@@ -109,7 +109,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
             // Top-left: room / seed / timer.
             root.spawn(Node { position_type: PositionType::Absolute, top: px(24), left: px(28), flex_direction: FlexDirection::Column, row_gap: px(2), ..default() })
                 .with_children(|c| {
-                    c.spawn((t.hud_text_sized("ROOM 000", true, 40.0), RoomLabel));
+                    // No room number on screen: the door signs are the only count.
                     c.spawn((Text::new("00:00"), t.font(false, t.size_body), TextColor(t.text_dim), TimerLabel));
                     c.spawn(t.dim_text(format!("SEED {}", seed.display())));
                 });

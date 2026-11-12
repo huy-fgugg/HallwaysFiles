@@ -11,6 +11,7 @@ pub mod cutscene;
 pub mod data;
 pub mod encounters;
 pub mod floor;
+pub mod graphics;
 pub mod hollow;
 pub mod icons;
 pub mod interaction;
@@ -51,6 +52,6 @@ impl Plugin for HallwaysPlugin {
             capture::CapturePlugin,
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
-        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin));
+        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin));
     }
 }

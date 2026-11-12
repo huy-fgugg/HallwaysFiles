@@ -34,8 +34,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target\release\hallways.exe dist\
           Copy-Item -Recurse assets dist\assets
-          Copy-Item README.md dist\
-          Copy-Item CREDITS.md dist\
+          Copy-Item packaging\windows\*.bat dist\
           Compress-Archive -Path dist\* -DestinationPath hallways-windows.zip -Force
           Get-Item hallways-windows.zip | Select-Object Name, Length
 

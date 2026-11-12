@@ -258,7 +258,6 @@ fn manage_cursor(
 /// come from Poly Haven's API; music credits are read from
 /// `assets/music/CREDITS.txt` so drop-in tracks can be credited without code.
 pub const CREDITS: &[(&str, &[&str])] = &[
-    ("HALLWAYS", &["Design, code, models built from primitives, procedural score", "Made with Bevy (MIT / Apache-2.0)"]),
     (
         "3D MODELS  -  Poly Haven, CC0",
         &[
@@ -282,7 +281,6 @@ pub const CREDITS: &[(&str, &[&str])] = &[
         ],
     ),
     ("FONT", &["IBM Plex Mono by IBM (SIL Open Font License 1.1)"]),
-    ("INSPIRATION", &["Inspired by room-by-room horror games such as DOORS (LSPLASH).", "HALLWAYS is an independent project, not affiliated with or endorsed by them."]),
 ];
 
 fn music_credit_lines() -> Vec<String> {
@@ -311,15 +309,6 @@ fn spawn_credits(mut commands: Commands, theme: Res<UiTheme>) {
                 if !music.is_empty() {
                     section("MUSIC", music);
                 }
-                // Which drop-in songs the game found (assets/music/<slot>/).
-                let status = crate::music::custom_music_report()
-                    .into_iter()
-                    .map(|(label, file)| match file {
-                        Some(f) => format!("{label}: {}", f.rsplit('/').next().unwrap_or(&f)),
-                        None => format!("{label}: built-in score"),
-                    })
-                    .collect();
-                section("YOUR MUSIC (assets/music)", status);
             });
             spawn_button(root, &theme, "Back", MenuAction::CloseCredits, 0, true);
         });

@@ -8,11 +8,9 @@ pub mod meshes;
 pub mod plaque;
 
 use bevy::{
-    anti_alias::taa::TemporalAntiAliasing,
     camera::Hdr,
     core_pipeline::tonemapping::Tonemapping,
-    pbr::{DistanceFog, FogFalloff, ScreenSpaceAmbientOcclusion},
-    post_process::bloom::Bloom,
+    pbr::{DistanceFog, FogFalloff},
     prelude::*,
 };
 use std::collections::HashMap;
@@ -738,10 +736,10 @@ fn spawn_test_level(
                 Transform::from_xyz(0.0, crate::player::STAND_EYE, 0.0),
                 Hdr,
                 Tonemapping::TonyMcMapface,
-                Bloom { intensity: 0.12, ..Bloom::NATURAL },
+                // Bloom, SSAO and anti-aliasing are added by `graphics` to match
+                // the quality setting (never on Low, so weak GPUs don't crash).
                 Msaa::Off,
-                ScreenSpaceAmbientOcclusion::default(),
-                TemporalAntiAliasing::default(),
+                crate::graphics::QualityCamera { bloom: 0.12 },
                 DistanceFog {
                     color: Color::srgb(0.02, 0.025, 0.035),
                     falloff: FogFalloff::Exponential { density: 0.07 },
@@ -811,7 +809,8 @@ pub fn spawn_menu_scene(
         Transform::from_xyz(0.35, 1.6, 1.5).looking_at(Vec3::new(0.0, 1.4, -30.0), Vec3::Y),
         Hdr,
         Tonemapping::TonyMcMapface,
-        Bloom { intensity: 0.15, ..Bloom::NATURAL },
+        Msaa::Off,
+        crate::graphics::QualityCamera { bloom: 0.15 },
         DistanceFog { color: Color::srgb(0.02, 0.022, 0.03), falloff: FogFalloff::Exponential { density: 0.09 }, ..default() },
         DespawnOnExit(scope),
         Name::new("Menu camera"),

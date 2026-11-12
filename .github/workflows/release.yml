@@ -43,7 +43,7 @@ jobs:
           New-Item -ItemType Directory -Force HALLWAYS | Out-Null
           Copy-Item target\release\hallways.exe HALLWAYS\
           Copy-Item -Recurse assets HALLWAYS\assets
-          Copy-Item README.md, CREDITS.md HALLWAYS\
+          Copy-Item packaging\windows\*.bat HALLWAYS\
           Compress-Archive -Path HALLWAYS -DestinationPath "hallways-$v-windows.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
@@ -94,13 +94,13 @@ jobs:
           files: out/*
           body: |
             ## Downloads
-            - **Windows:** `hallways-${{ needs.check.outputs.version }}-windows.zip`. Unzip it and run `HALLWAYS\hallways.exe`. Windows may warn about an unknown app (it isn't code-signed): choose **More info → Run anyway**.
+            - **Windows:** `hallways-${{ needs.check.outputs.version }}-windows.zip`. Unzip it and run `HALLWAYS\hallways.exe`. On an older or integrated GPU, use `HALLWAYS (Low Graphics).bat`; if it still crashes, `HALLWAYS (Compatibility Mode).bat`. Windows may warn about an unknown app (it isn't code-signed): choose **More info → Run anyway**.
             - **Linux (Debian/Ubuntu):** `hallways_${{ needs.check.outputs.version }}_amd64.deb`. Install with `sudo apt install ./hallways_${{ needs.check.outputs.version }}_amd64.deb`, then start **HALLWAYS** from your app menu or run `hallways`.
 
             Needs a graphics card with Vulkan (Linux) or DirectX 12/Vulkan (Windows).
 
             ## Online rooms
-            Host or join with a 5-letter room code (up to 4 players). The room server is in `server/` and deploys to Render with `render.yaml` (see README).
+            Host or join with a 5-letter room code (up to 4 players). The room server is in `server/` and deploys to Render with `render.yaml`.
 
             ## Your own music
             Drop a song into a folder in `assets/music/` (Windows: next to the exe; Linux: `/opt/hallways/assets/music/`).

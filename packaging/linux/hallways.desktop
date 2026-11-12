@@ -8,3 +8,8 @@ Icon=hallways
 Terminal=false
 Categories=Game;ActionGame;
 Keywords=horror;doors;survival;
+Actions=low;
+
+[Desktop Action low]
+Name=HALLWAYS (Low Graphics)
+Exec=hallways --low

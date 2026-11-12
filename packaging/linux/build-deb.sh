@@ -12,8 +12,6 @@ install -Dm755 "$BIN" "$PKG/opt/hallways/hallways"
 cp -r assets "$PKG/opt/hallways/assets"
 # Music drop-in folders and server.txt are user-editable (no sudo needed).
 chmod -R a+rwX "$PKG/opt/hallways/assets/music" "$PKG/opt/hallways/assets/server.txt"
-install -Dm644 README.md "$PKG/opt/hallways/README.md"
-install -Dm644 CREDITS.md "$PKG/opt/hallways/CREDITS.md"
 install -Dm644 packaging/linux/hallways.desktop "$PKG/usr/share/applications/hallways.desktop"
 install -Dm644 packaging/linux/hallways.png "$PKG/usr/share/icons/hicolor/256x256/apps/hallways.png"
 mkdir -p "$PKG/usr/bin"
@@ -40,7 +38,7 @@ Homepage: https://github.com/huy-fgugg/HallwaysFiles
 Description: First-person procedural horror game
  Make it through 100 procedurally generated rooms, hide from rushing
  entities, read the door numbers, and play online with up to 3 friends
- using room codes. Built with Rust and Bevy.
+ using room codes.
 CTL
 mkdir -p dist
 dpkg-deb --build --root-owner-group "$PKG" "dist/hallways_${VERSION}_amd64.deb"
