@@ -1,0 +1,7 @@
+MAIN MENU music (loops)
+
+Drop ONE audio file in this folder (.ogg, .mp3 or .wav). Any file name works.
+If there are several, the first one alphabetically is used.
+Length: 20 seconds to 5 minutes, cut so it loops seamlessly.
+Remove the file to go back to the built-in music.
+The Credits screen (main menu) shows which song the game found.

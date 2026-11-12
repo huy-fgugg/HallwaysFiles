@@ -56,6 +56,9 @@ struct ActiveSubtitle {
     remaining: f32,
 }
 
+#[derive(Component)]
+struct DamageFlash;
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
@@ -64,7 +67,7 @@ impl Plugin for HudPlugin {
             .add_systems(OnEnter(AppState::Playing), spawn_hud)
             .add_systems(
                 Update,
-                (update_labels, update_prompt, update_hide_overlay, update_subtitles, hud_visibility, update_items)
+                (update_labels, update_prompt, update_hide_overlay, update_subtitles, hud_visibility, update_items, update_damage_flash)
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -93,6 +96,15 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
                 o.spawn((Node { width: percent(8), height: percent(100), ..default() }, BackgroundColor(Color::BLACK.with_alpha(0.25))));
                 o.spawn((Node { width: percent(46), height: percent(100), ..default() }, BackgroundColor(Color::BLACK.with_alpha(0.93))));
             });
+
+            // Damage flash / low-vitality pulse: red edges over the view.
+            root.spawn((
+                Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), border: UiRect::all(px(70)), ..default() },
+                BorderColor::all(Color::NONE),
+                BackgroundColor(Color::NONE),
+                Pickable::IGNORE,
+                DamageFlash,
+            ));
 
             // Top-left: room / seed / timer.
             root.spawn(Node { position_type: PositionType::Absolute, top: px(24), left: px(28), flex_direction: FlexDirection::Column, row_gap: px(2), ..default() })
@@ -348,6 +360,36 @@ fn update_prompt(
             text.0 = s;
         }
         color.0 = if warn { theme.danger } else { theme.text };
+    }
+}
+
+/// Red edge flash when vitality drops, and a slow pulse while it is low.
+fn update_damage_flash(
+    time: Res<Time>,
+    theme: Res<UiTheme>,
+    run: Res<RunState>,
+    settings: Res<crate::settings::Settings>,
+    mut q: Query<(&mut BorderColor, &mut BackgroundColor), With<DamageFlash>>,
+    mut state: Local<(f32, f32)>,
+) {
+    let (last, mut flash) = *state;
+    if run.vitality < last - 0.5 {
+        flash = 1.0;
+    }
+    flash = (flash - time.delta_secs() * if settings.reduce_flashing { 0.8 } else { 1.6 }).max(0.0);
+    *state = (run.vitality, flash);
+    let low = if run.vitality > 0.0 && run.vitality < 35.0 {
+        let k = 1.0 - run.vitality / 35.0;
+        let speed = if settings.reduce_flashing { 1.5 } else { 3.2 };
+        (0.5 + 0.5 * (time.elapsed_secs() * speed).sin()) * 0.22 * k + 0.08 * k
+    } else {
+        0.0
+    };
+    let peak = if settings.reduce_flashing { 0.35 } else { 0.6 };
+    let edge = (flash * peak).max(low);
+    for (mut b, mut bg) in &mut q {
+        *b = BorderColor::all(theme.danger.with_alpha(edge));
+        bg.0 = theme.danger.with_alpha(flash * peak * 0.25);
     }
 }
 

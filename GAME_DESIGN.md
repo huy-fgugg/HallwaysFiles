@@ -61,13 +61,19 @@ Every entity's cue window is at least 2 s at default difficulty, and scales with
 Every fresh run starts in the lift with its own looping music. The lobby waits until every expected player has joined, then counts down 15 s; the host can force-start at any time. Retrying after death skips the lobby.
 
 ## Progression (Phase 5)
-Lumens are earned per room cleared, per item found and for surviving encounters. They buy pre-run items and unlock modifiers ("Blackout rooms only", "More entities"). Save files are versioned, with corrupted-save recovery like the settings file.
+Lumens collected in a run are banked when it ends (death or Door 100), multiplied by any active modifiers: Lights Low +25%, Restless +35%, Fragile +30%. The bank buys up to 3 starting items for the next run (Flashlight 60, Lockpick 45, Vitamins 30, Bandage 35, Skeleton Key 90). Purchases are refundable before the run starts. There are no randomised rewards and no real-money purchases.
+
+## Room features
+- **Number signs:** every door has a back-lit number sign above its frame plus the engraved plaque.
+- **Choice walls (rare):** from Room 005, about 6% of rooms (11% after Room 020) line up one to three look-alike doors beside the real exit. Only the real door shows the next number. Opening a fake costs 25 vitality.
+- **Raised exits:** some rooms climb a staircase to a landing with the exit door set high in the wall; the next room begins on a landing with stairs back down.
+- **Key lofts:** some key rooms hide the key in a chest on a loft up a staircase along a side wall, lit by its own lamp.
 
 ## Cutscenes
 Data-driven RON timelines in `assets/cutscenes/<id>/cutscene.ron`: camera shots (absolute or player-eye), subtitles, fades, light moods, sounds and entity/elevator commands. Each folder has a music slot. Skippable by holding Space; skipping applies all state changes (gate opens, entity risen) so the world stays consistent.
 
-## Multiplayer (planned, separate phase)
-Co-op for up to 4 players with **room codes**. Plan: client-hosted sessions with a small relay/matchmaking service that maps 6-character codes to hosts (needs a hosted server). Deterministic seeds keep the level identical on every client; the host is authoritative for entity spawns and door state. This is deliberately deferred until the single-player loop is complete.
+## Multiplayer (online rooms)
+Up to 4 players. The host creates a room and gets a 5-letter code (no 0/O or 1/I); others join with it. Everyone generates the same floor from the host's seed. The lift lobby waits until the room is full (then counts down 15 s) or the host starts. Shared: positions, poses, held items, flashlight beams, gestures and opened doors. Each player meets entities on their own machine. If the host leaves, the next player becomes host. The relay server holds no game logic and stores nothing.
 
 ## Accessibility
 Subtitles on by default, including in cutscenes. Spooky intensity scales shake, cue loudness and distortion. The loud-sound limiter caps stingers. Reduce Flashing replaces strobes with slow dims and disables head-bob and title flicker. Full keyboard/controller menu navigation with visible focus.

@@ -50,14 +50,34 @@ impl MusicTrack {
         !matches!(self, MusicTrack::Cutscene(_))
     }
 
-    /// Asset path (without extension) of the drop-in slot.
-    pub fn slot(&self) -> String {
+    /// Folder under `assets/music/` where the player drops a song for this track.
+    /// Any audio file inside works, whatever it is called.
+    pub fn folder(&self) -> String {
         match self {
             MusicTrack::Menu => "music/menu".into(),
             MusicTrack::Lift => "music/elevator".into(),
             MusicTrack::Ambience => "music/ambience".into(),
             MusicTrack::Chase => "music/chase".into(),
+            MusicTrack::Cutscene(id) => format!("music/cutscene_{}", cutscene_short_name(id)),
+        }
+    }
+
+    /// Older single-file location (still honoured): `<slot>.ogg|mp3|wav`.
+    pub fn slot(&self) -> String {
+        match self {
             MusicTrack::Cutscene(id) => format!("cutscenes/{id}/music"),
+            other => other.folder(),
+        }
+    }
+
+    /// Friendly name for the credits/music status screen.
+    pub fn label(&self) -> String {
+        match self {
+            MusicTrack::Menu => "Main menu".into(),
+            MusicTrack::Lift => "Elevator lobby".into(),
+            MusicTrack::Ambience => "Exploring".into(),
+            MusicTrack::Chase => "Chase".into(),
+            MusicTrack::Cutscene(id) => format!("Cutscene: {}", cutscene_short_name(id)),
         }
     }
 
@@ -102,16 +122,54 @@ pub fn asset_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("assets"))
 }
 
-/// Finds a user-supplied file for a slot, trying supported extensions.
+const AUDIO_EXTS: [&str; 3] = ["ogg", "mp3", "wav"];
+
+/// "01_intro" -> "intro", "02_the_hollow" -> "hollow".
+pub fn cutscene_short_name(id: &str) -> String {
+    let rest = id.split_once('_').map_or(id, |(_, r)| r);
+    rest.strip_prefix("the_").unwrap_or(rest).to_string()
+}
+
+fn is_audio(p: &std::path::Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+/// First audio file (alphabetically) inside `root/dir`, as an asset path.
+fn first_audio_in(root: &std::path::Path, dir: &str) -> Option<String> {
+    let mut files: Vec<_> = std::fs::read_dir(root.join(dir)).ok()?.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_file() && is_audio(p)).collect();
+    files.sort();
+    let name = files.first()?.file_name()?.to_str()?.to_string();
+    Some(format!("{dir}/{name}"))
+}
+
+/// Finds a user-supplied file: any audio file in the track's music folder,
+/// or the older fixed file name.
+pub fn find_track_override(track: &MusicTrack) -> Option<String> {
+    let root = asset_root();
+    if let Some(p) = first_audio_in(&root, &track.folder()) {
+        return Some(p);
+    }
+    find_override(&track.slot())
+}
+
+/// Finds a user-supplied file for a fixed slot path, trying supported extensions.
 pub fn find_override(slot: &str) -> Option<String> {
     let root = asset_root();
-    for ext in ["ogg", "mp3", "wav"] {
+    for ext in AUDIO_EXTS {
         let rel = format!("{slot}.{ext}");
         if root.join(&rel).is_file() {
             return Some(rel);
         }
     }
     None
+}
+
+/// Every music slot and the custom file it will use, if any (shown in Credits).
+pub fn custom_music_report() -> Vec<(String, Option<String>)> {
+    let mut tracks = vec![MusicTrack::Menu, MusicTrack::Lift, MusicTrack::Ambience, MusicTrack::Chase];
+    tracks.push(MusicTrack::Cutscene(crate::cutscene::INTRO.into()));
+    tracks.push(MusicTrack::Cutscene(crate::cutscene::THE_HOLLOW.into()));
+    tracks.into_iter().map(|t| (t.label(), find_track_override(&t))).collect()
 }
 
 pub struct MusicPlugin;
@@ -153,7 +211,7 @@ fn default_wants(
 }
 
 fn source_for(track: &MusicTrack, asset_server: &AssetServer, cache: &mut ScoreCache, sources: &mut Assets<AudioSource>) -> Handle<AudioSource> {
-    if let Some(path) = find_override(&track.slot()) {
+    if let Some(path) = find_track_override(track) {
         info!("music: using drop-in file {path}");
         return asset_server.load(path);
     }
@@ -527,6 +585,10 @@ mod tests {
     #[test]
     fn slots() {
         assert_eq!(MusicTrack::Cutscene("02_the_hollow".into()).slot(), "cutscenes/02_the_hollow/music");
+        assert_eq!(MusicTrack::Cutscene("02_the_hollow".into()).folder(), "music/cutscene_hollow");
+        assert_eq!(MusicTrack::Cutscene("01_intro".into()).folder(), "music/cutscene_intro");
+        assert!(is_audio(std::path::Path::new("My Song.MP3")));
+        assert!(!is_audio(std::path::Path::new("PUT_YOUR_SONG_HERE.txt")));
         assert_eq!(MusicTrack::Chase.slot(), "music/chase");
     }
 }

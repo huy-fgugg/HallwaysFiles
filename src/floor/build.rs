@@ -208,7 +208,7 @@ pub fn spawn_room(
     } else {
         vec![center]
     };
-    let per_lamp = base * scale / lamp_points.len() as f32;
+    let per_lamp = base * scale * rt.light_scale / lamp_points.len() as f32;
     for (i, p) in lamp_points.iter().enumerate() {
         match r.area {
             Area::ServiceTunnels | Area::QuarryLift => caged_bulb(b, props, Vec3::new(p.x, h, p.y), 0.7),

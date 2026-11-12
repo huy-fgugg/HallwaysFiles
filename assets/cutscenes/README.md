@@ -5,7 +5,7 @@ One folder per cutscene. Each folder has:
 | File | What it is |
 |------|------------|
 | `cutscene.ron` | The timeline: camera shots, subtitles, light changes, fades, sound cues. Edit it with any text editor. If you break it, the game falls back to the built-in copy and logs a warning. |
-| `music.ogg` / `music.mp3` / `music.wav` | **Optional.** Drop your own music here. It starts at the first frame of the cutscene. If there is no file, the built-in original score plays. |
+| (music) | **Easiest:** drop any audio file into `assets/music/cutscene_intro/` or `assets/music/cutscene_hollow/`. A `music.ogg` placed in this folder also still works. |
 
 | Folder | When it plays | Length |
 |--------|---------------|--------|

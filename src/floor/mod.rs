@@ -37,6 +37,8 @@ pub struct FloorRuntime {
     pub keys: HashSet<u32>,
     /// Fake doors already opened: (room, slot).
     pub mimics_triggered: HashSet<(u32, u8)>,
+    /// Lamp brightness multiplier (Lights Low modifier).
+    pub light_scale: f32,
     pub surges_done: HashSet<u32>,
     pub loaded: HashSet<u32>,
     /// When Door 100 was opened (for the summary fade).
@@ -58,6 +60,7 @@ impl Default for FloorRuntime {
             finished_at: None,
             items: crate::data::ItemConfig::default(),
             encounters_done: HashSet::new(),
+            light_scale: 1.0,
         }
     }
 }
@@ -87,9 +90,27 @@ impl Plugin for FloorPlugin {
     }
 }
 
-fn setup_floor(mut commands: Commands, seed: Res<RunSeed>, cfg: Res<crate::data::EntityConfig>, items: Res<crate::data::ItemConfig>, mut std_mats: ResMut<Assets<StandardMaterial>>, mut meshes: ResMut<Assets<Mesh>>) {
+#[allow(clippy::too_many_arguments)]
+fn setup_floor(
+    mut commands: Commands,
+    seed: Res<RunSeed>,
+    cfg: Res<crate::data::EntityConfig>,
+    items: Res<crate::data::ItemConfig>,
+    profile: Res<crate::profile::Profile>,
+    mut std_mats: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    use crate::profile::Modifier;
+    let mut cfg = cfg.clone();
+    if profile.has(Modifier::Restless) {
+        for t in [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush] {
+            t.chance = (t.chance * 1.6).min(0.9);
+            t.cooldown = t.cooldown.saturating_sub(t.cooldown / 3);
+        }
+    }
     commands.insert_resource(Floor(plan::generate_with(seed.0, &cfg)));
-    commands.insert_resource(FloorRuntime { items: items.clone(), ..default() });
+    let light_scale = if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
+    commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, ..default() });
     commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes));
 }
 

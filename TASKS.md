@@ -47,20 +47,39 @@
 - [x] Deterministic encounter-schedule tests per seed
 - [x] Robustness: commands on streamed-out entities no longer crash the game
 
+## Phase 3.5: Doors and rooms
+- [x] Back-lit number sign above every door
+- [x] Rare fake-door choice walls (wrong numbers; opening one costs 25 vitality)
+- [x] Stair rooms: raised exits with landings, key lofts; walkable ground with step-up and falling
+- [x] First-person arms: hold the selected item, sway, sprint pump, reach/use/flinch/swap gestures
+
 ## Phase 4: UI polish
-- [ ] Item icons, vitality damage feedback, run summary with next unlock
+- [x] Pixel item icons in the HUD
+- [x] Red damage flash and low-vitality pulse (softer with Reduce Flashing)
+- [x] Death and results screens show banked Lumens
+- [x] Play screen with text boxes and keyboard/gamepad focus
 
 ## Phase 5: Progression
-- [ ] Persistent Lumens, shop, modifiers, seed input in lobby, versioned saves
+- [x] Persistent Lumens bank (versioned profile with migration and corrupt-file backup)
+- [x] Pre-run shop (up to 3 items, refundable), no randomised rewards
+- [x] Modifiers: Lights Low, Restless, Fragile (Lumens bonus)
+- [x] Seed entry on the Play screen
+- [x] Drop-in music folders: one folder per song, any file name, status in Credits
 
-## Phase 6: Release QA
-- [ ] Packaged-build QA checklist on Windows, GitHub Release
+## Multiplayer
+- [x] Room server (`server/`, axum WebSockets) with 5-letter codes, host promotion, version check; deploys to Render via `render.yaml`
+- [x] Host / join by code, up to 4 players, shared seed, lift lobby counts and host start
+- [x] Teammate avatars: walk cycle, crouch, head look, held items, flashlight beam, gestures, name tags
+- [x] Doors opened by anyone open for everyone
+- [ ] Shared entity encounters (each player currently runs their own)
 
-## Multiplayer (separate phase)
-- [ ] Networking layer, relay/matchmaking service for room codes, synced doors and entities
+## Phase 6: Release QA (waiting for the owner's final touches)
+- [ ] Windows installer/zip and Linux .deb release
+- [ ] Packaged-build QA checklist on real hardware
 
 ## Known issues / not verified
 - Visual checks were done with software rendering (Mesa lavapipe) on Linux; real-GPU performance on Windows is unmeasured.
 - The CI smoke test cannot render (no GPU on GitHub runners); it only confirms the exe and assets package correctly.
 - Spot lights don't render on the Linux software renderer used for QA, so the flashlight also casts a point-light pool that works everywhere; the spot beam is unverified on real GPUs.
-- The lobby is single-player for now (always 1/1); networking will fill in the player counts.
+- The Render deployment itself hasn't been run from here (no Render account access); the server was tested locally, including two game windows in one room.
+- Online play over the internet (real latency, TLS to Render) is untested; local tests used a plain ws:// connection.

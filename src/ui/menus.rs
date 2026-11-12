@@ -94,7 +94,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                     Node { margin: UiRect::bottom(px(34)), ..default() },
                 ));
                 for (i, (label, action)) in [
-                    ("Start Run", MenuAction::StartRun),
+                    ("Play", MenuAction::OpenPlay),
                     ("Settings", MenuAction::OpenSettings),
                     ("Credits", MenuAction::OpenCredits),
                     ("Quit", MenuAction::Quit),
@@ -165,6 +165,7 @@ fn main_menu_actions(
     for MenuActivated(action) in reader.read() {
         match action {
             MenuAction::StartRun => next_app.set(AppState::Playing),
+            MenuAction::OpenPlay => next_overlay.set(Overlay::Play),
             MenuAction::OpenSettings => next_overlay.set(Overlay::Settings),
             MenuAction::OpenCredits => next_overlay.set(Overlay::Credits),
             MenuAction::Quit => {
@@ -308,6 +309,15 @@ fn spawn_credits(mut commands: Commands, theme: Res<UiTheme>) {
                 if !music.is_empty() {
                     section("MUSIC", music);
                 }
+                // Which drop-in songs the game found (assets/music/<slot>/).
+                let status = crate::music::custom_music_report()
+                    .into_iter()
+                    .map(|(label, file)| match file {
+                        Some(f) => format!("{label}: {}", f.rsplit('/').next().unwrap_or(&f)),
+                        None => format!("{label}: built-in score"),
+                    })
+                    .collect();
+                section("YOUR MUSIC (assets/music)", status);
             });
             spawn_button(root, &theme, "Back", MenuAction::CloseCredits, 0, true);
         });
@@ -325,7 +335,8 @@ fn credits_actions(
     }
 }
 
-fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<crate::hollow::DeathCause>) {
+fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<crate::hollow::DeathCause>, run: Res<crate::run::RunState>, profile: Res<crate::profile::Profile>) {
+    let earned = (run.lumens as f32 * profile.lumen_multiplier()).round() as u32;
     commands
         .spawn((
             Node {
@@ -350,6 +361,11 @@ fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<cr
                     BorderColor::all(theme.interact),
                 ))
                 .with_child((Text::new(format!("LESSON  -  {}", cause.lesson)), theme.font(false, theme.size_small), TextColor(theme.interact)));
+                p.spawn((
+                    Text::new(format!("Reached Room {:03}   -   {} Lumens banked for the shop", run.best_room.max(run.current_room), earned)),
+                    theme.font(false, theme.size_small),
+                    TextColor(theme.text_dim),
+                ));
                 spawn_button(p, &theme, "Retry", MenuAction::Retry, 0, true);
                 spawn_button(p, &theme, "Return to Main Menu", MenuAction::AbandonRun, 1, false);
             });
@@ -366,7 +382,7 @@ fn death_actions(mut reader: MessageReader<MenuActivated>, mut next_app: ResMut<
     }
 }
 
-fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::run::RunState>, seed: Res<RunSeed>) {
+fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::run::RunState>, seed: Res<RunSeed>, profile: Res<crate::profile::Profile>) {
     commands
         .spawn((
             Node { width: percent(100), height: percent(100), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
@@ -383,6 +399,7 @@ fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::ru
                     ("Time", run.timer_text()),
                     ("Doors opened", "100 / 100".to_string()),
                     ("Lumens collected", run.lumens.to_string()),
+                    ("Lumens banked (with modifiers)", format!("{}", (run.lumens as f32 * profile.lumen_multiplier()).round() as u32)),
                     ("Surges survived", run.surges_survived.to_string()),
                     ("Mimics that fooled you", run.mimics_fooled.to_string()),
                     ("Damage taken", format!("{:.0}", run.damage_taken)),

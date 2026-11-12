@@ -1,16 +1,21 @@
 # Music drop-in folder
 
-Put your own tracks here. Name them exactly like this (any of `.ogg`, `.mp3`, `.wav`):
+**Easy setup: every song has its own folder. Drop one audio file into a folder; any file name works.**
 
-| File name | Where it plays | Loops? |
-|-----------|----------------|--------|
-| `menu.ogg` | Main menu | yes |
-| `elevator.ogg` | Inside the lift while players gather, until everyone has joined (then a 15 s countdown) or the host presses Enter | yes |
-| `ambience.ogg` | Exploring the rooms | yes |
-| `chase.ogg` | While an entity is hunting you | yes |
+| Folder | Where it plays | Loops? | Length |
+|--------|----------------|--------|--------|
+| `menu/` | Main menu | yes | 20 s – 5 min |
+| `elevator/` | In the lift while players gather, until everyone has joined (then a 15 s countdown) or the host presses Enter | yes | 20 s – 5 min |
+| `ambience/` | Exploring the rooms | yes | 20 s – 5 min |
+| `chase/` | While something hunts you | yes | 20 s – 5 min |
+| `cutscene_intro/` | The elevator arrival cutscene | no | 14 s – 60 s (bell at 7.0 s) |
+| `cutscene_hollow/` | The Hollow cutscene | no | 16 s – 60 s (big hit at 11.3 s) |
 
-If a file is missing, the game plays its built-in original score instead.
-Cutscene music goes in each cutscene's own folder: see `assets/cutscenes/README.md`.
+- Supported: `.ogg` (best), `.mp3`, `.wav`.
+- If a folder holds several songs, the first one alphabetically plays.
+- Empty folder = the game's built-in original score.
+- Check it worked: main menu → **Credits** → "YOUR MUSIC" lists the file each slot found.
+- The older names (`music/menu.ogg`, `cutscenes/01_intro/music.ogg`, ...) still work.
 
 ## Length limits for looping tracks
 

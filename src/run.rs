@@ -16,6 +16,8 @@ pub struct RunState {
     pub mimics_fooled: u32,
     /// Highest room reached.
     pub best_room: u32,
+    /// Fragile modifier: 50% more damage.
+    pub fragile: bool,
 }
 
 impl RunState {
@@ -25,6 +27,7 @@ impl RunState {
 
     /// Applies damage; returns true if this was fatal.
     pub fn damage(&mut self, amount: f32) -> bool {
+        let amount = if self.fragile { amount * 1.5 } else { amount };
         self.vitality = (self.vitality - amount).max(0.0);
         self.damage_taken += amount;
         self.vitality <= 0.0
@@ -72,8 +75,8 @@ impl Plugin for RunPlugin {
         app.add_message::<Subtitle>()
             .init_resource::<RunState>()
             .init_resource::<CameraShake>()
-            .add_systems(OnEnter(AppState::Playing), |mut commands: Commands| {
-                commands.insert_resource(RunState::new());
+            .add_systems(OnEnter(AppState::Playing), |mut commands: Commands, profile: Res<crate::profile::Profile>| {
+                commands.insert_resource(RunState { fragile: profile.has(crate::profile::Modifier::Fragile), ..RunState::new() });
                 commands.insert_resource(CameraShake::default());
             })
             .add_systems(Update, tick_timer.run_if(gameplay_active));

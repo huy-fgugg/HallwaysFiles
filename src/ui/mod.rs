@@ -3,6 +3,7 @@
 pub mod focus;
 pub mod hud;
 pub mod menus;
+pub mod play_menu;
 pub mod settings_menu;
 
 use bevy::prelude::*;
@@ -16,6 +17,7 @@ impl Plugin for UiPlugin {
             menus::MenusPlugin,
             settings_menu::SettingsMenuPlugin,
             hud::HudPlugin,
+            play_menu::PlayMenuPlugin,
         ));
     }
 }
