@@ -6,6 +6,7 @@ pub mod elevator;
 pub mod materials;
 pub mod meshes;
 pub mod plaque;
+pub mod sky;
 
 use bevy::{
     camera::Hdr,
@@ -139,6 +140,8 @@ pub struct RoomStyle {
     pub floor: Handle<StandardMaterial>,
     pub floor_tile: f32,
     pub wainscot: bool,
+    /// Open sky: no ceiling (outdoor areas).
+    pub sky: bool,
 }
 
 /// Small helper that owns the spawning context for level geometry.
@@ -209,7 +212,9 @@ impl Builder<'_, '_, '_> {
         let m = self.mats.clone();
         // Floor and ceiling.
         self.block(Vec3::new(min.x, -0.1, min.y), Vec3::new(max.x, 0.0, max.y), &style.floor, style.floor_tile, false);
-        self.block(Vec3::new(min.x, height, min.y), Vec3::new(max.x, height + 0.1, max.y), &m.plaster_ceiling, 2.0, false);
+        if !style.sky {
+            self.block(Vec3::new(min.x, height, min.y), Vec3::new(max.x, height + 0.1, max.y), &m.plaster_ceiling, 2.0, false);
+        }
 
         for side in [Side::North, Side::South, Side::West, Side::East] {
             // a = coordinate along the wall; the wall's interior face is at `line`.
@@ -474,7 +479,7 @@ fn spawn_test_level(
     let height = 3.0;
 
     // ---- Room 000: a faded sitting room -----------------------------------
-    let room0 = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.wood_floor.clone(), floor_tile: 2.4, wainscot: true };
+    let room0 = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.wood_floor.clone(), floor_tile: 2.4, wainscot: true, sky: false };
     b.room(
         Vec2::new(-4.0, -5.0),
         Vec2::new(4.0, 5.0),
@@ -499,7 +504,7 @@ fn spawn_test_level(
     b.block(Vec3::new(-1.2, 2.42, 4.965), Vec3::new(1.2, 2.45, 5.0), &mats.brass, 1.0, false);
     b.block(Vec3::new(-1.0, -0.1, 5.0), Vec3::new(1.0, 0.01, 5.2), &mats.brass, 1.0, false);
     // ---- Room 001: a narrow, neglected corridor ---------------------------
-    let corridor = RoomStyle { wall: mats.peeling_wall.clone(), wall_tile: 2.0, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: false };
+    let corridor = RoomStyle { wall: mats.peeling_wall.clone(), wall_tile: 2.0, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: false, sky: false };
     let c_min = Vec2::new(-1.4, -14.0);
     let c_max = Vec2::new(1.4, -5.0 - WALL_T);
     b.room(
@@ -766,7 +771,7 @@ pub fn spawn_menu_scene(
     let scope = AppState::MainMenu;
     let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope, parent: None, member: None, base_y: 0.0 };
     let (x0, x1, z0, z1, h) = (-1.7f32, 1.7f32, -42.0f32, 3.0f32, 3.0f32);
-    let style = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: true };
+    let style = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: true, sky: false };
     let door_zs: Vec<f32> = (0..6).map(|i| -4.0 - i as f32 * 6.0).collect();
     let mut openings = vec![];
     for &z in &door_zs {

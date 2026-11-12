@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use super::plan::{steps_for, Area, Feature, LightState, RoomKind, RoomPlan, FINAL_DOOR, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
+use super::plan::{steps_for, Area, Feature, LightState, RoomKind, RoomPlan, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
 use super::{FloorRuntime, RoomMember};
 use crate::interaction::{AnimatedPart, Door, Drawer, HidingSpot, InteractKind, Interactable, PartMotion};
 use crate::physics::{Aabb, Collider, Ground};
@@ -24,10 +24,47 @@ pub struct PropMaterials {
     pub unit_cube: Handle<Mesh>,
     pub unit_cyl: Handle<Mesh>,
     pub sphere: Handle<Mesh>,
+    // Outdoors (The Grounds).
+    pub grass: Handle<StandardMaterial>,
+    pub hedge: Handle<StandardMaterial>,
+    pub leaves: Handle<StandardMaterial>,
+    pub bark: Handle<StandardMaterial>,
+    pub gravel: Handle<StandardMaterial>,
+    pub lantern: Handle<StandardMaterial>,
+    pub water: Handle<StandardMaterial>,
+    pub cone: Handle<Mesh>,
+}
+
+/// Small tileable noise textures for the outdoor area (no image files needed).
+fn noise_texture(images: &mut Assets<Image>, seed: u64, base: [f32; 3], spread: [f32; 3], blades: bool) -> Handle<Image> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    const N: usize = 128;
+    let mut rng = GameRng::new(seed);
+    let mut px = vec![0u8; N * N * 4];
+    for y in 0..N {
+        for x in 0..N {
+            let n = rng.next_f32();
+            // Vertical streaks read as grass blades / bark grain.
+            let streak = if blades { (((x * 7919) ^ (y / 3 * 104729)) % 13) as f32 / 13.0 } else { 0.5 };
+            let k = n * 0.6 + streak * 0.4;
+            let i = (y * N + x) * 4;
+            for c in 0..3 {
+                px[i + c] = ((base[c] + (k - 0.5) * spread[c]).clamp(0.0, 1.0) * 255.0) as u8;
+            }
+            px[i + 3] = 255;
+        }
+    }
+    images.add(Image::new(Extent3d { width: N as u32, height: N as u32, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default()))
 }
 
 impl PropMaterials {
-    pub fn new(mats: &mut Assets<StandardMaterial>, meshes: &mut Assets<Mesh>) -> Self {
+    pub fn new(mats: &mut Assets<StandardMaterial>, meshes: &mut Assets<Mesh>, images: &mut Assets<Image>) -> Self {
+        let tex = |images: &mut Assets<Image>, seed, base, spread, blades| noise_texture(images, seed, base, spread, blades);
+        let grass_tex = tex(images, 11, [0.16, 0.26, 0.1], [0.12, 0.16, 0.08], true);
+        let hedge_tex = tex(images, 12, [0.07, 0.17, 0.07], [0.08, 0.14, 0.07], false);
+        let bark_tex = tex(images, 13, [0.22, 0.15, 0.1], [0.12, 0.08, 0.06], true);
+        let gravel_tex = tex(images, 14, [0.42, 0.4, 0.37], [0.3, 0.3, 0.3], false);
         let book = |c: Color| StandardMaterial { base_color: c, perceptual_roughness: 0.75, ..default() };
         Self {
             books: [
@@ -49,18 +86,27 @@ impl PropMaterials {
             unit_cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
             unit_cyl: meshes.add(Cylinder::new(0.5, 1.0)),
             sphere: meshes.add(Sphere::new(0.5).mesh().uv(20, 12)),
+            grass: mats.add(StandardMaterial { base_color_texture: Some(grass_tex), perceptual_roughness: 0.95, ..default() }),
+            hedge: mats.add(StandardMaterial { base_color_texture: Some(hedge_tex), perceptual_roughness: 0.9, ..default() }),
+            leaves: mats.add(StandardMaterial { base_color: Color::srgb(0.6, 0.85, 0.55), base_color_texture: Some(tex(images, 15, [0.1, 0.2, 0.08], [0.1, 0.16, 0.08], false)), perceptual_roughness: 0.85, ..default() }),
+            bark: mats.add(StandardMaterial { base_color_texture: Some(bark_tex), perceptual_roughness: 0.9, ..default() }),
+            gravel: mats.add(StandardMaterial { base_color_texture: Some(gravel_tex), perceptual_roughness: 0.95, ..default() }),
+            lantern: mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.85, 0.6), emissive: LinearRgba::rgb(9.0, 6.0, 3.0), ..default() }),
+            water: mats.add(StandardMaterial { base_color: Color::srgb(0.03, 0.06, 0.09), perceptual_roughness: 0.05, reflectance: 0.8, ..default() }),
+            cone: meshes.add(Cone { radius: 0.5, height: 1.0 }),
         }
     }
 }
 
-fn style_for(area: Area, b: &Builder) -> RoomStyle {
+fn style_for(area: Area, b: &Builder, props: &PropMaterials) -> RoomStyle {
     let m = &b.mats;
     match area {
-        Area::GuestWing => RoomStyle { wall: m.wallpaper.clone(), wall_tile: 1.6, floor: m.wood_floor.clone(), floor_tile: 2.4, wainscot: true },
-        Area::Archive => RoomStyle { wall: m.archive_wall.clone(), wall_tile: 2.0, floor: m.wood_floor.clone(), floor_tile: 2.0, wainscot: true },
-        Area::ServiceTunnels => RoomStyle { wall: m.concrete_wall.clone(), wall_tile: 2.5, floor: m.concrete_floor.clone(), floor_tile: 2.0, wainscot: false },
-        Area::QuarryLift => RoomStyle { wall: m.rock.clone(), wall_tile: 3.0, floor: m.dirt.clone(), floor_tile: 2.5, wainscot: false },
-        Area::Atrium => RoomStyle { wall: m.brick.clone(), wall_tile: 2.2, floor: m.marble.clone(), floor_tile: 3.0, wainscot: true },
+        Area::GuestWing => RoomStyle { wall: m.wallpaper.clone(), wall_tile: 1.6, floor: m.wood_floor.clone(), floor_tile: 2.4, wainscot: true, sky: false },
+        Area::Archive => RoomStyle { wall: m.archive_wall.clone(), wall_tile: 2.0, floor: m.wood_floor.clone(), floor_tile: 2.0, wainscot: true, sky: false },
+        Area::ServiceTunnels => RoomStyle { wall: m.concrete_wall.clone(), wall_tile: 2.5, floor: m.concrete_floor.clone(), floor_tile: 2.0, wainscot: false, sky: false },
+        Area::QuarryLift => RoomStyle { wall: m.rock.clone(), wall_tile: 3.0, floor: m.dirt.clone(), floor_tile: 2.5, wainscot: false, sky: false },
+        Area::Atrium => RoomStyle { wall: m.brick.clone(), wall_tile: 2.2, floor: m.marble.clone(), floor_tile: 3.0, wainscot: true, sky: false },
+        Area::Grounds => RoomStyle { wall: m.rock.clone(), wall_tile: 2.4, floor: props.grass.clone(), floor_tile: 1.5, wainscot: false, sky: true },
     }
 }
 
@@ -115,7 +161,7 @@ pub fn spawn_room(
 ) {
     b.member = Some(r.index);
     let mut rng = GameRng::new(r.seed);
-    let style = style_for(r.area, b);
+    let style = style_for(r.area, b, props);
     let h = r.height;
 
     // ---- Shell with exit (and mimic) openings ----
@@ -209,9 +255,15 @@ pub fn spawn_room(
         vec![center]
     };
     let per_lamp = base * scale * rt.light_scale / lamp_points.len() as f32;
+    // Outdoor lamp posts stand beside the gravel path, not on it.
+    let post_x = |x: f32| {
+        let right = x + 1.4;
+        if (right - r.exit_x).abs() < 1.3 || (right - r.entry_x).abs() < 1.3 { x - 1.4 } else { right }
+    };
     for (i, p) in lamp_points.iter().enumerate() {
         match r.area {
             Area::ServiceTunnels | Area::QuarryLift => caged_bulb(b, props, Vec3::new(p.x, h, p.y), 0.7),
+            Area::Grounds => lamp_post(b, props, Vec3::new(post_x(p.x), 0.0, p.y)),
             _ => {
                 let e = b
                     .commands
@@ -225,7 +277,7 @@ pub fn spawn_room(
             .spawn((
                 PointLight { color: warm, intensity: per_lamp, range: 18.0, radius: 0.05, shadow_maps_enabled: i == 0 && r.light != LightState::Dark, ..default() },
                 Flicker { base: per_lamp, seed: r.index as f32 * 1.37 + i as f32, depth },
-                Transform::from_xyz(p.x, lamp_y, p.y),
+                if r.area.outdoors() { Transform::from_xyz(post_x(p.x), 2.72, p.y) } else { Transform::from_xyz(p.x, lamp_y, p.y) },
             ))
             .id();
         b.tag(e);
@@ -255,6 +307,7 @@ pub fn spawn_room(
         Area::QuarryLift => quarry_architecture(b, props, r),
         Area::ServiceTunnels => tunnel_architecture(b, props, r),
         Area::Atrium => atrium_architecture(b, props, r),
+        Area::Grounds => grounds_architecture(b, props, r, &mut rng),
         _ => {}
     }
     if r.area == Area::Atrium || (r.area == Area::GuestWing && r.kind != RoomKind::Hall && rng.next_f32() < 0.5) {
@@ -327,7 +380,7 @@ pub fn spawn_room(
         let n = if r.kind == RoomKind::Hall || r.depth() > 10.0 { 2 } else { 1 };
         for _ in 0..n {
             if let Some(s) = slots.pop() {
-                if narrow || matches!(r.area, Area::ServiceTunnels | Area::QuarryLift) {
+                if narrow || matches!(r.area, Area::ServiceTunnels | Area::QuarryLift | Area::Grounds) {
                     locker(b, s);
                 } else {
                     wardrobe(b, asset_server, s);
@@ -338,7 +391,7 @@ pub fn spawn_room(
     for c in 0..r.containers {
         let Some(s) = slots.pop() else { break };
         let ids = match r.area {
-            Area::ServiceTunnels | Area::QuarryLift => tool_chest(b, s, r, rt, &mut drawer_id, c),
+            Area::ServiceTunnels | Area::QuarryLift | Area::Grounds => tool_chest(b, s, r, rt, &mut drawer_id, c),
             _ => {
                 if rng.next_f32() < 0.5 {
                     drawer_cabinet(b, asset_server, s, r, rt, &mut drawer_id)
@@ -368,6 +421,7 @@ pub fn spawn_room(
         match r.area {
             Area::Archive => bookshelf(b, props, s, &mut rng),
             Area::QuarryLift | Area::ServiceTunnels => crate_stack(b, s, &mut rng),
+            Area::Grounds => hedge(b, props, s, &mut rng),
             Area::GuestWing | Area::Atrium => {
                 if narrow {
                     continue;
@@ -732,6 +786,124 @@ fn reading_table(b: &mut Builder, props: &PropMaterials, at: Vec3, lit: bool) {
     }
 }
 
+/// Outdoor architecture: stone capping on the walls, a gravel path from door
+/// to door, trees, a fountain in big gardens, and a cool moonlit fill light.
+fn grounds_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, rng: &mut GameRng) {
+    let h = r.height;
+    let rock = b.mats.rock.clone();
+    // Capstones along the top of the walls.
+    for (lo, hi) in [
+        (Vec3::new(r.min.x - WALL_T - 0.05, h, r.min.y - WALL_T - 0.05), Vec3::new(r.max.x + WALL_T + 0.05, h + 0.18, r.min.y + 0.05)),
+        (Vec3::new(r.min.x - WALL_T - 0.05, h, r.max.y - 0.05), Vec3::new(r.max.x + WALL_T + 0.05, h + 0.18, r.max.y + WALL_T + 0.05)),
+        (Vec3::new(r.min.x - WALL_T - 0.05, h, r.min.y), Vec3::new(r.min.x + 0.05, h + 0.18, r.max.y)),
+        (Vec3::new(r.max.x - 0.05, h, r.min.y), Vec3::new(r.max.x + WALL_T + 0.05, h + 0.18, r.max.y)),
+    ] {
+        b.block(lo, hi, &rock, 1.0, false);
+    }
+    // Gravel path: entry → middle → exit.
+    let gravel = props.gravel.clone();
+    let mid = (r.max.y + r.min.y) / 2.0;
+    b.block(Vec3::new(r.entry_x - 0.7, 0.0, mid - 0.7), Vec3::new(r.entry_x + 0.7, 0.012, r.max.y), &gravel, 1.2, false);
+    b.block(Vec3::new(r.exit_x - 0.7, 0.0, r.min.y), Vec3::new(r.exit_x + 0.7, 0.013, mid + 0.7), &gravel, 1.2, false);
+    let (x0, x1) = (r.entry_x.min(r.exit_x), r.entry_x.max(r.exit_x));
+    b.block(Vec3::new(x0 - 0.7, 0.0, mid - 0.7), Vec3::new(x1 + 0.7, 0.011, mid + 0.7), &gravel, 1.2, false);
+    let on_path = |x: f32, z: f32| {
+        ((x - r.entry_x).abs() < 1.6 && z > mid - 1.6) || ((x - r.exit_x).abs() < 1.6 && z < mid + 1.6) || ((z - mid).abs() < 1.6 && x > x0 - 1.6 && x < x1 + 1.6)
+    };
+    // Trees away from the path and the walls' furniture strip.
+    let mut placed: Vec<Vec2> = vec![];
+    for _ in 0..12 {
+        if placed.len() >= 3 {
+            break;
+        }
+        let x = rng.range_f32(r.min.x + 1.8, r.max.x - 1.8);
+        let z = rng.range_f32(r.min.y + 1.8, r.max.y - 1.8);
+        if on_path(x, z) || placed.iter().any(|p| p.distance(Vec2::new(x, z)) < 3.0) {
+            continue;
+        }
+        tree(b, props, Vec3::new(x, 0.0, z), rng.range_f32(0.85, 1.25));
+        placed.push(Vec2::new(x, z));
+    }
+    // A stone fountain in larger gardens.
+    let c = r.center();
+    if r.width() > 9.0 && !on_path(c.x, c.y) {
+        fountain(b, props, Vec3::new(c.x, 0.0, c.y));
+    }
+    // Moonlight: a cool, soft fill from high above.
+    let e = b
+        .commands
+        .spawn((PointLight { color: Color::srgb(0.62, 0.72, 1.0), intensity: 220_000.0, range: 30.0, radius: 2.0, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(c.x, h + 7.0, c.y)))
+        .id();
+    b.tag(e);
+}
+
+fn tree(b: &mut Builder, props: &PropMaterials, at: Vec3, k: f32) {
+    let root = b.commands.spawn((Transform::from_translation(at), Visibility::default(), Collider(Aabb { min: at + Vec3::new(-0.25, 0.0, -0.25), max: at + Vec3::new(0.25, 3.0, 0.25) }))).id();
+    b.tag(root);
+    let (cyl, sphere, cone) = (props.unit_cyl.clone(), props.sphere.clone(), props.cone.clone());
+    let (bark, leaves) = (props.bark.clone(), props.leaves.clone());
+    b.commands.entity(root).with_children(|t| {
+        t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(bark.clone()), Transform::from_xyz(0.0, 1.3 * k, 0.0).with_scale(Vec3::new(0.32, 2.6 * k, 0.32))));
+        // Roots flaring at the base.
+        t.spawn((Mesh3d(cone.clone()), MeshMaterial3d(bark.clone()), Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(0.7, 0.5, 0.7))));
+        // Two branches.
+        for (ang, y) in [(0.7f32, 1.9f32), (-0.9, 2.3)] {
+            t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(bark.clone()), Transform::from_xyz(ang.sin() * 0.35, y * k, 0.0).with_rotation(Quat::from_rotation_z(-ang)).with_scale(Vec3::new(0.12, 0.9, 0.12))));
+        }
+        // Canopy: a cluster of leaf balls.
+        for (dx, dy, dz, sz) in [(0.0, 3.3, 0.0, 2.2), (0.7, 2.9, 0.3, 1.5), (-0.6, 3.0, -0.4, 1.6), (0.2, 3.9, -0.3, 1.4), (-0.3, 2.8, 0.7, 1.3)] {
+            t.spawn((Mesh3d(sphere.clone()), MeshMaterial3d(leaves.clone()), Transform::from_xyz(dx * k, dy * k, dz * k).with_scale(Vec3::splat(sz * k))));
+        }
+    });
+}
+
+fn fountain(b: &mut Builder, props: &PropMaterials, at: Vec3) {
+    let stone = b.mats.marble.clone();
+    let root = b.commands.spawn((Transform::from_translation(at), Visibility::default(), Collider(Aabb { min: at + Vec3::new(-1.1, 0.0, -1.1), max: at + Vec3::new(1.1, 0.6, 1.1) }))).id();
+    b.tag(root);
+    let (cyl, water) = (props.unit_cyl.clone(), props.water.clone());
+    b.commands.entity(root).with_children(|f| {
+        f.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(stone.clone()), Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(2.2, 0.5, 2.2))));
+        f.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(water), Transform::from_xyz(0.0, 0.45, 0.0).with_scale(Vec3::new(1.95, 0.12, 1.95))));
+        f.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(stone.clone()), Transform::from_xyz(0.0, 0.9, 0.0).with_scale(Vec3::new(0.3, 1.0, 0.3))));
+        f.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(stone.clone()), Transform::from_xyz(0.0, 1.42, 0.0).with_scale(Vec3::new(0.95, 0.1, 0.95))));
+    });
+}
+
+/// Iron lamp post with a glowing lantern (the light itself is added by the caller).
+fn lamp_post(b: &mut Builder, props: &PropMaterials, at: Vec3) {
+    let root = b.commands.spawn((Transform::from_translation(at), Visibility::default(), Collider(Aabb { min: at + Vec3::new(-0.12, 0.0, -0.12), max: at + Vec3::new(0.12, 2.9, 0.12) }))).id();
+    b.tag(root);
+    let iron = b.mats.iron.clone();
+    let (cube, cyl, glow) = (props.unit_cube.clone(), props.unit_cyl.clone(), props.lantern.clone());
+    b.commands.entity(root).with_children(|l| {
+        l.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 0.15, 0.0).with_scale(Vec3::new(0.3, 0.3, 0.3))));
+        l.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 1.3, 0.0).with_scale(Vec3::new(0.09, 2.6, 0.09))));
+        l.spawn((Mesh3d(cube.clone()), MeshMaterial3d(glow), Transform::from_xyz(0.0, 2.72, 0.0).with_scale(Vec3::new(0.22, 0.3, 0.22))));
+        l.spawn((Mesh3d(cube.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 2.9, 0.0).with_scale(Vec3::new(0.32, 0.06, 0.32))));
+        l.spawn((Mesh3d(cube.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 2.55, 0.0).with_scale(Vec3::new(0.28, 0.04, 0.28))));
+    });
+}
+
+/// A clipped hedge against the wall (outdoor decor slot).
+fn hedge(b: &mut Builder, props: &PropMaterials, s: Slot, rng: &mut GameRng) {
+    let len = rng.range_f32(1.4, 1.8);
+    let hgt = rng.range_f32(1.1, 1.6);
+    let tf = slot_tf(s, 0.45);
+    let col = world_aabb(Vec3::new(-len / 2.0, 0.0, -0.45), Vec3::new(len / 2.0, hgt, 0.45), &tf);
+    let root = b.commands.spawn((tf, Visibility::default(), Collider(col))).id();
+    b.tag(root);
+    let (cube, sphere, mat) = (props.unit_cube.clone(), props.sphere.clone(), props.hedge.clone());
+    b.commands.entity(root).with_children(|h| {
+        h.spawn((Mesh3d(cube), MeshMaterial3d(mat.clone()), Transform::from_xyz(0.0, hgt / 2.0, 0.0).with_scale(Vec3::new(len, hgt, 0.9))));
+        // Rounded, uneven top.
+        for i in 0..3 {
+            let x = -len / 3.0 + i as f32 * len / 3.0;
+            h.spawn((Mesh3d(sphere.clone()), MeshMaterial3d(mat.clone()), Transform::from_xyz(x, hgt - 0.05, 0.0).with_scale(Vec3::new(len / 2.6, 0.45, 0.95))));
+        }
+    });
+}
+
 fn caged_bulb(b: &mut Builder, props: &PropMaterials, ceiling: Vec3, drop: f32) {
     let root = b.commands.spawn((Transform::from_translation(ceiling - Vec3::Y * drop), Visibility::default())).id();
     b.tag(root);
@@ -862,7 +1034,7 @@ fn crate_box(b: &mut Builder, c: Vec3, size: f32, yaw: f32, solid: bool) {
 
 /// Door 100 gets a grand surround: marble pilasters, a lintel and red lamps.
 pub fn final_door_surround(b: &mut Builder, r: &RoomPlan) {
-    if r.exit_door() != FINAL_DOOR {
+    if r.kind != RoomKind::Final {
         return;
     }
     b.member = Some(r.index);

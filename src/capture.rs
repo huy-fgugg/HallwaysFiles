@@ -27,6 +27,8 @@ const ROOM_SHOTS: &[(&str, u32, f32)] = &[
     ("31_entry_landing", 0, 0.0),
     ("32_key_loft", 0, 0.0),
     ("33_fake_doors", 0, 0.0),
+    ("37_grounds", 53, 0.0),
+    ("37b_grounds_entry", 51, 0.0),
     ("35_admin_panel", 4, 0.0),
     ("36_jumpscare", 4, 0.0),
 ];
