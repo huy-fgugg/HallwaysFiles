@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=HALLWAYS
+GenericName=Horror Game
+Comment=First-person procedural horror: survive 100 doors
+Exec=hallways
+Icon=hallways
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=horror;doors;survival;

@@ -80,7 +80,8 @@
 - [x] Admin panel (F8, code-locked): spawn items; kill, revive or jumpscare any player
 
 ## Phase 6: Release QA (waiting for the owner's final touches)
-- [ ] Windows installer/zip and Linux .deb release
+- [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
+- [x] .deb installed and launched in a clean Linux container (menu renders, assets found)
 - [ ] Packaged-build QA checklist on real hardware
 
 ## Known issues / not verified
