@@ -139,10 +139,8 @@ fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut A
     // so it doesn't read as grey under the ambient light.
     let ink = mats.add(StandardMaterial {
         base_color: Color::srgb(0.004, 0.003, 0.004),
-        perceptual_roughness: 0.12,
-        reflectance: 0.25,
-        clearcoat: 0.4,
-        clearcoat_perceptual_roughness: 0.1,
+        perceptual_roughness: 0.3,
+        reflectance: 0.04,
         ..default()
     });
     let cloth = mats.add(StandardMaterial { base_color: Color::srgb(0.03, 0.028, 0.03), perceptual_roughness: 0.9, ..default() });

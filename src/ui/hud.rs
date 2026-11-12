@@ -342,8 +342,14 @@ fn update_subtitles(
     mut active: ResMut<ActiveSubtitle>,
     mut boxq: Query<&mut Visibility, With<SubtitleBox>>,
     mut textq: Query<(&mut Text, &mut TextColor), With<SubtitleText>>,
+    cutscene: Res<crate::cutscene::ActiveCutscene>,
 ) {
     for s in reader.read() {
+        // Cutscenes draw their own captions inside the letterbox.
+        if cutscene.is_playing() {
+            active.remaining = 0.0;
+            continue;
+        }
         active.text = s.text.clone();
         active.danger = s.danger;
         active.remaining = s.seconds;
