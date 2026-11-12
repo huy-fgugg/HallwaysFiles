@@ -30,7 +30,7 @@ pub struct RoomMember(pub u32);
 pub struct Floor(pub FloorPlan);
 
 /// Everything the player changed on this floor, so streamed rooms come back the same.
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug)]
 pub struct FloorRuntime {
     pub opened: HashSet<u32>,
     pub searched: HashSet<(u32, u8)>,
@@ -40,6 +40,25 @@ pub struct FloorRuntime {
     pub loaded: HashSet<u32>,
     /// When Door 100 was opened (for the summary fade).
     pub finished_at: Option<f32>,
+    /// Item tuning (copied in at run start) used when building drawers.
+    pub items: crate::data::ItemConfig,
+    pub encounters_done: HashSet<u32>,
+}
+
+impl Default for FloorRuntime {
+    fn default() -> Self {
+        Self {
+            opened: HashSet::new(),
+            searched: HashSet::new(),
+            keys: HashSet::new(),
+            mimics_triggered: HashSet::new(),
+            surges_done: HashSet::new(),
+            loaded: HashSet::new(),
+            finished_at: None,
+            items: crate::data::ItemConfig::default(),
+            encounters_done: HashSet::new(),
+        }
+    }
 }
 
 /// How many rooms behind/ahead of the player stay loaded.
@@ -67,9 +86,9 @@ impl Plugin for FloorPlugin {
     }
 }
 
-fn setup_floor(mut commands: Commands, seed: Res<RunSeed>, mut std_mats: ResMut<Assets<StandardMaterial>>, mut meshes: ResMut<Assets<Mesh>>) {
-    commands.insert_resource(Floor(plan::generate(seed.0)));
-    commands.insert_resource(FloorRuntime::default());
+fn setup_floor(mut commands: Commands, seed: Res<RunSeed>, cfg: Res<crate::data::EntityConfig>, items: Res<crate::data::ItemConfig>, mut std_mats: ResMut<Assets<StandardMaterial>>, mut meshes: ResMut<Assets<Mesh>>) {
+    commands.insert_resource(Floor(plan::generate_with(seed.0, &cfg)));
+    commands.insert_resource(FloorRuntime { items: items.clone(), ..default() });
     commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes));
 }
 
@@ -96,7 +115,7 @@ fn stream_rooms(
     if !stale.is_empty() {
         for (e, m) in &members {
             if stale.contains(&m.0) {
-                commands.entity(e).despawn();
+                commands.entity(e).try_despawn();
             }
         }
         for i in stale {
@@ -117,9 +136,9 @@ fn stream_rooms(
 fn fix_open_doors(mut commands: Commands, doors: Query<(Entity, &Door), Added<OpenOnSpawn>>) {
     for (e, d) in &doors {
         if d.blocker != Entity::PLACEHOLDER {
-            commands.entity(d.blocker).remove::<Collider>();
+            commands.entity(d.blocker).try_remove::<Collider>();
         }
-        commands.entity(e).remove::<OpenOnSpawn>();
+        commands.entity(e).try_remove::<OpenOnSpawn>();
     }
 }
 

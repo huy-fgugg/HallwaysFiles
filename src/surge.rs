@@ -14,7 +14,8 @@ use crate::audio::{PlaySfx, Sfx};
 use crate::floor::plan::{FloorPlan, WALL_T};
 use crate::floor::{Floor, FloorRuntime};
 use crate::hollow::DeathCause;
-use crate::interaction::HideState;
+use crate::floor::plan::Encounter;
+use crate::interaction::{HideState, ThreatActive};
 use crate::player::Player;
 use crate::rng::GameRng;
 use crate::run::{CameraShake, RunState, Subtitle};
@@ -32,8 +33,8 @@ pub fn cue_seconds(room: u32) -> f32 {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurgePhase {
     Idle,
-    Cue { room: u32, t: f32 },
-    Rushing { room: u32, path: Vec<Vec3>, seg: usize, pos: Vec3, passed_close: bool },
+    Cue { room: u32, t: f32, undertow: bool },
+    Rushing { room: u32, path: Vec<Vec3>, seg: usize, pos: Vec3, passed_close: bool, passes_left: u32, pause: f32, undertow: bool },
 }
 
 #[derive(Resource, Debug)]
@@ -74,6 +75,18 @@ pub fn surge_path(plan: &FloorPlan, room: u32) -> Vec<Vec3> {
     pts
 }
 
+/// The Undertow sweeps a shorter stretch (two rooms back to one ahead) so
+/// its repeated passes stay near the player.
+pub fn undertow_path(plan: &FloorPlan, room: u32) -> Vec<Vec3> {
+    let mut p = surge_path(plan, room);
+    let first = room.saturating_sub(2).max(crate::floor::plan::FIRST_ROOM);
+    let last = (room + 1).min(crate::floor::plan::LAST_ROOM);
+    if let (Some(a), Some(b)) = (plan.room(first), plan.room(last)) {
+        p.retain(|v| v.z <= a.max.y + 3.1 && v.z >= b.min.y - 1.0);
+    }
+    p
+}
+
 /// Moves `pos` along `path` by `dist`; returns (new pos, new segment index, finished).
 pub fn advance(path: &[Vec3], mut seg: usize, mut pos: Vec3, mut dist: f32) -> (Vec3, usize, bool) {
     while seg + 1 < path.len() {
@@ -101,17 +114,45 @@ impl Plugin for SurgePlugin {
     }
 }
 
-fn trigger(run: Res<RunState>, floor: Option<Res<Floor>>, rt: Option<Res<FloorRuntime>>, mut state: ResMut<SurgeState>, mut mood: ResMut<Mood>, mut sfx: MessageWriter<PlaySfx>, mut subs: MessageWriter<Subtitle>) {
+#[allow(clippy::too_many_arguments)]
+fn trigger(
+    run: Res<RunState>,
+    floor: Option<Res<Floor>>,
+    rt: Option<Res<FloorRuntime>>,
+    force: Res<crate::encounters::ForceEncounter>,
+    mut state: ResMut<SurgeState>,
+    mut mood: ResMut<Mood>,
+    mut threat: ResMut<ThreatActive>,
+    mut sfx: MessageWriter<PlaySfx>,
+    mut subs: MessageWriter<Subtitle>,
+) {
+    threat.0 = state.0 != SurgePhase::Idle;
     let (Some(floor), Some(rt)) = (floor, rt) else { return };
     if state.0 != SurgePhase::Idle {
         return;
     }
     let Some(r) = floor.0.room(run.current_room) else { return };
-    if r.surge && !rt.surges_done.contains(&r.index) {
-        state.0 = SurgePhase::Cue { room: r.index, t: 0.0 };
-        *mood = Mood { tint: Color::srgb(0.75, 0.88, 1.0), amount: 0.35, scale: 1.0, flicker: 0.85 };
-        sfx.write(PlaySfx(Sfx::SurgeRoar));
-        subs.write(Subtitle::danger("[The lights strobe. A roar builds in the walls.] HIDE!"));
+    let enc = match force.0 {
+        Some((room, e)) if room == r.index => Some(e),
+        _ => r.encounter,
+    };
+    if rt.surges_done.contains(&r.index) {
+        return;
+    }
+    match enc {
+        Some(Encounter::Surge) => {
+            state.0 = SurgePhase::Cue { room: r.index, t: 0.0, undertow: false };
+            *mood = Mood { tint: Color::srgb(0.75, 0.88, 1.0), amount: 0.35, scale: 1.0, flicker: 0.85 };
+            sfx.write(PlaySfx(Sfx::SurgeRoar));
+            subs.write(Subtitle::danger("[The lights strobe. A roar builds in the walls.] HIDE!"));
+        }
+        Some(Encounter::Undertow) => {
+            state.0 = SurgePhase::Cue { room: r.index, t: 0.0, undertow: true };
+            *mood = Mood { tint: Color::srgb(0.45, 0.75, 0.7), amount: 0.45, scale: 0.9, flicker: 0.8 };
+            sfx.write(PlaySfx(Sfx::SurgeRoar));
+            subs.write(Subtitle::danger("[A low, dragging roar... the lights pulse green.] HIDE, and stay hidden!"));
+        }
+        _ => {}
     }
 }
 
@@ -132,22 +173,29 @@ fn run_surge(
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
     (mut death, mut next_overlay): (ResMut<DeathCause>, ResMut<NextState<Overlay>>),
+    cfg: Res<crate::data::EntityConfig>,
 ) {
     let dt = time.delta_secs();
     let Some(floor) = floor else { return };
     match &mut state.0 {
         SurgePhase::Idle => {}
-        SurgePhase::Cue { room, t } => {
+        SurgePhase::Cue { room, t, undertow } => {
             *t += dt;
-            if *t >= cue_seconds(*room) {
-                let path = surge_path(&floor.0, *room);
+            let tune = if *undertow { cfg.undertow } else { cfg.surge };
+            if *t >= tune.warn_for(*room) {
+                let path = if *undertow { undertow_path(&floor.0, *room) } else { surge_path(&floor.0, *room) };
                 let start = path[0];
-                spawn_surge(&mut commands, &mut meshes, &mut mats, start);
-                subs.write(Subtitle::danger("[IT'S HERE]"));
-                state.0 = SurgePhase::Rushing { room: *room, path, seg: 0, pos: start, passed_close: false };
+                spawn_surge(&mut commands, &mut meshes, &mut mats, start, *undertow);
+                subs.write(Subtitle::danger(if *undertow { "[IT'S HERE... and it isn't leaving]" } else { "[IT'S HERE]" }));
+                let passes = if *undertow { 2 + (*room % 2) } else { 0 };
+                state.0 = SurgePhase::Rushing { room: *room, path, seg: 0, pos: start, passed_close: false, passes_left: passes, pause: 0.0, undertow: *undertow };
             }
         }
-        SurgePhase::Rushing { room, path, seg, pos, passed_close } => {
+        SurgePhase::Rushing { room, path, seg, pos, passed_close, passes_left, pause, undertow } => {
+            if *pause > 0.0 {
+                *pause -= dt;
+                return;
+            }
             let (np, ns, done) = advance(path, *seg, *pos, SURGE_SPEED * dt);
             *pos = np;
             *seg = ns;
@@ -164,13 +212,21 @@ fn run_surge(
                 if d < SURGE_KILL_RADIUS && !hide.is_hiding() {
                     shake.add(1.0);
                     sfx.write(PlaySfx(Sfx::Stinger));
-                    *death = DeathCause {
-                        title: "THE SURGE TORE THROUGH".into(),
-                        cause: format!("Caught in the open in Room {:03}.", run.current_room),
-                        lesson: "When the lights strobe and a roar builds, hide in a wardrobe or locker right away and stay in until the lights settle.".into(),
+                    *death = if *undertow {
+                        DeathCause {
+                            title: "THE UNDERTOW DRAGGED YOU OUT".into(),
+                            cause: format!("Caught between passes in Room {:03}.", run.current_room),
+                            lesson: "The Undertow comes back again and again. Stay hidden until the green flicker stops completely; your hide timer pauses while it's out there.".into(),
+                        }
+                    } else {
+                        DeathCause {
+                            title: "THE SURGE TORE THROUGH".into(),
+                            cause: format!("Caught in the open in Room {:03}.", run.current_room),
+                            lesson: "When the lights strobe and a roar builds, hide in a wardrobe or locker right away and stay in until the lights settle.".into(),
+                        }
                     };
                     for (e, _) in &bodies {
-                        commands.entity(e).despawn();
+                        commands.entity(e).try_despawn();
                     }
                     *mood = Mood::default();
                     state.0 = SurgePhase::Idle;
@@ -178,10 +234,22 @@ fn run_surge(
                     return;
                 }
             }
+            if done && *passes_left > 0 {
+                // Undertow: turn around and come back after a short, quieter pause.
+                *passes_left -= 1;
+                path.reverse();
+                *seg = 0;
+                *pos = path[0];
+                *pause = 1.3;
+                *passed_close = false;
+                sfx.write(PlaySfx(Sfx::Rumble));
+                subs.write(Subtitle::danger("[It's turning back...]"));
+                return;
+            }
             if done {
                 let room = *room;
                 for (e, _) in &bodies {
-                    commands.entity(e).despawn();
+                    commands.entity(e).try_despawn();
                 }
                 *mood = Mood::default();
                 if let Some(rt) = rt.as_mut() {
@@ -196,8 +264,10 @@ fn run_surge(
     }
 }
 
-fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3) {
-    let shard_mat = mats.add(StandardMaterial { base_color: Color::WHITE, emissive: LinearRgba::rgb(9.0, 12.0, 18.0), unlit: true, ..default() });
+fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3, undertow: bool) {
+    // The Undertow is the same kind of thing, but sick green and heavier.
+    let glow = if undertow { LinearRgba::rgb(4.0, 14.0, 9.0) } else { LinearRgba::rgb(9.0, 12.0, 18.0) };
+    let shard_mat = mats.add(StandardMaterial { base_color: Color::WHITE, emissive: glow, unlit: true, ..default() });
     let dark_mat = mats.add(StandardMaterial { base_color: Color::srgb(0.02, 0.02, 0.03), perceptual_roughness: 0.3, ..default() });
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let mut rng = GameRng::new(0x5u64 ^ (at.z.abs() as u64));
@@ -206,7 +276,7 @@ fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut As
             Transform::from_translation(at),
             Visibility::default(),
             SurgeBody,
-            PointLight { color: Color::srgb(0.75, 0.88, 1.0), intensity: 500_000.0, range: 14.0, ..default() },
+            PointLight { color: if undertow { Color::srgb(0.5, 1.0, 0.75) } else { Color::srgb(0.75, 0.88, 1.0) }, intensity: 500_000.0, range: 14.0, ..default() },
             DespawnOnExit(AppState::Playing),
             Name::new("The Surge"),
         ))
@@ -279,16 +349,21 @@ mod tests {
     }
 
     #[test]
-    fn surge_kill_time_fits_inside_hide_limit() {
-        // Cue + full flight must be shorter than the wardrobe hide limit, so a
-        // player who hides at the first cue never gets pushed out mid-pass.
-        for seed in 0..30 {
-            let plan = generate(seed);
-            for r in plan.rooms.iter().filter(|r| r.surge) {
-                let path = surge_path(&plan, r.index);
-                let len: f32 = path.windows(2).map(|w| w[0].distance(w[1])).sum();
-                assert!(cue_seconds(r.index) + len / SURGE_SPEED < crate::interaction::HIDE_LIMIT, "seed {seed} room {}", r.index);
-            }
+    fn surge_cue_fits_inside_hide_limit() {
+        // The hide timer pauses while a threat is active, but the warning
+        // itself must still fit, so hiding at the first cue is always safe.
+        let cfg = crate::data::EntityConfig::default();
+        for room in 6..100 {
+            assert!(cfg.surge.warn_for(room) < crate::interaction::HIDE_LIMIT);
+            assert!(cfg.undertow.warn_for(room) < crate::interaction::HIDE_LIMIT);
         }
+    }
+
+    #[test]
+    fn undertow_path_is_shorter_than_surge_path() {
+        let plan = generate(4);
+        let len = |p: &[Vec3]| p.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>();
+        assert!(len(&undertow_path(&plan, 40)) < len(&surge_path(&plan, 40)));
+        assert!(undertow_path(&plan, 40).len() >= 4);
     }
 }

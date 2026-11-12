@@ -6,9 +6,14 @@
 pub mod audio;
 pub mod capture;
 pub mod cutscene;
+pub mod data;
+pub mod encounters;
 pub mod floor;
 pub mod hollow;
+pub mod icons;
 pub mod interaction;
+pub mod items;
+pub mod lobby;
 pub mod music;
 pub mod physics;
 pub mod player;
@@ -28,7 +33,7 @@ pub struct HallwaysPlugin;
 
 impl Plugin for HallwaysPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<rng::RunSeed>().add_plugins((
+        app.init_resource::<rng::RunSeed>().add_plugins(data::DataPlugin).add_plugins((
             settings::SettingsPlugin,
             state::StatePlugin,
             theme::ThemePlugin,
@@ -40,6 +45,6 @@ impl Plugin for HallwaysPlugin {
             ui::UiPlugin,
             capture::CapturePlugin,
         ))
-        .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin));
+        .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin));
     }
 }

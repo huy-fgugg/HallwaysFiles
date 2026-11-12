@@ -30,5 +30,8 @@ fn main() {
                 .set(ImagePlugin { default_sampler: sampler }),
         )
         .add_plugins(HallwaysPlugin)
+        // A stray command on a just-despawned entity (e.g. a room streaming out
+        // mid-load) is logged instead of crashing the player's game.
+        .set_error_handler(bevy::ecs::error::warn)
         .run();
 }
