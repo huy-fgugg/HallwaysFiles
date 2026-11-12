@@ -188,7 +188,8 @@ fn spawn_pause_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSe
                 ));
                 spawn_button(panel, &theme, "Resume", MenuAction::Resume, 0, true);
                 spawn_button(panel, &theme, "Settings", MenuAction::OpenSettings, 1, false);
-                spawn_button(panel, &theme, "Abandon Run", MenuAction::AbandonRun, 2, false);
+                spawn_button(panel, &theme, "Admin Panel", MenuAction::OpenAdmin, 2, false);
+                spawn_button(panel, &theme, "Abandon Run", MenuAction::AbandonRun, 3, false);
             });
         });
 }
@@ -201,6 +202,7 @@ fn pause_actions(
     for MenuActivated(action) in reader.read() {
         match action {
             MenuAction::Resume => next_overlay.set(Overlay::None),
+            MenuAction::OpenAdmin => next_overlay.set(Overlay::Admin),
             MenuAction::OpenSettings => next_overlay.set(Overlay::Settings),
             MenuAction::AbandonRun => {
                 next_overlay.set(Overlay::None);

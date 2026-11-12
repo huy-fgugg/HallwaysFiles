@@ -3,6 +3,7 @@
 //! The crate is a library plus a thin binary so gameplay logic can be unit
 //! tested with `cargo test` without opening a window.
 
+pub mod admin;
 pub mod audio;
 pub mod avatar;
 pub mod capture;
@@ -50,6 +51,6 @@ impl Plugin for HallwaysPlugin {
             capture::CapturePlugin,
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
-        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin));
+        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin));
     }
 }

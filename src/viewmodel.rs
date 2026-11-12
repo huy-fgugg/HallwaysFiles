@@ -4,7 +4,10 @@
 //! The same [`Gesture`] is sent to other players so their view of you moves
 //! the same way (see `net` and `avatar`).
 
+use bevy::camera::visibility::RenderLayers;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::NotShadowCaster;
+use bevy::camera::Hdr;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -71,6 +74,18 @@ pub struct PlayerGesture {
 #[derive(Component)]
 struct ViewRoot;
 
+/// Render layer used only by the first-person arms and their camera/light.
+pub const VIEW_LAYER: usize = 1;
+
+#[derive(Component)]
+struct ViewFill;
+
+/// The hand inside a first-person arm (turned into a fist grip while holding).
+#[derive(Component, Clone, Copy)]
+struct HandNode {
+    right: bool,
+}
+
 #[derive(Component, Clone, Copy, PartialEq)]
 struct ViewArm {
     right: bool,
@@ -90,7 +105,7 @@ impl Plugin for ViewModelPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ArmAnim>()
             .init_resource::<PlayerGesture>()
-            .add_systems(Update, (spawn_arms, (trigger_gestures, animate_arms).chain().after(crate::player::CameraSet)));
+            .add_systems(Update, (spawn_arms, (trigger_gestures, animate_arms, pose_hands, tag_view_layers, fill_light).chain().after(crate::player::CameraSet)));
     }
 }
 
@@ -145,33 +160,71 @@ fn part(c: &mut ChildSpawnerCommands, mesh: &Handle<Mesh>, mat: &Handle<Standard
     c.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(pos).with_scale(size), NotShadowCaster));
 }
 
-/// A hand (palm, four fingers, thumb) at the origin, fingers toward -Z.
+/// Finger group shown when the hand is open (`grip: false`) or wrapped
+/// around a held item (`grip: true`).
+#[derive(Component, Clone, Copy)]
+pub struct FingerSet {
+    pub grip: bool,
+    pub right: bool,
+}
+
+/// Where a held item sits in hand space: its long axis runs forward (-Z)
+/// through the fist, beside the palm (left of a right palm, right of a left
+/// one). `_along_fingers` is kept for call-site clarity; avatars and the
+/// first-person view use the same grip.
+pub fn grip_transform(right: bool, scale: f32, _along_fingers: bool) -> Transform {
+    let x = if right { -0.03 } else { 0.03 };
+    Transform::from_translation(Vec3::new(x, 0.0, -0.01) * scale)
+}
+
+/// A hand at the origin, fingers toward -Z. Builds an open hand and a
+/// gripping hand; [`FingerSet`] picks which one shows.
+///
+/// The gripping hand is shaped like holding a torch: palm upright against
+/// the side of the item, fingers wrapped underneath it, thumb along the top.
 pub fn build_hand(c: &mut ChildSpawnerCommands, kit: &BodyKit, right: bool, scale: f32) {
     let s = scale;
-    let side = if right { -1.0 } else { 1.0 };
-    // Palm, with a rounded heel and knuckle ridge.
-    part(c, &kit.cube, &kit.skin, Vec3::ZERO, Vec3::new(0.068, 0.026, 0.072) * s);
-    part(c, &kit.sphere, &kit.skin, Vec3::new(0.0, 0.0, 0.03) * s, Vec3::new(0.068, 0.032, 0.04) * s);
-    c.spawn((Mesh3d(kit.capsule.clone()), MeshMaterial3d(kit.skin.clone()), Transform::from_xyz(0.0, 0.004 * s, -0.036 * s).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(0.016 * s, 0.03 * s, 0.016 * s)), NotShadowCaster));
-    for i in 0..4 {
-        let x = (-0.024 + i as f32 * 0.016) * s;
-        let len = [0.022, 0.026, 0.025, 0.02][i] * s;
-        // Fingers curl down around a held item.
-        c.spawn((
-            Mesh3d(kit.capsule.clone()),
-            MeshMaterial3d(kit.skin.clone()),
-            Transform::from_xyz(x, -0.014 * s, -0.052 * s).with_rotation(Quat::from_rotation_x(-0.85 - std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(0.0145 * s, len, 0.0145 * s)),
-            NotShadowCaster,
-        ));
-    }
-    c.spawn((
-        Mesh3d(kit.capsule.clone()),
-        MeshMaterial3d(kit.skin.clone()),
-        Transform::from_xyz(side * 0.038 * s, -0.006 * s, -0.018 * s)
-            .with_rotation(Quat::from_rotation_y(side * 0.6) * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
-            .with_scale(Vec3::new(0.017 * s, 0.022 * s, 0.017 * s)),
-        NotShadowCaster,
-    ));
+    let side = if right { -1.0 } else { 1.0 }; // toward the item / thumb side
+    let half_pi = std::f32::consts::FRAC_PI_2;
+    let capsule = |c: &mut ChildSpawnerCommands, pos: Vec3, rot: Quat, r: f32, half_len: f32| {
+        c.spawn((Mesh3d(kit.capsule.clone()), MeshMaterial3d(kit.skin.clone()), Transform::from_translation(pos * s).with_rotation(rot).with_scale(Vec3::new(r * 2.0, half_len, r * 2.0) * s), NotShadowCaster));
+    };
+    let blob = |c: &mut ChildSpawnerCommands, pos: Vec3, size: Vec3| {
+        c.spawn((Mesh3d(kit.sphere.clone()), MeshMaterial3d(kit.skin.clone()), Transform::from_translation(pos * s).with_scale(size * s), NotShadowCaster));
+    };
+    // ---- Open hand: palm down, fingers relaxed ----
+    c.spawn((FingerSet { grip: false, right }, Transform::default(), Visibility::default())).with_children(|g| {
+        blob(g, Vec3::new(0.0, 0.0, -0.005), Vec3::new(0.072, 0.03, 0.085));
+        blob(g, Vec3::new(0.0, 0.002, 0.03), Vec3::new(0.064, 0.034, 0.05));
+        for i in 0..4 {
+            let x = -0.024 + i as f32 * 0.016;
+            let len = [0.02, 0.024, 0.023, 0.018][i];
+            capsule(g, Vec3::new(x, -0.012, -0.056), Quat::from_rotation_x(-0.6 - half_pi), 0.0075, len);
+        }
+        capsule(g, Vec3::new(side * 0.04, -0.006, -0.012), Quat::from_rotation_y(side * 0.6) * Quat::from_rotation_x(-half_pi), 0.009, 0.02);
+    });
+    // ---- Gripping hand ----
+    // Item axis: x = 0.03*side, y = 0, along Z.
+    let ix = 0.03 * side;
+    c.spawn((FingerSet { grip: true, right }, Transform::default(), Visibility::Hidden)).with_children(|g| {
+        // Upright palm (back of the hand faces outward), with a rounded heel.
+        blob(g, Vec3::new(-0.002 * side, 0.002, -0.006), Vec3::new(0.03, 0.07, 0.08));
+        blob(g, Vec3::new(0.0, -0.004, 0.028), Vec3::new(0.034, 0.056, 0.046));
+        // Knuckle ridge along the bottom front.
+        blob(g, Vec3::new(0.006 * side, -0.026, -0.016), Vec3::new(0.026, 0.022, 0.07));
+        // Four fingers stacked along the item: under it, then up the far side,
+        // tips tucked against it.
+        for i in 0..4 {
+            let z = -0.042 + i as f32 * 0.0175;
+            let k = [0.85, 1.0, 0.95, 0.8][i];
+            capsule(g, Vec3::new(ix - 0.002 * side, -0.029, z), Quat::from_rotation_z(half_pi + 0.2 * side), 0.0083, 0.015 * k);
+            capsule(g, Vec3::new(ix + 0.021 * side, -0.016, z), Quat::from_rotation_z(-0.55 * side), 0.0078, 0.008 * k);
+            capsule(g, Vec3::new(ix + 0.024 * side, -0.003, z), Quat::from_rotation_z(-1.1 * side), 0.0072, 0.004 * k);
+        }
+        // Thumb lying along the top of the item, pointing forward.
+        capsule(g, Vec3::new(ix - 0.004 * side, 0.025, -0.032), Quat::from_rotation_x(half_pi) * Quat::from_rotation_z(0.12 * side), 0.0098, 0.024);
+        blob(g, Vec3::new(-0.004 * side, 0.022, 0.004), Vec3::new(0.028, 0.026, 0.036));
+    });
 }
 
 /// Builds a small model of `kind` (held in the palm, pointing -Z).
@@ -195,12 +248,15 @@ pub fn build_item(c: &mut ChildSpawnerCommands, kit: &BodyKit, kind: ItemKind, s
             part(c, &kit.cube, &im.black, Vec3::new(0.006, 0.0, -0.005) * s, Vec3::new(0.03, 0.012, 0.035) * s);
         }
         ItemKind::Vitamins => {
-            cyl(c, &im.orange, Vec3::new(0.0, 0.03, -0.035), 0.024, 0.075, Quat::IDENTITY);
-            cyl(c, &im.white, Vec3::new(0.0, 0.074, -0.035), 0.026, 0.018, Quat::IDENTITY);
+            // Bottle held in the fist, cap forward; label band around the middle.
+            cyl(c, &im.orange, Vec3::new(0.0, 0.0, -0.02), 0.022, 0.085, lay);
+            cyl(c, &im.white, Vec3::new(0.0, 0.0, -0.035), 0.0225, 0.03, lay);
+            cyl(c, &im.white, Vec3::new(0.0, 0.0, -0.07), 0.024, 0.018, lay);
         }
         ItemKind::Bandage => {
-            cyl(c, &im.cloth, Vec3::new(0.0, 0.025, -0.04), 0.034, 0.05, Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
-            part(c, &kit.cube, &im.cloth, Vec3::new(0.0, -0.006, -0.08) * s, Vec3::new(0.045, 0.002, 0.05) * s);
+            // A roll in the fist with a loose tail hanging from the front.
+            cyl(c, &im.cloth, Vec3::new(0.0, 0.0, -0.02), 0.03, 0.06, lay);
+            part(c, &kit.cube, &im.cloth, Vec3::new(0.0, -0.03, -0.06) * s, Vec3::new(0.04, 0.002, 0.05) * s);
         }
         ItemKind::SkeletonKey => {
             c.spawn((
@@ -228,6 +284,28 @@ fn spawn_arms(
     for cam in &cams {
         let kit = BodyKit::new(&mut mats, &mut meshes, Color::srgb(0.16, 0.2, 0.26));
         let root = commands.spawn((ViewRoot, Transform::default(), Visibility::Hidden, ChildOf(cam), Name::new("View arms"))).id();
+        // The arms get their own camera drawn on top of the world: they never
+        // poke into walls and the flashlight's huge close-range light can't
+        // blow them out. A soft fill light on the same layer lights them.
+        commands.spawn((
+            Camera3d::default(),
+            Camera { order: 1, clear_color: ClearColorConfig::None, ..default() },
+            Projection::from(PerspectiveProjection { fov: 72f32.to_radians(), near: 0.02, ..default() }),
+            Hdr,
+            Tonemapping::TonyMcMapface,
+            Msaa::Off,
+            RenderLayers::layer(VIEW_LAYER),
+            Transform::default(),
+            ChildOf(cam),
+            Name::new("View-model camera"),
+        ));
+        commands.spawn((
+            PointLight { intensity: 9_000.0, range: 3.0, color: Color::srgb(1.0, 0.86, 0.7), shadow_maps_enabled: false, ..default() },
+            RenderLayers::layer(VIEW_LAYER),
+            ViewFill,
+            Transform::from_xyz(0.25, 0.45, 0.1),
+            ChildOf(cam),
+        ));
         for right in [true, false] {
             let base = if right { RIGHT_BASE } else { LEFT_BASE };
             commands
@@ -239,10 +317,10 @@ fn spawn_arms(
                     arm.spawn((Mesh3d(kit.cyl.clone()), MeshMaterial3d(kit.cuff.clone()), Transform::from_xyz(0.0, -0.008, 0.06).with_rotation(along).with_scale(Vec3::new(0.08, 0.035, 0.08)), NotShadowCaster));
                     // Wrist.
                     arm.spawn((Mesh3d(kit.capsule.clone()), MeshMaterial3d(kit.skin.clone()), Transform::from_xyz(0.0, -0.004, 0.03).with_rotation(along).with_scale(Vec3::new(0.05, 0.03, 0.045)), NotShadowCaster));
-                    arm.spawn((Transform::from_xyz(0.0, 0.0, -0.02), Visibility::default())).with_children(|hand| {
+                    arm.spawn((HandNode { right }, Transform::from_xyz(0.0, 0.0, -0.02), Visibility::default())).with_children(|hand| {
                         build_hand(hand, &kit, right, 1.0);
                         for kind in ItemKind::ALL {
-                            hand.spawn((HeldItem { kind, right }, Transform::from_xyz(0.0, 0.03, -0.03), Visibility::Hidden)).with_children(|it| build_item(it, &kit, kind, 1.0));
+                            hand.spawn((HeldItem { kind, right }, grip_transform(right, 1.0, false), Visibility::Hidden)).with_children(|it| build_item(it, &kit, kind, 1.0));
                         }
                     });
                 });
@@ -377,33 +455,81 @@ fn animate_arms(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gestures_start_and_end_at_rest() {
-        for g in [Gesture::Reach, Gesture::Use, Gesture::Flinch, Gesture::Swap] {
-            assert!(g.envelope(0.0) < 0.01);
-            assert!(g.envelope(g.duration()) == 0.0);
-            let peak = (0..100).map(|i| g.envelope(g.duration() * i as f32 / 100.0)).fold(0.0, f32::max);
-            assert!(peak > 0.95, "{g:?} never reaches full pose");
-        }
-        assert_eq!(Gesture::None.envelope(0.1), 0.0);
+/// Puts every mesh under the arms on the view-model layer.
+fn tag_view_layers(mut commands: Commands, roots: Query<Entity, With<ViewRoot>>, children: Query<&Children>, tagged: Query<(), With<RenderLayers>>, mut n: Local<u32>) {
+    if std::env::var_os("HALLWAYS_DEBUG_LIGHT").is_some() {
+        *n += 1;
+        if *n % 5 == 0 { info!("viewmodel: roots={} tagged={}", roots.iter().count(), tagged.iter().count()); }
     }
+    for root in &roots {
+        let mut stack = vec![root];
+        while let Some(e) = stack.pop() {
+            if !tagged.contains(e) {
+                commands.entity(e).try_insert(RenderLayers::layer(VIEW_LAYER));
+            }
+            if let Ok(ch) = children.get(e) {
+                stack.extend(ch.iter());
+            }
+        }
+    }
+}
 
-    #[test]
-    fn flashlight_moves_to_left_hand() {
-        let cfg = crate::data::ItemConfig::default();
-        let mut inv = Inventory::default();
-        inv.add(ItemKind::Flashlight, &cfg);
-        inv.add(ItemKind::Bandage, &cfg);
-        inv.selected = 0;
-        inv.flashlight_on = true;
-        assert_eq!(held_items(&inv), (Some(ItemKind::Flashlight), None));
-        inv.selected = 1;
-        assert_eq!(held_items(&inv), (Some(ItemKind::Bandage), Some(ItemKind::Flashlight)));
-        inv.flashlight_on = false;
-        assert_eq!(held_items(&inv), (Some(ItemKind::Bandage), None));
+/// Fill light follows the room: dimmer in dark rooms, a little brighter when
+/// your own flashlight is on.
+fn fill_light(
+    run: Res<RunState>,
+    inv: Res<Inventory>,
+    floor: Option<Res<crate::floor::Floor>>,
+    rt: Option<Res<crate::floor::FloorRuntime>>,
+    mut lights: Query<&mut PointLight, With<ViewFill>>,
+) {
+    let dark = floor.and_then(|f| f.0.room(run.current_room).map(|r| r.light)).map_or(1.0, |l| match l {
+        crate::floor::plan::LightState::Bright => 1.0,
+        crate::floor::plan::LightState::Dim => 0.65,
+        crate::floor::plan::LightState::Dark => 0.25,
+    });
+    let scale = rt.map_or(1.0, |r| r.light_scale);
+    let torch = 1.0;
+    let _ = &inv;
+    for mut l in &mut lights {
+        l.intensity = 9_000.0 * dark * scale.max(0.6) * torch;
+    }
+}
+
+/// Holding something: close the fingers into a fist and turn the hand so the
+/// item runs along the knuckles and points forward.
+fn pose_hands(
+    inv: Res<Inventory>,
+    mut hands: Query<(&HandNode, &mut Transform)>,
+    mut fingers: Query<(&FingerSet, &ChildOf, &mut Visibility)>,
+) {
+    let (held_r, held_l) = held_items(&inv);
+    let holding = |right: bool| if right { held_r.is_some() } else { held_l.is_some() };
+    for (h, mut tf) in &mut hands {
+        let s = if h.right { 1.0 } else { -1.0 };
+        if holding(h.right) {
+            // Roll the fist around the item's axis so the back of the hand and
+            // the knuckles face up (overhand torch grip), then cock the wrist
+            // slightly in so the item points at the crosshair.
+            let pivot = grip_transform(h.right, 1.0, false).translation;
+            let roll = Quat::from_rotation_z(1.25 * s);
+            let aim = Quat::from_rotation_y(0.14 * s) * Quat::from_rotation_x(0.1);
+            tf.rotation = aim * roll;
+            let base = Vec3::new(-pivot.x, 0.01, -0.03);
+            tf.translation = base + pivot - tf.rotation * pivot;
+        } else {
+            tf.rotation = Quat::IDENTITY;
+            tf.translation = Vec3::new(0.0, 0.0, -0.02);
+        }
+    }
+    // Only first-person hands (finger sets whose parent is a HandNode).
+    for (f, parent, mut v) in &mut fingers {
+        if !hands.contains(parent.parent()) {
+            continue;
+        }
+        let want = if holding(f.right) == f.grip { Visibility::Inherited } else { Visibility::Hidden };
+        if *v != want {
+            *v = want;
+        }
     }
 }

@@ -228,13 +228,19 @@ impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(load_profile())
             .init_resource::<LastBanked>()
-            .add_systems(OnEnter(Overlay::Dead), |mut p: ResMut<Profile>, run: Res<RunState>, mut last: ResMut<LastBanked>| {
-                last.0 = p.bank_run(&run, false);
-                save_profile(&p);
+            .add_systems(OnEnter(Overlay::Dead), |mut p: ResMut<Profile>, mut run: ResMut<RunState>, mut last: ResMut<LastBanked>| {
+                if !run.banked {
+                    run.banked = true;
+                    last.0 = p.bank_run(&run, false);
+                    save_profile(&p);
+                }
             })
-            .add_systems(OnEnter(Overlay::Summary), |mut p: ResMut<Profile>, run: Res<RunState>, mut last: ResMut<LastBanked>| {
-                last.0 = p.bank_run(&run, true);
-                save_profile(&p);
+            .add_systems(OnEnter(Overlay::Summary), |mut p: ResMut<Profile>, mut run: ResMut<RunState>, mut last: ResMut<LastBanked>| {
+                if !run.banked {
+                    run.banked = true;
+                    last.0 = p.bank_run(&run, true);
+                    save_profile(&p);
+                }
             });
     }
 }

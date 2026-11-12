@@ -17,7 +17,7 @@ use crate::player::{Player, PlayerCamera};
 use crate::run::RunState;
 use crate::state::AppState;
 use crate::theme::UiTheme;
-use crate::viewmodel::{build_hand, build_item, BodyKit, Gesture, PlayerGesture};
+use crate::viewmodel::{build_hand, build_item, grip_transform, BodyKit, FingerSet, Gesture, PlayerGesture};
 
 const SEND_HZ: f32 = 15.0;
 
@@ -163,7 +163,7 @@ fn apply_peer_events(
             PeerMsg::Notice { text } => {
                 subs.write(crate::run::Subtitle::info(format!("{}: {}", session.name_of(ev.from), text)));
             }
-            PeerMsg::State(_) => {}
+            PeerMsg::State(_) | PeerMsg::Admin { .. } => {}
         }
     }
 }
@@ -260,7 +260,7 @@ fn spawn_avatar(commands: &mut Commands, kit: &BodyKit, id: u8, st: &PeerState, 
                             fore.spawn((Transform::from_xyz(0.0, -0.29, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), Visibility::default())).with_children(|hand| {
                                 build_hand(hand, kit, right, 1.3);
                                 for kind in ItemKind::ALL {
-                                    hand.spawn((AvatarItem { kind, right }, Transform::from_xyz(0.0, 0.03, -0.04), Visibility::Hidden)).with_children(|it| build_item(it, kit, kind, 1.3));
+                                    hand.spawn((AvatarItem { kind, right }, grip_transform(right, 1.3, true), Visibility::Hidden)).with_children(|it| build_item(it, kit, kind, 1.3));
                                 }
                                 if !right {
                                     hand.spawn((
@@ -286,6 +286,7 @@ fn animate_avatars(
     mut limbs: Query<(&Limb, &mut Transform), Without<Avatar>>,
     mut items: Query<(&AvatarItem, &mut Visibility), (Without<Avatar>, Without<AvatarBeam>)>,
     mut beams: Query<&mut Visibility, (With<AvatarBeam>, Without<Avatar>, Without<AvatarItem>)>,
+    mut fingers: Query<(&FingerSet, &mut Visibility), (Without<Avatar>, Without<AvatarItem>, Without<AvatarBeam>)>,
     children: Query<&Children>,
 ) {
     let dt = time.delta_secs();
@@ -365,6 +366,10 @@ fn animate_avatars(
             if let Ok((it, mut v)) = items.get_mut(ent) {
                 let held = if it.right { st.right } else { st.left };
                 *v = if held == Some(it.kind) { Visibility::Inherited } else { Visibility::Hidden };
+            }
+            if let Ok((f, mut v)) = fingers.get_mut(ent) {
+                let held = if f.right { holding_r } else { holding_l };
+                *v = if held == f.grip { Visibility::Inherited } else { Visibility::Hidden };
             }
             if let Ok(mut v) = beams.get_mut(ent) {
                 *v = if st.light { Visibility::Inherited } else { Visibility::Hidden };

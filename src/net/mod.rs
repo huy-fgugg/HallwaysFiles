@@ -67,6 +67,8 @@ pub enum PeerMsg {
     Door { number: u32 },
     /// Short notice shown as a subtitle ("Ana reached Door 050").
     Notice { text: String },
+    /// Admin panel action aimed at one player.
+    Admin { target: u8, action: crate::admin::AdminAction },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

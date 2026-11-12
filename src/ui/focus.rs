@@ -37,6 +37,11 @@ pub enum MenuAction {
     Buy(crate::items::ItemKind),
     Refund,
     ToggleModifier(crate::profile::Modifier),
+    OpenAdmin,
+    CloseAdmin,
+    AdminUnlock,
+    AdminSpawn(crate::items::ItemKind),
+    Admin(u8, crate::admin::AdminAction),
 }
 
 #[derive(Component, Debug, Clone, Copy)]

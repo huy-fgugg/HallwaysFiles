@@ -46,6 +46,7 @@ cargo test --lib
 | Select item slot | 1 / 2 / 3, mouse wheel | LT / RT, D-pad left/right |
 | Use selected item | Q or right mouse | Y |
 | Start the lift (host) | Enter | A |
+| Admin panel (needs the code) | F8, or Pause → Admin Panel | - |
 | Pause | Esc | Start |
 | Menus | Arrows/WASD, Enter/Space, Esc (letters type while a text box is selected) | D-pad, A, B |
 | Skip cutscene | Hold Space | Hold A |
@@ -61,6 +62,19 @@ Main menu → **Play**:
 - **Modifiers**: Lights Low, Restless and Fragile make runs harder and pay more Lumens.
 
 What's shared online: every player gets the same floor (the host's seed), sees teammates' characters walk, crouch, carry items, shine flashlights, reach and use items, and doors opened by anyone open for everyone. Entities run separately on each player's machine, so each player survives their own encounters.
+
+## Starting items
+
+Every run starts with a **flashlight** and a **bandage**, plus anything you bought in the shop.
+
+## Admin panel
+
+Press **F8** during a run (or Pause → **Admin Panel**) and enter the admin code. Once unlocked (until you quit the game) you can:
+
+- **Spawn items** for yourself.
+- **Kill**, **Revive** or **Scare** (a jumpscare) any player in your room, or yourself in solo.
+
+The jumpscare respects **Reduce Flashing** (no flicker) and **Limit Loud Sounds** (quieter). The code is stored inside the game, so treat the panel as a party/testing tool for friends, not as real security: anyone who knows the code can use it on everyone in the room.
 
 ## The online server (Render)
 
