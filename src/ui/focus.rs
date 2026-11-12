@@ -42,6 +42,19 @@ pub enum MenuAction {
     AdminUnlock,
     AdminSpawn(crate::items::ItemKind),
     Admin(u8, crate::admin::AdminAction),
+    OpenCustom,
+    CloseCustom,
+    PresetPrev,
+    PresetNext,
+    PresetAdjust(crate::presets::PresetField, i8),
+    PresetToggleArea(crate::floor::plan::Area),
+    PresetToggleEntity(u8),
+    PresetSave,
+    PresetSaveNew,
+    PresetDelete,
+    PresetFolder,
+    PresetPlay,
+    PresetHost,
 }
 
 #[derive(Component, Debug, Clone, Copy)]

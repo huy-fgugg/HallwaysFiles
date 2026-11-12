@@ -3,6 +3,7 @@
 pub mod focus;
 pub mod hud;
 pub mod menus;
+pub mod custom_menu;
 pub mod play_menu;
 pub mod settings_menu;
 
@@ -18,6 +19,7 @@ impl Plugin for UiPlugin {
             settings_menu::SettingsMenuPlugin,
             hud::HudPlugin,
             play_menu::PlayMenuPlugin,
+            custom_menu::CustomMenuPlugin,
         ));
     }
 }

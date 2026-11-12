@@ -99,6 +99,7 @@ fn setup_floor(
     cfg: Res<crate::data::EntityConfig>,
     items: Res<crate::data::ItemConfig>,
     profile: Res<crate::profile::Profile>,
+    preset: Res<crate::presets::ActivePreset>,
     mut std_mats: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
@@ -111,8 +112,17 @@ fn setup_floor(
             t.cooldown = t.cooldown.saturating_sub(t.cooldown / 3);
         }
     }
-    commands.insert_resource(Floor(plan::generate_with(seed.0, &cfg)));
-    let light_scale = if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
+    // A custom preset (from Custom Floors) shapes the whole floor.
+    let opts = match &preset.0 {
+        Some(p) => {
+            p.apply_entities(&mut cfg);
+            p.gen_options()
+        }
+        None => plan::GenOptions::default(),
+    };
+    commands.insert_resource(Floor(plan::generate_custom(seed.0, &cfg, &opts)));
+    let custom_light = preset.0.as_ref().map_or(1.0, |p| p.light_scale());
+    let light_scale = custom_light * if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
     commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, ..default() });
     commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes, &mut images));
 }

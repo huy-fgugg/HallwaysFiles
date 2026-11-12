@@ -46,6 +46,7 @@ struct Room {
     seed: u64,
     started: bool,
     next_id: u8,
+    config: Option<serde_json::Value>,
 }
 
 impl Room {
@@ -83,7 +84,7 @@ impl Rooms {
     }
 
     /// Creates a room; returns (code, player id).
-    fn host(&self, name: &str, seed: u64, tx: mpsc::UnboundedSender<String>) -> Result<(String, u8), String> {
+    fn host(&self, name: &str, seed: u64, config: Option<serde_json::Value>, tx: mpsc::UnboundedSender<String>) -> Result<(String, u8), String> {
         let mut map = self.0.lock().unwrap();
         if map.len() >= MAX_ROOMS {
             return Err("The server is full right now. Try again soon.".into());
@@ -91,8 +92,8 @@ impl Rooms {
         let code = Self::new_code(&map);
         let player = Player { id: 1, name: clean_name(name), tx: tx.clone() };
         let info = vec![PlayerInfo { id: 1, name: player.name.clone() }];
-        map.insert(code.clone(), Room { players: vec![player], host_id: 1, seed, started: false, next_id: 2 });
-        send(&tx, &ServerMsg::Welcome { code: code.clone(), id: 1, host_id: 1, seed, max: MAX_PLAYERS, players: info });
+        map.insert(code.clone(), Room { players: vec![player], host_id: 1, seed, started: false, next_id: 2, config: config.clone() });
+        send(&tx, &ServerMsg::Welcome { code: code.clone(), id: 1, host_id: 1, seed, max: MAX_PLAYERS, players: info, config });
         Ok((code, 1))
     }
 
@@ -112,7 +113,7 @@ impl Rooms {
         room.broadcast(&ServerMsg::Joined { player: player.clone() }, None);
         room.players.push(Player { id, name: player.name.clone(), tx: tx.clone() });
         let players = room.players.iter().map(|p| PlayerInfo { id: p.id, name: p.name.clone() }).collect();
-        send(&tx, &ServerMsg::Welcome { code, id, host_id: room.host_id, seed: room.seed, max: MAX_PLAYERS, players });
+        send(&tx, &ServerMsg::Welcome { code, id, host_id: room.host_id, seed: room.seed, max: MAX_PLAYERS, players, config: room.config.clone() });
         Ok(id)
     }
 
@@ -182,7 +183,7 @@ async fn handle(socket: WebSocket, rooms: Rooms) {
             (ClientMsg::Host { version, .. } | ClientMsg::Join { version, .. }, None) if version != PROTOCOL_VERSION => {
                 send(&tx, &ServerMsg::Error { msg: "Your game version doesn't match the server. Update HALLWAYS.".into() });
             }
-            (ClientMsg::Host { name, seed, .. }, None) => match rooms.host(&name, seed, tx.clone()) {
+            (ClientMsg::Host { name, seed, config, .. }, None) => match rooms.host(&name, seed, config, tx.clone()) {
                 Ok(j) => joined = Some(j),
                 Err(e) => send(&tx, &ServerMsg::Error { msg: e }),
             },
@@ -255,15 +256,16 @@ mod tests {
     async fn host_join_relay_start_leave() {
         let url = start().await;
         let (mut a, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-        a.send(text(&ClientMsg::Host { name: "Ana".into(), seed: 42, version: PROTOCOL_VERSION })).await.unwrap();
+        a.send(text(&ClientMsg::Host { name: "Ana".into(), seed: 42, version: PROTOCOL_VERSION, config: Some(serde_json::json!({"doors": 30})) })).await.unwrap();
         let ServerMsg::Welcome { code, id, host_id, seed, .. } = recv(&mut a).await else { panic!() };
         assert_eq!((id, host_id, seed), (1, 1, 42));
         assert!(proto::valid_code(&code));
 
         let (mut b, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         b.send(text(&ClientMsg::Join { code: code.to_lowercase(), name: "<Bo>".into(), version: PROTOCOL_VERSION })).await.unwrap();
-        let ServerMsg::Welcome { id: bid, seed, players, .. } = recv(&mut b).await else { panic!() };
+        let ServerMsg::Welcome { id: bid, seed, players, config, .. } = recv(&mut b).await else { panic!() };
         assert_eq!((bid, seed, players.len()), (2, 42, 2));
+        assert_eq!(config, Some(serde_json::json!({"doors": 30})), "guests get the host's preset");
         assert_eq!(players[1].name, "Bo");
         assert!(matches!(recv(&mut a).await, ServerMsg::Joined { player } if player.id == 2));
 
@@ -293,7 +295,7 @@ mod tests {
         let (mut a, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         a.send(text(&ClientMsg::Join { code: "ZZZZZ".into(), name: "x".into(), version: PROTOCOL_VERSION })).await.unwrap();
         assert!(matches!(recv(&mut a).await, ServerMsg::Error { .. }));
-        a.send(text(&ClientMsg::Host { name: "x".into(), seed: 1, version: 999 })).await.unwrap();
+        a.send(text(&ClientMsg::Host { name: "x".into(), seed: 1, version: 999, config: None })).await.unwrap();
         assert!(matches!(recv(&mut a).await, ServerMsg::Error { .. }));
     }
 }
