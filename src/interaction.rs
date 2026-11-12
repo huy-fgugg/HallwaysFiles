@@ -14,6 +14,8 @@ use crate::state::{gameplay_active, AppState};
 
 pub const REACH: f32 = 2.3;
 /// Seconds a player may stay hidden before being forced out.
+/// Vitality lost for opening a fake door on a choice wall.
+pub const FAKE_DOOR_DAMAGE: f32 = 25.0;
 pub const HIDE_LIMIT: f32 = 10.0;
 pub const HIDE_WARN: f32 = 7.0;
 const HIDE_TRANSITION: f32 = 0.45;
@@ -283,18 +285,18 @@ fn interact(
         InteractKind::Door => {
             let Ok(mut door) = doors.get_mut(e) else { return };
             if door.mimic {
-                // Mimic: the "door" lunges. Damage, scare, and a lesson.
+                // Fake door: it lunges. Damage, scare, and a lesson.
                 commands.entity(e).try_remove::<Interactable>();
                 if let (Some(rt), Ok(m)) = (runtime.as_mut(), mimics.get(e)) {
-                    rt.mimics_triggered.insert(m.0);
+                    rt.mimics_triggered.insert((m.0, m.1));
                 }
                 run.mimics_fooled += 1;
                 shake.add(0.8);
                 sfx.write(PlaySfx(Sfx::Stinger));
-                subs.write(Subtitle::danger(format!("It was a Mimic: the plaque said {:03}. Check the numbers.", door.number)));
-                if run.damage(40.0) {
+                subs.write(Subtitle::danger(format!("Wrong door! It said {:03}, not {:03}. -{} vitality", door.number, run.current_room + 1, FAKE_DOOR_DAMAGE as u32)));
+                if run.damage(FAKE_DOOR_DAMAGE) {
                     *death = crate::hollow::DeathCause {
-                        title: "A MIMIC DOOR GOT YOU".into(),
+                        title: "YOU PICKED THE WRONG DOOR".into(),
                         cause: format!("You opened a fake door numbered {:03} in Room {:03}.", door.number, run.current_room),
                         lesson: "Real doors count up by one. Read the plaque before you open: if the number is wrong, it's a Mimic.".into(),
                     };

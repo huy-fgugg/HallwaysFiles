@@ -23,16 +23,24 @@ const ROOM_SHOTS: &[(&str, u32, f32)] = &[
     ("27_hush", 0, 0.0),
     ("28_dark_flashlight", 0, 0.0),
     ("29_inventory", 4, 0.0),
+    ("30_raised_exit", 0, 0.0),
+    ("31_entry_landing", 0, 0.0),
+    ("32_key_loft", 0, 0.0),
+    ("33_fake_doors", 0, 0.0),
 ];
 
 /// For special shots, find a suitable room in this seed's floor.
 fn pick_room(label: &str, plan: &crate::floor::plan::FloorPlan) -> Option<(u32, Option<crate::floor::plan::Encounter>)> {
-    use crate::floor::plan::{Encounter, LightState, RoomKind};
+    use crate::floor::plan::{Encounter, Feature, LightState, RoomKind};
     let lit = |r: &&crate::floor::plan::RoomPlan| r.light != LightState::Dark && r.kind != RoomKind::Hall && r.encounter.is_none();
     match label {
         "26_gallery" => plan.rooms.iter().filter(|r| r.index >= 30).find(lit).map(|r| (r.index, Some(Encounter::Gallery))),
         "27_hush" => plan.rooms.iter().filter(|r| r.index >= 50).find(lit).map(|r| (r.index, Some(Encounter::Hush))),
         "28_dark_flashlight" => plan.rooms.iter().find(|r| r.light == LightState::Dark && r.index >= 10 && r.encounter.is_none()).map(|r| (r.index, None)),
+        "30_raised_exit" => plan.rooms.iter().find(|r| matches!(r.feature, Some(Feature::RaisedExit { .. }))).map(|r| (r.index, None)),
+        "31_entry_landing" => plan.rooms.iter().find(|r| r.entry_height > 0.0).map(|r| (r.index, None)),
+        "32_key_loft" => plan.rooms.iter().find(|r| matches!(r.feature, Some(Feature::KeyLoft { .. }))).map(|r| (r.index, None)),
+        "33_fake_doors" => plan.rooms.iter().filter(|r| r.mimics.len() >= 2).max_by_key(|r| r.mimics.len()).map(|r| (r.index, None)),
         _ => None,
     }
 }
@@ -165,11 +173,22 @@ fn run_capture(
             next_overlay.set(crate::state::Overlay::None);
         }
         if cap.frames < 6 {
-            tf.translation = Vec3::new(r.entry_x, 0.0, r.max.y - 0.8);
-            let target = Vec3::new(r.exit_x, 0.0, r.min.y);
+            tf.translation = Vec3::new(r.entry_x, r.entry_height, r.max.y - 0.8);
+            let mut target = Vec3::new(r.exit_x, 0.0, r.min.y);
+            pl.pitch = 0.05;
+            if label.starts_with("32") {
+                if let Some(crate::floor::plan::Feature::KeyLoft { east }) = r.feature {
+                    let wall = if east { r.max.x } else { r.min.x };
+                    tf.translation = Vec3::new(r.center().x - (wall - r.center().x).signum() * 0.8, 0.0, r.max.y - 0.6);
+                    target = Vec3::new(wall, 0.0, r.min.y + 3.0);
+                    pl.pitch = 0.12;
+                }
+            }
+            if label.starts_with("31") {
+                pl.pitch = -0.55;
+            }
             let d = target - tf.translation;
             pl.yaw = (-d.x).atan2(-d.z);
-            pl.pitch = 0.05;
         }
         if cap.timer > 6.0 && cap.frames > 24 && !cap.shot_taken {
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(format!("{}/{}.png", cap.dir, label)));

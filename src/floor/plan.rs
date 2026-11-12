@@ -18,6 +18,8 @@ pub const FINAL_DOOR: u32 = LAST_ROOM + 1;
 pub const START_Z: f32 = -14.2;
 pub const WALL_T: f32 = 0.2;
 const DOOR_MARGIN: f32 = 0.95;
+/// Minimum centre-to-centre distance between doors on a choice wall.
+pub const FAKE_SPACING: f32 = 1.8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Area {
@@ -115,6 +117,26 @@ impl Encounter {
     }
 }
 
+/// Unusual architecture that turns a room into a small climb.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Feature {
+    /// Stairs climb to a landing; the exit door sits `height` above the floor
+    /// and the next room starts on a matching landing with stairs down.
+    RaisedExit { height: f32 },
+    /// The key waits in a chest on a loft up a staircase along a side wall.
+    KeyLoft { east: bool },
+}
+
+pub const LOFT_HEIGHT: f32 = 1.6;
+pub const STEP_RISE: f32 = 0.2;
+pub const STEP_RUN: f32 = 0.3;
+pub const LANDING_DEPTH: f32 = 1.3;
+
+/// Number of steps for a climb of `height`.
+pub fn steps_for(height: f32) -> usize {
+    (height / STEP_RISE).ceil() as usize
+}
+
 /// A fake door with the wrong number on the north wall.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mimic {
@@ -142,7 +164,11 @@ pub struct RoomPlan {
     pub hiding: bool,
     /// Entity encounter triggered on entering this room.
     pub encounter: Option<Encounter>,
-    pub mimic: Option<Mimic>,
+    /// Fake doors on the north wall (wrong numbers; opening one hurts).
+    pub mimics: Vec<Mimic>,
+    pub feature: Option<Feature>,
+    /// Entry landing height (when the previous room's exit is raised).
+    pub entry_height: f32,
     /// Per-room seed for furniture, loot and decor.
     pub seed: u64,
 }
@@ -225,6 +251,7 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
     let mut last_seen: std::collections::HashMap<Encounter, i64> = std::collections::HashMap::new();
     let mut last_any: i64 = -100;
     let mut last_key: i64 = -100;
+    let mut pending_entry = 0.0f32;
 
     for index in FIRST_ROOM..=LAST_ROOM {
         let mut rng = GameRng::fork(seed, u64::from(index));
@@ -276,6 +303,9 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
         };
         let width = (width * 10.0).round() / 10.0;
         let depth = (depth * 10.0).round() / 10.0;
+        // Rooms entered from a raised door need space for the stairs down.
+        let entry_height = std::mem::take(&mut pending_entry);
+        let depth = if entry_height > 0.0 { depth.max(7.0) } else { depth };
 
         // Centre so the entry door fits with a margin; drift gently, pull back toward x = 0.
         let lo = entry_x + DOOR_MARGIN - width / 2.0;
@@ -316,7 +346,7 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
                 let since = i64::from(index) - last_seen.get(&enc).copied().unwrap_or(-1000);
                 // Always draw the roll so the RNG stream doesn't depend on earlier outcomes.
                 let roll = rng.next_f32();
-                if chosen.is_none() && allowed && index >= t.min_room && since >= i64::from(t.cooldown) && roll < t.chance {
+                if chosen.is_none() && allowed && !(entry_height > 0.0 && enc.needs_hiding()) && index >= t.min_room && since >= i64::from(t.cooldown) && roll < t.chance {
                     chosen = Some(enc);
                 }
             }
@@ -337,16 +367,70 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
         };
         let hiding = surge || matches!(kind, RoomKind::Transition) || (kind != RoomKind::Final && rng.next_f32() < 0.45);
 
-        // Mimic door: needs room on the north wall away from the real exit.
-        let mimic = if index >= 10 && kind != RoomKind::Hall && kind != RoomKind::Final && rng.next_f32() < 0.16 {
-            let left = (min.x + DOOR_MARGIN, exit_x - 1.8);
-            let right = (exit_x + 1.8, max.x - DOOR_MARGIN);
-            let side = if rng.next_f32() < 0.5 { left } else { right };
-            let alt = if side == left { right } else { left };
-            let span = if side.1 > side.0 { Some(side) } else if alt.1 > alt.0 { Some(alt) } else { None };
-            span.map(|(a, b)| Mimic { x: ((rng.range_f32(a, b)) * 10.0).round() / 10.0, shown_number: wrong_number(&mut rng, index + 1) })
+        // ---- Weird architecture ----
+        let feature_roll = rng.next_f32();
+        let feature = if kind == RoomKind::KeyPuzzle && width >= 5.5 && depth >= 7.6 && feature_roll < 0.6 {
+            Some(Feature::KeyLoft { east: rng.next_f32() < 0.5 })
+        } else if index >= 8
+            && index + 2 < LAST_ROOM
+            && entry_height == 0.0
+            && !surge
+            && matches!(kind, RoomKind::Loot | RoomKind::Dark)
+            && depth >= 7.5
+            && feature_roll < 0.14
+        {
+            let height = if rng.next_f32() < 0.5 { 1.2 } else { 1.6 };
+            Some(Feature::RaisedExit { height })
         } else {
             None
+        };
+        if let Some(Feature::RaisedExit { height }) = feature {
+            pending_entry = height;
+        }
+
+        // Fake doors: a "choice wall" of look-alike doors around the real exit.
+        // Only the real door shows the next number; every fake shows a wrong one.
+        let mimics = if index >= 5 && feature.is_none() && !matches!(kind, RoomKind::Hall | RoomKind::Final | RoomKind::Transition) {
+            let chance = if index < 20 { 0.06 } else { 0.11 };
+            if rng.next_f32() < chance {
+                // Candidate slots along the north wall, clear of the real exit.
+                let mut slots = Vec::new();
+                let mut x = min.x + DOOR_MARGIN;
+                while x <= max.x - DOOR_MARGIN + 1e-3 {
+                    if (x - exit_x).abs() >= FAKE_SPACING {
+                        slots.push((x * 10.0).round() / 10.0);
+                    }
+                    x += FAKE_SPACING;
+                }
+                // Shuffle deterministically, then keep fakes that don't overlap each other.
+                for i in (1..slots.len()).rev() {
+                    let j = rng.below(i as u32 + 1) as usize;
+                    slots.swap(i, j);
+                }
+                let want = 1 + rng.below(3) as usize;
+                let mut picked: Vec<Mimic> = Vec::new();
+                for sx in slots {
+                    if picked.len() >= want {
+                        break;
+                    }
+                    if picked.iter().all(|m| (m.x - sx).abs() >= FAKE_SPACING) {
+                        let mut n = wrong_number(&mut rng, index + 1);
+                        for _ in 0..6 {
+                            if picked.iter().all(|m| m.shown_number != n) {
+                                break;
+                            }
+                            n = wrong_number(&mut rng, index + 1);
+                        }
+                        picked.push(Mimic { x: sx, shown_number: n });
+                    }
+                }
+                picked.sort_by(|a, b| a.x.total_cmp(&b.x));
+                picked
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
         };
 
         rooms.push(RoomPlan {
@@ -356,13 +440,22 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
             light,
             min,
             max,
-            height: area.ceiling(),
+            height: {
+                let climb = match feature {
+                    Some(Feature::RaisedExit { height }) => height,
+                    _ => 0.0,
+                }
+                .max(entry_height);
+                if climb > 0.0 { area.ceiling().max(climb + 2.9) } else { area.ceiling() }
+            },
             entry_x,
             exit_x,
             containers,
             hiding,
             encounter,
-            mimic,
+            mimics,
+            feature,
+            entry_height,
             seed: rng.next_u64(),
         });
         history.push(kind);
@@ -483,13 +576,68 @@ mod tests {
     fn mimics_never_show_the_real_number() {
         for seed in 0..100 {
             for r in generate(seed).rooms {
-                if let Some(m) = r.mimic {
+                for (i, m) in r.mimics.iter().enumerate() {
                     assert_ne!(m.shown_number, r.exit_door());
                     assert!((m.x - r.exit_x).abs() >= 1.7, "mimic overlaps real door");
                     assert!(m.x - 0.5 >= r.min.x && m.x + 0.5 <= r.max.x);
+                    for o in &r.mimics[i + 1..] {
+                        assert!((o.x - m.x).abs() >= 1.7, "fake doors overlap");
+                    }
                 }
             }
         }
+    }
+
+    #[test]
+    fn choice_walls_are_common_later() {
+        let mut rooms_with_fakes = 0;
+        let mut multi = 0;
+        for seed in 0..20 {
+            for r in generate(seed).rooms {
+                if !r.mimics.is_empty() {
+                    rooms_with_fakes += 1;
+                    assert!(r.index >= 5);
+                }
+                if r.mimics.len() >= 2 {
+                    multi += 1;
+                }
+            }
+        }
+        assert!(rooms_with_fakes > 60 && rooms_with_fakes < 400, "fake doors should be rare but present: {rooms_with_fakes}");
+        assert!(multi > 15, "multi-door choice walls too rare: {multi}");
+    }
+
+    #[test]
+    fn raised_exits_lead_to_landings() {
+        let mut raised = 0;
+        let mut lofts = 0;
+        for seed in 0..30 {
+            let plan = generate(seed);
+            for (i, r) in plan.rooms.iter().enumerate() {
+                match r.feature {
+                    Some(Feature::RaisedExit { height }) => {
+                        raised += 1;
+                        let next = &plan.rooms[i + 1];
+                        assert_eq!(next.entry_height, height);
+                        assert!(next.depth() >= 6.95);
+                        assert!(r.depth() >= 7.45);
+                        assert!(r.mimics.is_empty());
+                        assert!(!r.surge() && !next.surge(), "stair rooms need hiding space");
+                        assert!(next.feature.is_none() || !matches!(next.feature, Some(Feature::RaisedExit { .. })));
+                    }
+                    Some(Feature::KeyLoft { .. }) => {
+                        lofts += 1;
+                        assert_eq!(r.kind, RoomKind::KeyPuzzle);
+                    }
+                    None => {}
+                }
+                if i == 0 {
+                    assert_eq!(r.entry_height, 0.0);
+                }
+            }
+        }
+        assert!(raised > 20, "raised exits too rare: {raised}");
+        assert!(lofts > 10, "key lofts too rare: {lofts}");
     }
 
     #[test]

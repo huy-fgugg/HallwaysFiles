@@ -67,6 +67,19 @@ impl Aabb {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Collider(pub Aabb);
 
+/// A walkable top surface (stairs, landings, lofts). The floor at y = 0 is implicit.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Ground(pub Aabb);
+
+/// Highest walkable height under `pos` (XZ) that is at most `step` above `feet`.
+pub fn ground_height(pos: Vec3, feet: f32, step: f32, grounds: &[Aabb]) -> f32 {
+    grounds
+        .iter()
+        .filter(|g| pos.x >= g.min.x && pos.x <= g.max.x && pos.z >= g.min.z && pos.z <= g.max.z && g.max.y <= feet + step)
+        .map(|g| g.max.y)
+        .fold(0.0, f32::max)
+}
+
 /// Pushes a vertical cylinder (centre `pos` on the XZ plane, `radius`, spanning
 /// `y_min..y_max`) out of every box it overlaps. Returns the corrected
 /// position. Runs a few iterations so corners resolve cleanly.
@@ -119,6 +132,17 @@ pub fn resolve_cylinder(mut pos: Vec3, radius: f32, y_min: f32, y_max: f32, boxe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ground_steps_up_but_not_onto_ledges() {
+        let step = Aabb { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(1.0, 0.2, 1.0) };
+        let ledge = Aabb { min: Vec3::new(2.0, 0.0, 0.0), max: Vec3::new(3.0, 1.6, 1.0) };
+        let g = [step, ledge];
+        assert_eq!(ground_height(Vec3::new(0.5, 0.0, 0.5), 0.0, 0.38, &g), 0.2);
+        assert_eq!(ground_height(Vec3::new(2.5, 0.0, 0.5), 0.0, 0.38, &g), 0.0);
+        assert_eq!(ground_height(Vec3::new(2.5, 0.0, 0.5), 1.6, 0.38, &g), 1.6);
+        assert_eq!(ground_height(Vec3::new(5.0, 0.0, 0.5), 1.6, 0.38, &g), 0.0);
+    }
 
     fn wall() -> Aabb {
         Aabb::from_center_size(Vec3::new(0.0, 1.5, 0.0), Vec3::new(4.0, 3.0, 0.2))

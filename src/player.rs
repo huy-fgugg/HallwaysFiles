@@ -17,6 +17,9 @@ pub const CROUCH_SPEED: f32 = 1.6;
 pub const STAND_EYE: f32 = 1.62;
 pub const CROUCH_EYE: f32 = 1.0;
 pub const RADIUS: f32 = 0.3;
+/// Tallest ledge the player walks up without jumping (stair risers are 0.2).
+pub const STEP_UP: f32 = 0.38;
+const GRAVITY: f32 = 18.0;
 const BASE_MOUSE: f32 = 0.0022;
 const BASE_STICK: f32 = 2.6;
 
@@ -30,11 +33,13 @@ pub struct Player {
     pub speed: f32,
     bob_phase: f32,
     step_accum: f32,
+    /// Vertical speed while dropping off a ledge.
+    pub fall: f32,
 }
 
 impl Player {
     pub fn new(yaw: f32) -> Self {
-        Self { yaw, pitch: 0.0, eye: STAND_EYE, crouching: false, sprinting: false, speed: 0.0, bob_phase: 0.0, step_accum: 0.0 }
+        Self { yaw, pitch: 0.0, eye: STAND_EYE, crouching: false, sprinting: false, speed: 0.0, bob_phase: 0.0, step_accum: 0.0, fall: 0.0 }
     }
 }
 
@@ -92,6 +97,7 @@ fn movement(
     time: Res<Time>,
     hide: Res<HideState>,
     colliders: Query<&Collider>,
+    grounds: Query<&crate::physics::Ground>,
     player_q: Single<(&mut Player, &mut Transform)>,
     mut sfx: MessageWriter<PlaySfx>,
     boost: Res<crate::items::SpeedBoost>,
@@ -143,8 +149,25 @@ fn movement(
     let target = transform.translation + vel * dt;
     let eye_target = if crouch { CROUCH_EYE } else { STAND_EYE };
     player.eye += (eye_target - player.eye) * (dt * 10.0).min(1.0);
-    let resolved = resolve_cylinder(target, RADIUS, transform.translation.y, transform.translation.y + player.eye + 0.1, &boxes);
-    let moved = (resolved - transform.translation).length();
+    let feet = transform.translation.y;
+    // Low boxes (stair steps) are stepped over; ground snapping lifts the player.
+    let mut resolved = resolve_cylinder(target, RADIUS, feet + STEP_UP, feet + player.eye + 0.1, &boxes);
+    let floors: Vec<_> = grounds.iter().map(|g| g.0).collect();
+    let ground = crate::physics::ground_height(resolved, feet, STEP_UP, &floors);
+    if ground >= feet {
+        resolved.y = feet + (ground - feet) * (dt * 18.0).min(1.0);
+        if ground - resolved.y < 0.01 {
+            resolved.y = ground;
+        }
+        player.fall = 0.0;
+    } else {
+        player.fall += GRAVITY * dt;
+        resolved.y = (feet - player.fall * dt).max(ground);
+        if resolved.y <= ground {
+            player.fall = 0.0;
+        }
+    }
+    let moved = (Vec3::new(resolved.x, 0.0, resolved.z) - Vec3::new(transform.translation.x, 0.0, transform.translation.z)).length();
     transform.translation = resolved;
     player.speed = if dt > 0.0 { moved / dt } else { 0.0 };
 

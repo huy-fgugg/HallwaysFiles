@@ -35,7 +35,8 @@ pub struct FloorRuntime {
     pub opened: HashSet<u32>,
     pub searched: HashSet<(u32, u8)>,
     pub keys: HashSet<u32>,
-    pub mimics_triggered: HashSet<u32>,
+    /// Fake doors already opened: (room, slot).
+    pub mimics_triggered: HashSet<(u32, u8)>,
     pub surges_done: HashSet<u32>,
     pub loaded: HashSet<u32>,
     /// When Door 100 was opened (for the summary fade).
@@ -125,7 +126,7 @@ fn stream_rooms(
     // Build at most one room per frame to avoid hitches.
     if let Some(i) = wanted.clone().find(|i| !rt.loaded.contains(i)) {
         let Some(room) = floor.0.room(i) else { return };
-        let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None };
+        let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None, base_y: 0.0 };
         build::spawn_room(&mut b, room, &rt, &props, &asset_server, &mut images, &mut std_mats);
         build::final_door_surround(&mut b, room);
         rt.loaded.insert(i);
