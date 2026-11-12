@@ -1,0 +1,51 @@
+// HALLWAYS cutscene: the arrival lift (plays the first time you start a run each session).
+// Times are seconds; positions are (x, y, z) metres.
+// The lift car spans x -1..1, z 5.2..7.4 (gate at z 5.32); Room 000 is x -4..4, z -5..5.
+// Built-in music is synced to: descent drone 0-7, bell DING at 7.0, gate opens 7.6-9.0.
+// Music: drop music.ogg / music.mp3 / music.wav in this folder (see README.md).
+(
+    title: "Arrival",
+    duration: 14.0,
+    letterbox: true,
+    skippable: true,
+    shots: [
+        // Inside the car: high corner, looking at the closed gate and floor dial.
+        (start: 0.0, end: 4.0, fov: 62.0, ease: Linear,
+            from: At(pos: (0.75, 2.2, 7.25), look: (-0.15, 1.5, 5.2)),
+            to:   At(pos: (0.6, 2.1, 7.1), look: (-0.05, 1.6, 5.2))),
+        // Close on the dial as the needle sweeps down to the floor.
+        (start: 4.0, end: 6.8, fov: 34.0, ease: InOut,
+            from: At(pos: (0.25, 2.25, 6.25), look: (0.0, 2.37, 5.27)),
+            to:   At(pos: (0.1, 2.33, 5.85), look: (0.0, 2.37, 5.27))),
+        // Through the lattice as the gate rattles open.
+        (start: 6.8, end: 9.4, fov: 60.0, ease: InOut,
+            from: At(pos: (0.0, 1.5, 6.9), look: (0.0, 1.35, 0.0)),
+            to:   At(pos: (0.0, 1.55, 6.1), look: (0.0, 1.35, 0.0))),
+        // Wide from inside Room 000, looking back at the open lift.
+        (start: 9.4, end: 11.8, fov: 55.0, ease: InOut,
+            from: At(pos: (-2.8, 2.3, -1.0), look: (0.0, 1.3, 5.8)),
+            to:   At(pos: (-2.3, 2.1, 0.2), look: (0.0, 1.3, 5.8))),
+        (start: 11.8, end: 14.0, fov: 72.0, ease: InOut,
+            from: At(pos: (0.0, 2.0, 7.0), look: (0.0, 1.5, 0.0)),
+            to:   PlayerEye),
+    ],
+    events: [
+        (at: 0.0, do: Fade(alpha: 1.0, seconds: 0.0)),
+        (at: 0.1, do: Fade(alpha: 0.0, seconds: 2.0)),
+        (at: 0.2, do: Sfx(Rumble)),
+        (at: 0.5, do: Elevator(Needle(to: 1.0, seconds: 6.3))),
+        (at: 1.2, do: Subtitle(text: "[The lift groans as it descends]", seconds: 2.6)),
+        (at: 2.6, do: Lights(color: (1.0, 1.0, 1.0), amount: 0.0, scale: 1.0, flicker: 0.5)),
+        (at: 2.6, do: Shake(0.35)),
+        (at: 3.4, do: Lights(color: (1.0, 1.0, 1.0), amount: 0.0, scale: 1.0, flicker: 0.0)),
+        (at: 4.2, do: Subtitle(text: "[Floor 1]", seconds: 2.2)),
+        (at: 6.8, do: Shake(0.2)),
+        (at: 7.0, do: Sfx(Ding)),
+        (at: 7.6, do: Elevator(OpenGate(seconds: 1.4))),
+        (at: 7.8, do: Subtitle(text: "[The gate rattles open]", seconds: 2.0)),
+        (at: 9.6, do: Title(text: "H A L L W A Y S", sub: "FLOOR 1  -  THE GUEST WING", seconds: 3.4)),
+        (at: 11.9, do: Sfx(Whoosh)),
+        (at: 12.0, do: Subtitle(text: "Find the next door. Search the drawers. Listen to the lights.", seconds: 3.0)),
+    ],
+    end: GiveControl,
+)
