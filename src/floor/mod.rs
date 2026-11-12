@@ -20,7 +20,9 @@ use crate::state::{AppState, Overlay};
 use crate::world::materials::SurfaceMaterials;
 use crate::world::Builder;
 use build::{OpenOnSpawn, PropMaterials};
-use plan::{FloorPlan, RoomKind, FINAL_DOOR, FIRST_ROOM, LAST_ROOM};
+use plan::{FloorPlan, RoomKind, FINAL_DOOR, FIRST_ROOM};
+#[cfg(test)]
+use plan::LAST_ROOM;
 
 /// Tags every root entity of a generated room (for streaming).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,10 +72,10 @@ pub const KEEP_BEHIND: u32 = 1;
 pub const KEEP_AHEAD: u32 = 3;
 
 /// Pure helper: which generated rooms should exist when the player is in `current`.
-pub fn wanted_rooms(current: u32, gate_open: bool) -> std::ops::RangeInclusive<u32> {
+pub fn wanted_rooms(current: u32, gate_open: bool, last: u32) -> std::ops::RangeInclusive<u32> {
     let lo = current.saturating_sub(KEEP_BEHIND).max(FIRST_ROOM);
     let ahead = if gate_open || current >= FIRST_ROOM { KEEP_AHEAD } else { 1 };
-    let hi = (current.max(1) + ahead).min(LAST_ROOM);
+    let hi = (current.max(1) + ahead).min(last);
     lo..=hi
 }
 
@@ -99,6 +101,7 @@ fn setup_floor(
     profile: Res<crate::profile::Profile>,
     mut std_mats: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     use crate::profile::Modifier;
     let mut cfg = cfg.clone();
@@ -111,7 +114,7 @@ fn setup_floor(
     commands.insert_resource(Floor(plan::generate_with(seed.0, &cfg)));
     let light_scale = if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
     commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, ..default() });
-    commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes));
+    commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes, &mut images));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -131,7 +134,7 @@ fn stream_rooms(
 ) {
     let (Some(floor), Some(mats), Some(props)) = (floor, mats, props) else { return };
     let gate_open = chase.phase == ChasePhase::Done;
-    let wanted = wanted_rooms(run.current_room, gate_open);
+    let wanted = wanted_rooms(run.current_room, gate_open, floor.0.last_room);
     // Unload rooms that are out of range.
     let stale: Vec<u32> = rt.loaded.iter().copied().filter(|i| !wanted.contains(i)).collect();
     if !stale.is_empty() {
@@ -204,8 +207,9 @@ fn announce_areas(run: Res<RunState>, floor: Option<Res<Floor>>, mut last: Local
 }
 
 /// Opening Door 100 ends the floor: fade, then the run summary.
-fn finish_floor(time: Res<Time>, mut rt: ResMut<FloorRuntime>, run: Res<RunState>, mut next: ResMut<NextState<Overlay>>) {
-    if rt.opened.contains(&FINAL_DOOR) && rt.finished_at.is_none() {
+fn finish_floor(time: Res<Time>, floor: Option<Res<Floor>>, mut rt: ResMut<FloorRuntime>, run: Res<RunState>, mut next: ResMut<NextState<Overlay>>) {
+    let final_door = floor.map_or(FINAL_DOOR, |f| f.0.final_door());
+    if rt.opened.contains(&final_door) && rt.finished_at.is_none() {
         rt.finished_at = Some(run.elapsed);
     }
     if let Some(t) = rt.finished_at
@@ -224,9 +228,10 @@ mod tests {
     #[test]
     fn streaming_window() {
         // Before the gate opens only the first generated room is preloaded.
-        assert_eq!(wanted_rooms(0, false), 2..=2);
-        assert_eq!(wanted_rooms(1, true), 2..=4);
-        assert_eq!(wanted_rooms(10, true), 9..=13);
-        assert_eq!(wanted_rooms(99, true), 98..=99);
+        assert_eq!(wanted_rooms(0, false, LAST_ROOM), 2..=2);
+        assert_eq!(wanted_rooms(1, true, LAST_ROOM), 2..=4);
+        assert_eq!(wanted_rooms(10, true, LAST_ROOM), 9..=13);
+        assert_eq!(wanted_rooms(23, true, 24), 22..=24);
+        assert_eq!(wanted_rooms(99, true, LAST_ROOM), 98..=99);
     }
 }

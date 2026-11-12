@@ -60,7 +60,7 @@ struct Shard {
 /// through every doorway, at chest height.
 pub fn surge_path(plan: &FloorPlan, room: u32) -> Vec<Vec3> {
     let first = room.saturating_sub(3).max(crate::floor::plan::FIRST_ROOM);
-    let last = (room + 2).min(crate::floor::plan::LAST_ROOM);
+    let last = (room + 2).min(plan.last_room);
     let y = 1.4;
     let mut pts = vec![];
     if let Some(r) = plan.room(first) {
@@ -80,7 +80,7 @@ pub fn surge_path(plan: &FloorPlan, room: u32) -> Vec<Vec3> {
 pub fn undertow_path(plan: &FloorPlan, room: u32) -> Vec<Vec3> {
     let mut p = surge_path(plan, room);
     let first = room.saturating_sub(2).max(crate::floor::plan::FIRST_ROOM);
-    let last = (room + 1).min(crate::floor::plan::LAST_ROOM);
+    let last = (room + 1).min(plan.last_room);
     if let (Some(a), Some(b)) = (plan.room(first), plan.room(last)) {
         p.retain(|v| v.z <= a.max.y + 3.1 && v.z >= b.min.y - 1.0);
     }

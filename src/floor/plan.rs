@@ -21,21 +21,31 @@ const DOOR_MARGIN: f32 = 0.95;
 /// Minimum centre-to-centre distance between doors on a choice wall.
 pub const FAKE_SPACING: f32 = 1.8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Area {
     GuestWing,
     Archive,
     ServiceTunnels,
+    /// Outdoors: walled night gardens under an open sky.
+    Grounds,
     QuarryLift,
     Atrium,
 }
 
 impl Area {
+    pub const ALL: [Area; 6] = [Area::GuestWing, Area::Archive, Area::ServiceTunnels, Area::Grounds, Area::QuarryLift, Area::Atrium];
+
+    /// No ceiling: open sky.
+    pub fn outdoors(self) -> bool {
+        self == Area::Grounds
+    }
+
     pub fn for_room(i: u32) -> Area {
         match i {
             0..=20 => Area::GuestWing,
             21..=40 => Area::Archive,
-            41..=60 => Area::ServiceTunnels,
+            41..=50 => Area::ServiceTunnels,
+            51..=60 => Area::Grounds,
             61..=80 => Area::QuarryLift,
             _ => Area::Atrium,
         }
@@ -46,6 +56,7 @@ impl Area {
             Area::GuestWing => "The Guest Wing",
             Area::Archive => "The Archive",
             Area::ServiceTunnels => "The Service Tunnels",
+            Area::Grounds => "The Grounds",
             Area::QuarryLift => "The Quarry Lift",
             Area::Atrium => "The Atrium",
         }
@@ -56,6 +67,7 @@ impl Area {
             Area::GuestWing => 3.0,
             Area::Archive => 4.2,
             Area::ServiceTunnels => 2.8,
+            Area::Grounds => 3.6,
             Area::QuarryLift => 3.3,
             Area::Atrium => 6.0,
         }
@@ -67,6 +79,7 @@ impl Area {
             Area::GuestWing => ((5.0, 8.0), (5.0, 8.0)),
             Area::Archive => ((7.0, 10.0), (7.0, 10.0)),
             Area::ServiceTunnels => ((4.5, 6.5), (7.0, 12.0)),
+            Area::Grounds => ((8.0, 12.0), (8.0, 13.0)),
             Area::QuarryLift => ((5.0, 8.0), (6.0, 10.0)),
             Area::Atrium => ((10.0, 13.0), (9.0, 13.0)),
         }
@@ -199,9 +212,15 @@ impl RoomPlan {
 pub struct FloorPlan {
     pub seed: u64,
     pub rooms: Vec<RoomPlan>,
+    /// Last generated room (the final door is one higher).
+    pub last_room: u32,
 }
 
 impl FloorPlan {
+    pub fn final_door(&self) -> u32 {
+        self.last_room + 1
+    }
+
     pub fn room(&self, index: u32) -> Option<&RoomPlan> {
         index.checked_sub(FIRST_ROOM).and_then(|i| self.rooms.get(i as usize))
     }
@@ -239,11 +258,51 @@ fn wrong_number(rng: &mut GameRng, real: u32) -> u32 {
     real + 1
 }
 
+/// Knobs for custom floors (presets). `Default` is the classic 100-door floor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenOptions {
+    /// Last generated room; the final door is `last_room + 1`.
+    pub last_room: u32,
+    /// Areas in order, sharing the floor evenly. `None` = classic layout.
+    pub areas: Option<Vec<Area>>,
+    /// Room size multiplier.
+    pub size: f32,
+    /// Multiplier on the chance of dim and dark rooms.
+    pub darkness: f32,
+    pub fake_doors: f32,
+    pub stairs: f32,
+    pub loot: f32,
+}
+
+impl Default for GenOptions {
+    fn default() -> Self {
+        Self { last_room: LAST_ROOM, areas: None, size: 1.0, darkness: 1.0, fake_doors: 1.0, stairs: 1.0, loot: 1.0 }
+    }
+}
+
+impl GenOptions {
+    pub fn area_for(&self, index: u32) -> Area {
+        match &self.areas {
+            Some(list) if !list.is_empty() => {
+                let count = (self.last_room + 1 - FIRST_ROOM).max(1);
+                let k = ((index.saturating_sub(FIRST_ROOM)) as usize * list.len() / count as usize).min(list.len() - 1);
+                list[k]
+            }
+            _ => Area::for_room(index),
+        }
+    }
+}
+
 pub fn generate(seed: u64) -> FloorPlan {
     generate_with(seed, &EntityConfig::default())
 }
 
 pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
+    generate_custom(seed, cfg, &GenOptions::default())
+}
+
+pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> FloorPlan {
+    let last = opt.last_room.clamp(FIRST_ROOM + 4, LAST_ROOM);
     let mut rooms: Vec<RoomPlan> = Vec::new();
     let mut entry_x = 0.0f32;
     let mut south = START_Z;
@@ -253,13 +312,13 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
     let mut last_key: i64 = -100;
     let mut pending_entry = 0.0f32;
 
-    for index in FIRST_ROOM..=LAST_ROOM {
+    for index in FIRST_ROOM..=last {
         let mut rng = GameRng::fork(seed, u64::from(index));
-        let area = Area::for_room(index);
-        let first_of_area = index == FIRST_ROOM || Area::for_room(index - 1) != area;
+        let area = opt.area_for(index);
+        let first_of_area = index == FIRST_ROOM || opt.area_for(index - 1) != area;
 
         // ---- Kind (weighted, with cooldowns) ----
-        let kind = if index == LAST_ROOM {
+        let kind = if index == last {
             RoomKind::Final
         } else if first_of_area {
             RoomKind::Transition
@@ -270,7 +329,7 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
             let candidates = [
                 (RoomKind::Loot, 5.0),
                 (RoomKind::Hall, 2.2),
-                (RoomKind::Dark, if index >= 5 { dark_w } else { 0.0 }),
+                (RoomKind::Dark, if index >= 5 { dark_w * opt.darkness.clamp(0.0, 3.0) } else { 0.0 }),
                 (RoomKind::KeyPuzzle, if index >= 8 && i64::from(index) - last_key >= 6 { 1.3 } else { 0.0 }),
             ];
             let weights: Vec<f32> = candidates
@@ -301,6 +360,9 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
             RoomKind::Transition => (w1, d0.max(6.0)),
             _ => (rng.range_f32(w0, w1), rng.range_f32(d0, d1)),
         };
+        // Custom size, never so small that doors or stairs stop fitting.
+        let k = opt.size.clamp(0.5, 1.8);
+        let (width, depth) = if kind == RoomKind::Hall { (width, depth * k) } else { ((width * k).max(4.0), (depth * k).max(5.0)) };
         let width = (width * 10.0).round() / 10.0;
         let depth = (depth * 10.0).round() / 10.0;
         // Rooms entered from a raised door need space for the stairs down.
@@ -325,7 +387,7 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
             RoomKind::Dark => LightState::Dark,
             RoomKind::Transition | RoomKind::Final => LightState::Bright,
             _ => {
-                let dim_chance = if area == Area::ServiceTunnels { 0.5 } else { 0.3 };
+                let dim_chance = (if area == Area::ServiceTunnels { 0.5 } else { 0.3 }) * opt.darkness.clamp(0.0, 3.0);
                 if rng.next_f32() < dim_chance { LightState::Dim } else { LightState::Bright }
             }
         };
@@ -365,19 +427,20 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
             RoomKind::Final => 0,
             _ => 1 + rng.below(2) as u8,
         };
+        let containers = if kind == RoomKind::KeyPuzzle { containers } else { ((containers as f32 * opt.loot.clamp(0.0, 3.0)).round() as u8).min(5) };
         let hiding = surge || matches!(kind, RoomKind::Transition) || (kind != RoomKind::Final && rng.next_f32() < 0.45);
 
         // ---- Weird architecture ----
         let feature_roll = rng.next_f32();
-        let feature = if kind == RoomKind::KeyPuzzle && width >= 5.5 && depth >= 7.6 && feature_roll < 0.6 {
+        let feature = if kind == RoomKind::KeyPuzzle && width >= 5.5 && depth >= 7.6 && feature_roll < 0.6 * opt.stairs.clamp(0.0, 1.6) {
             Some(Feature::KeyLoft { east: rng.next_f32() < 0.5 })
         } else if index >= 8
-            && index + 2 < LAST_ROOM
+            && index + 2 < last
             && entry_height == 0.0
             && !surge
             && matches!(kind, RoomKind::Loot | RoomKind::Dark)
             && depth >= 7.5
-            && feature_roll < 0.14
+            && feature_roll < 0.14 * opt.stairs.clamp(0.0, 6.0)
         {
             let height = if rng.next_f32() < 0.5 { 1.2 } else { 1.6 };
             Some(Feature::RaisedExit { height })
@@ -391,7 +454,7 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
         // Fake doors: a "choice wall" of look-alike doors around the real exit.
         // Only the real door shows the next number; every fake shows a wrong one.
         let mimics = if index >= 5 && feature.is_none() && !matches!(kind, RoomKind::Hall | RoomKind::Final | RoomKind::Transition) {
-            let chance = if index < 20 { 0.06 } else { 0.11 };
+            let chance = (if index < 20 { 0.06 } else { 0.11 }) * opt.fake_doors.clamp(0.0, 8.0);
             if rng.next_f32() < chance {
                 // Candidate slots along the north wall, clear of the real exit.
                 let mut slots = Vec::new();
@@ -462,7 +525,7 @@ pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
         entry_x = exit_x;
         south = min.y - WALL_T;
     }
-    FloorPlan { seed, rooms }
+    FloorPlan { seed, rooms, last_room: last }
 }
 
 #[cfg(test)]
@@ -638,6 +701,36 @@ mod tests {
         }
         assert!(raised > 20, "raised exits too rare: {raised}");
         assert!(lofts > 10, "key lofts too rare: {lofts}");
+    }
+
+    #[test]
+    fn custom_floors() {
+        let opt = GenOptions { last_room: 24, areas: Some(vec![Area::Grounds, Area::Atrium]), size: 1.3, ..default_opts() };
+        let plan = generate_custom(5, &EntityConfig::default(), &opt);
+        assert_eq!(plan.last_room, 24);
+        assert_eq!(plan.final_door(), 25);
+        assert_eq!(plan.rooms.len(), 23);
+        assert_eq!(plan.rooms.last().unwrap().kind, RoomKind::Final);
+        assert!(plan.rooms.iter().take(11).all(|r| r.area == Area::Grounds));
+        assert!(plan.rooms.iter().skip(12).all(|r| r.area == Area::Atrium));
+        // Deterministic, and different options make a different floor.
+        assert_eq!(plan, generate_custom(5, &EntityConfig::default(), &opt));
+        assert_ne!(plan, generate(5));
+        // No fake doors when they're turned off; lots when turned up.
+        let none = generate_custom(5, &EntityConfig::default(), &GenOptions { fake_doors: 0.0, ..default_opts() });
+        assert!(none.rooms.iter().all(|r| r.mimics.is_empty()));
+    }
+
+    #[test]
+    fn classic_floor_has_outdoor_grounds() {
+        let plan = generate(1);
+        assert_eq!(plan.room(55).unwrap().area, Area::Grounds);
+        assert_eq!(plan.room(45).unwrap().area, Area::ServiceTunnels);
+        assert_eq!(plan.final_door(), FINAL_DOOR);
+    }
+
+    fn default_opts() -> GenOptions {
+        GenOptions::default()
     }
 
     #[test]
