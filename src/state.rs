@@ -25,6 +25,7 @@ pub enum Overlay {
     Settings,
     Credits,
     Play,
+    Admin,
     Dead,
     Summary,
 }
@@ -37,6 +38,7 @@ pub enum Screen {
     Settings,
     Credits,
     Play,
+    Admin,
     Death,
     Summary,
 }
@@ -52,6 +54,7 @@ impl ComputedStates for Screen {
             (AppState::MainMenu, Overlay::Play) => Screen::Play,
             (AppState::MainMenu, _) => Screen::MainMenu,
             (AppState::Playing, Overlay::Pause) => Screen::Pause,
+            (AppState::Playing, Overlay::Admin) => Screen::Admin,
             (AppState::Playing, Overlay::Dead) => Screen::Death,
             (AppState::Playing, Overlay::Summary) => Screen::Summary,
             (AppState::Playing, _) => Screen::Hud,

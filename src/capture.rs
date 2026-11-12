@@ -27,6 +27,8 @@ const ROOM_SHOTS: &[(&str, u32, f32)] = &[
     ("31_entry_landing", 0, 0.0),
     ("32_key_loft", 0, 0.0),
     ("33_fake_doors", 0, 0.0),
+    ("35_admin_panel", 4, 0.0),
+    ("36_jumpscare", 4, 0.0),
 ];
 
 /// For special shots, find a suitable room in this seed's floor.
@@ -99,6 +101,7 @@ fn run_capture(
     (mut force, mut inv): (ResMut<crate::encounters::ForceEncounter>, ResMut<crate::items::Inventory>),
     (mut run, app_overlay, mut next_overlay): (ResMut<crate::run::RunState>, Res<State<crate::state::Overlay>>, ResMut<NextState<crate::state::Overlay>>),
     mut lobby: ResMut<crate::lobby::LiftLobby>,
+    (mut admin, mut effects): (ResMut<crate::admin::AdminUnlocked>, MessageWriter<crate::admin::AdminEffect>),
 ) {
     cap.timer += time.delta_secs();
     cap.frames += 1;
@@ -179,6 +182,17 @@ fn run_capture(
         }
         // The capture camera can't look away or hide, so it never takes damage.
         run.vitality = 100.0;
+        if label.starts_with("35") {
+            admin.0 = true;
+            if *app_overlay.get() != crate::state::Overlay::Admin && cap.frames > 8 {
+                next_overlay.set(crate::state::Overlay::Admin);
+            }
+        } else if *app_overlay.get() == crate::state::Overlay::Admin {
+            next_overlay.set(crate::state::Overlay::None);
+        }
+        if label.starts_with("36") && cap.frames > 20 {
+            effects.write(crate::admin::AdminEffect { action: crate::admin::AdminAction::Jumpscare, by: "QA".into() });
+        }
         if *app_overlay.get() == crate::state::Overlay::Dead {
             next_overlay.set(crate::state::Overlay::None);
         }

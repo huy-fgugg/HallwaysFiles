@@ -19,14 +19,16 @@ pub enum FieldKind {
     Name,
     Seed,
     Code,
+    AdminCode,
 }
 
 impl FieldKind {
     fn label(self) -> &'static str {
         match self {
-            FieldKind::Name => "NAME",
+            FieldKind::Name => "YOUR NAME",
             FieldKind::Seed => "SEED",
             FieldKind::Code => "ROOM CODE",
+            FieldKind::AdminCode => "CODE",
         }
     }
 
@@ -35,6 +37,7 @@ impl FieldKind {
             FieldKind::Name => 16,
             FieldKind::Seed => 24,
             FieldKind::Code => 5,
+            FieldKind::AdminCode => 5,
         }
     }
 
@@ -43,6 +46,7 @@ impl FieldKind {
             FieldKind::Name => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::Seed => c.is_ascii_graphic() || c == ' ',
             FieldKind::Code => c.is_ascii_alphanumeric(),
+            FieldKind::AdminCode => c.is_ascii_digit(),
         }
     }
 }
@@ -89,11 +93,13 @@ impl Plugin for PlayMenuPlugin {
                 t.0 = false;
                 *p = Pending::None;
             })
-            .add_systems(Update, (type_into_fields, play_actions, refresh_labels, room_ready).chain().run_if(in_state(Screen::Play)));
+            .add_systems(Update, type_into_fields.run_if(|s: Option<Res<State<Screen>>>| s.is_some_and(|s| matches!(s.get(), Screen::Play | Screen::Admin))))
+            .add_systems(OnExit(Screen::Admin), |mut t: ResMut<Typing>| t.0 = false)
+            .add_systems(Update, (play_actions, refresh_labels, room_ready).chain().after(type_into_fields).run_if(in_state(Screen::Play)));
     }
 }
 
-fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: FieldKind, value: &str, order: i32) {
+pub fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: FieldKind, value: &str, order: i32) {
     parent
         .spawn((
             Node {
@@ -125,6 +131,7 @@ fn spawn_play(mut commands: Commands, theme: Res<UiTheme>, profile: Res<Profile>
                 // ---- Left: who / where ----
                 cols.spawn(t.panel(430.0)).with_children(|p| {
                     field_row(p, &t, FieldKind::Name, &profile.name, 0);
+                    p.spawn(t.dim_text("Click the box and type. Other players see this name over your head."));
                     field_row(p, &t, FieldKind::Seed, &profile.seed_text, 1);
                     p.spawn(t.dim_text("Leave the seed empty for a new floor every run."));
                     let solo = spawn_button(p, &t, "Solo Run", MenuAction::PlaySolo, 2, true);
@@ -156,15 +163,29 @@ fn spawn_play(mut commands: Commands, theme: Res<UiTheme>, profile: Res<Profile>
 }
 
 fn type_into_fields(
-    focus: Res<InputFocus>,
+    mut focus: ResMut<InputFocus>,
     mut typing: ResMut<Typing>,
     mut keys: MessageReader<KeyboardInput>,
     mut fields: Query<(Entity, &mut TextField, &mut BorderColor, &Children)>,
     mut texts: Query<&mut Text, With<FieldText>>,
     theme: Res<UiTheme>,
+    mut focus_once: Local<bool>,
     time: Res<Time<Real>>,
     mut profile: ResMut<Profile>,
 ) {
+    // First visit with the default name: put the cursor in the name box.
+    if !*focus_once {
+        *focus_once = true;
+        if profile.name == "Player" {
+            if let Some((e, ..)) = fields.iter().find(|(_, f, ..)| f.kind == FieldKind::Name) {
+                *focus = InputFocus::from_entity(e);
+                // Start the default name blank so typing replaces it.
+                if let Ok((_, mut f, ..)) = fields.get_mut(e) {
+                    f.value.clear();
+                }
+            }
+        }
+    }
     let focused = focus.get();
     typing.0 = focused.is_some_and(|f| fields.contains(f));
     let events: Vec<KeyboardInput> = keys.read().cloned().collect();
@@ -190,20 +211,23 @@ fn type_into_fields(
                 }
             }
             match field.kind {
-                FieldKind::Name => profile.name = field.value.clone(),
+                // An emptied box keeps the old name until something is typed.
+                FieldKind::Name if !field.value.trim().is_empty() => profile.name = field.value.clone(),
+                FieldKind::Name => {}
                 FieldKind::Seed => profile.seed_text = field.value.clone(),
-                FieldKind::Code => {}
+                FieldKind::Code | FieldKind::AdminCode => {}
             }
         }
         let caret = if active && (time.elapsed_secs() * 2.0) as i32 % 2 == 0 { "_" } else { " " };
         let shown = if field.value.is_empty() && !active {
             match field.kind {
                 FieldKind::Seed => "random".to_string(),
-                FieldKind::Code => "-----".to_string(),
+                FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
                 FieldKind::Name => String::new(),
             }
         } else {
-            format!("{}{caret}", field.value)
+            let v = if field.kind == FieldKind::AdminCode { "*".repeat(field.value.len()) } else { field.value.clone() };
+            format!("{v}{caret}")
         };
         for c in children.iter() {
             if let Ok(mut t) = texts.get_mut(c) {

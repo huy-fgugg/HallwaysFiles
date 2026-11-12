@@ -18,6 +18,8 @@ use crate::run::{RunState, Subtitle};
 use crate::state::{gameplay_active, AppState};
 
 pub const SLOTS: usize = 3;
+/// Every run begins with these.
+pub const STARTING_ITEMS: [ItemKind; 2] = [ItemKind::Flashlight, ItemKind::Bandage];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ItemKind {
@@ -174,6 +176,10 @@ impl Plugin for ItemsPlugin {
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands, mut profile: ResMut<crate::profile::Profile>, cfg: Res<ItemConfig>| {
                 // Items bought in the shop are handed over once, at the start of a run.
                 let mut inv = Inventory::default();
+                // Nobody starts empty-handed: a flashlight and a bandage, plus shop items.
+                for k in STARTING_ITEMS {
+                    inv.add(k, &cfg);
+                }
                 if !profile.loadout.is_empty() {
                     for k in std::mem::take(&mut profile.loadout) {
                         inv.add(k, &cfg);
@@ -229,13 +235,13 @@ fn follow_camera(
     let Ok(cam) = cam.single() else { return };
     let (_, rot, pos) = cam.to_scale_rotation_translation();
     for mut tf in &mut light {
-        // Held slightly low and to the right, like a hand torch.
-        tf.translation = pos + rot * Vec3::new(0.18, -0.15, -0.1);
+        // Starts just past the first-person hands so it lights the room, not your own arms.
+        tf.translation = pos + rot * Vec3::new(0.12, -0.12, -0.62);
         tf.rotation = rot;
     }
-    // The pool sits ~1.3 m ahead, pulled back if a wall is closer.
+    // The pool sits ~2 m ahead (well past your hands), pulled back if a wall is closer.
     let fwd = rot * Vec3::NEG_Z;
-    let mut dist: f32 = 1.3;
+    let mut dist: f32 = 2.1;
     for c in &colliders {
         if let Some(t) = c.0.ray_hit(pos, fwd, dist)
             && !c.0.contains(pos)

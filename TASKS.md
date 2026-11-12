@@ -73,6 +73,12 @@
 - [x] Doors opened by anyone open for everyone
 - [ ] Shared entity encounters (each player currently runs their own)
 
+## Requested extras
+- [x] Name box on the Play screen (focused on first visit), shown over your head online
+- [x] Overhand torch grip: fist wraps held items; arms drawn by their own camera so lights and walls don't affect them
+- [x] Every run starts with a flashlight and a bandage
+- [x] Admin panel (F8, code-locked): spawn items; kill, revive or jumpscare any player
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [ ] Windows installer/zip and Linux .deb release
 - [ ] Packaged-build QA checklist on real hardware

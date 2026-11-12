@@ -18,6 +18,8 @@ pub struct RunState {
     pub best_room: u32,
     /// Fragile modifier: 50% more damage.
     pub fragile: bool,
+    /// Lumens already banked (a revived player who dies again isn't paid twice).
+    pub banked: bool,
 }
 
 impl RunState {

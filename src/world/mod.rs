@@ -539,8 +539,8 @@ fn spawn_test_level(
         if i == 0 && loot.is_none() {
             loot = Some(3); // guarantee something to find
         }
-        // Every run's first drawer holds a flashlight.
-        let item = (i == 0).then_some(crate::items::ItemKind::Flashlight);
+        // Every run's first drawer holds vitamins (you already carry a flashlight).
+        let item = (i == 0).then_some(crate::items::ItemKind::Vitamins);
         let owner = b
             .commands
             .spawn((Drawer { open: false, t: 0.0, loot, searched: false, has_key: false, tag: None, item }, Interactable { kind: InteractKind::Drawer, aabb }, DespawnOnExit(AppState::Playing)))
