@@ -1,9 +1,5 @@
 # Credits
 
-## HALLWAYS
-Design, code, primitive-built models (doors, elevator, lockers, tool chests, bookshelves, crates, timber frames, The Hollow, The Surge, room shells) and the procedural score and sound effects were created for this project.
-Built with [Bevy](https://bevy.org) (MIT / Apache-2.0).
-
 ## 3D models (Poly Haven, CC0 1.0)
 | Asset | Author(s) |
 |---|---|
@@ -35,7 +31,4 @@ Source: https://polyhaven.com (CC0: no attribution required; credited anyway).
 IBM Plex Mono, © IBM Corp., SIL Open Font License 1.1 (`assets/fonts/IBMPlexMono-OFL.txt`).
 
 ## Music
-Original procedural score. Drop-in tracks are credited in `assets/music/CREDITS.txt`.
-
-## Inspiration
-Inspired by room-by-room horror games such as DOORS (LSPLASH). HALLWAYS is an independent project and is not affiliated with or endorsed by them. It uses none of their assets, characters or music.
+Tracks are credited in `assets/music/CREDITS.txt`.

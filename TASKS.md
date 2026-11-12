@@ -79,6 +79,13 @@
 - [x] Every run starts with a flashlight and a bandage
 - [x] Admin panel (F8, code-locked): spawn items; kill, revive or jumpscare any player
 
+## 1.0.1
+- [x] Graphics quality setting (Low / Medium / High; Medium default); `--low` start-up switch and Low Graphics / Compatibility launchers
+- [x] Heavy effects (SSAO, TAA, bloom) are only added at High/Medium, never on the first frame for Low
+- [x] crash.log written to the settings folder on any crash
+- [x] Credits screen: asset credits only; legal notices moved to assets/legal; README removed
+- [x] Room number removed from the HUD
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
 - [x] .deb installed and launched in a clean Linux container (menu renders, assets found)

@@ -21,10 +21,12 @@ pub enum SettingField {
     ReduceFlashing,
     LimitLoudSounds,
     Fullscreen,
+    Graphics,
 }
 
 impl SettingField {
-    pub const ALL: [SettingField; 10] = [
+    pub const ALL: [SettingField; 11] = [
+        SettingField::Graphics,
         SettingField::MouseSensitivity,
         SettingField::InvertY,
         SettingField::MasterVolume,
@@ -49,6 +51,7 @@ impl SettingField {
             SettingField::ReduceFlashing => "Reduce flashing",
             SettingField::LimitLoudSounds => "Limit loud sounds",
             SettingField::Fullscreen => "Display mode",
+            SettingField::Graphics => "Graphics quality",
         }
     }
 
@@ -67,6 +70,7 @@ impl SettingField {
             SettingField::ReduceFlashing => on_off(s.reduce_flashing),
             SettingField::LimitLoudSounds => on_off(s.limit_loud_sounds),
             SettingField::Fullscreen => if s.fullscreen { "FULLSCREEN".into() } else { "WINDOWED".into() },
+            SettingField::Graphics => s.graphics.label().into(),
         }
     }
 
@@ -98,6 +102,7 @@ impl SettingField {
             SettingField::ReduceFlashing => s.reduce_flashing = !s.reduce_flashing,
             SettingField::LimitLoudSounds => s.limit_loud_sounds = !s.limit_loud_sounds,
             SettingField::Fullscreen => s.fullscreen = !s.fullscreen,
+            SettingField::Graphics => s.graphics = s.graphics.step(delta),
         }
     }
 }

@@ -9,6 +9,52 @@ use std::path::PathBuf;
 
 pub const SETTINGS_VERSION: u32 = 1;
 
+/// Rendering quality. Low is for weak or integrated GPUs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Graphics {
+    /// No ambient occlusion, anti-aliasing, bloom or lamp shadows; small
+    /// shadow maps; conservative GPU limits. Runs on most integrated GPUs.
+    Low,
+    /// No ambient occlusion or temporal AA (cheap FXAA instead); bloom and
+    /// one shadowed lamp per room.
+    #[default]
+    Medium,
+    /// Everything on: SSAO, temporal AA, bloom, shadows.
+    High,
+}
+
+impl Graphics {
+    pub fn label(self) -> &'static str {
+        match self {
+            Graphics::Low => "LOW",
+            Graphics::Medium => "MEDIUM",
+            Graphics::High => "HIGH",
+        }
+    }
+
+    pub fn step(self, delta: i32) -> Self {
+        let order = [Graphics::Low, Graphics::Medium, Graphics::High];
+        let i = order.iter().position(|g| *g == self).unwrap_or(1) as i32;
+        let n = if delta == 0 { (i + 1) % 3 } else { (i + delta).clamp(0, 2) };
+        order[n as usize]
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "low" | "--low" => Some(Graphics::Low),
+            "medium" | "--medium" => Some(Graphics::Medium),
+            "high" | "--high" => Some(Graphics::High),
+            _ => None,
+        }
+    }
+
+    /// Start-up override so a game that crashes on launch can still be opened:
+    /// `hallways --low` or `HALLWAYS_GRAPHICS=low`.
+    pub fn startup_override() -> Option<Self> {
+        std::env::args().skip(1).find_map(|a| Graphics::parse(&a)).or_else(|| std::env::var("HALLWAYS_GRAPHICS").ok().and_then(|v| Graphics::parse(&v)))
+    }
+}
+
 #[derive(Resource, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -29,6 +75,7 @@ pub struct Settings {
     /// Caps the loudest stingers and failure sounds.
     pub limit_loud_sounds: bool,
     pub fullscreen: bool,
+    pub graphics: Graphics,
 }
 
 impl Default for Settings {
@@ -45,6 +92,7 @@ impl Default for Settings {
             reduce_flashing: false,
             limit_loud_sounds: false,
             fullscreen: false,
+            graphics: Graphics::default(),
         }
     }
 }
