@@ -26,16 +26,16 @@ These are original designs. The counters follow genre-standard rules (hide, look
 | Entity | Cue | Counter | Fail | Status |
 |---|---|---|---|---|
 | **The Hollow**: stooped figure of black tatters with a cracked porcelain mask and amber eye-slits; rises from a pool of ink | Lights stutter, then turn red; low rumble; ink on the floor | Break line of sight and **hide in a wardrobe**. It searches outside for 3 s, then sinks away | Caught if it reaches you while you're in the open | Done |
-| **The Surge**: a roaring wall of static and wind that tears down the hall | Lights strobe (slow pulse with Reduce Flashing), distant roar growing over 4–6 s, subtitle "[A roar builds in the walls]" | **Hide in a closet or wardrobe** before it passes | Caught in the open | Phase 3 |
+| **The Surge**: a roaring knot of crackling white-blue static shards with trailing streaks | Lights strobe (slow dim with Reduce Flashing), a roar builds over 3.2–5 s (shorter deeper in) | **Hide in a wardrobe or locker** until the lights settle. Surge rooms always have one | Caught in the open | Done |
 | **The Undertow**: like The Surge, but it passes back and forth 2–5 times | Same as The Surge but lower-pitched, with a "double-back" sound | Stay hidden until the lights stop flickering; leave between passes if your hide timer is low | Leaving too early | Phase 3 |
 | **The Whisperer**: a pale shape in dark rooms | Whispering from a random direction in a dark room | **Look straight at it** within 2.5 s | Ignored too long | Phase 3 |
 | **The Gallery**: a cluster of painted eyes that open on the walls | The room dims to violet, with a heartbeat | **Look away**; vitality drains while you look at it | Staring | Phase 3 |
 | **The Hush**: a pressure wave | Screen vignette and "STOP" prompt, all sound muffled | **Stop moving** until the prompt clears (2–4 s) | Moving | Phase 3 |
-| **Mimic Doors** | A door whose plaque number is wrong (skips or repeats) | **Check the numbers**; open the right one | Opening the mimic causes damage and a jump scare | Phase 2 |
+| **Mimic Doors** | A second door whose plaque number is wrong (skips, repeats or swaps digits) | **Check the numbers**; open the right one | 40 damage plus a scare; 3 hits is death | Done |
 
 Every entity's cue window is at least 2 s at default difficulty, and scales with floor depth.
 
-## Floor generation (Phase 2, target 100 doors)
+## Floor generation (Phase 2, done)
 - **Graph:** a linear spine of 100 numbered rooms with occasional side closets and dead-end branches. Seeded with `GameRng::fork(seed, room_index)` so each room is independent and reproducible.
 - **Areas** (original themes, changing every 20–30 rooms with a transition room):
   1. *The Guest Wing*: wallpaper, wainscoting, wardrobes, warm sconces (current art).

@@ -142,20 +142,31 @@ pub struct RoomStyle {
 }
 
 /// Small helper that owns the spawning context for level geometry.
-struct Builder<'a, 'w, 's> {
-    commands: &'a mut Commands<'w, 's>,
-    meshes: &'a mut Assets<Mesh>,
-    mats: SurfaceMaterials,
-    cache: HashMap<[i32; 4], Handle<Mesh>>,
+pub struct Builder<'a, 'w, 's> {
+    pub(crate) commands: &'a mut Commands<'w, 's>,
+    pub(crate) meshes: &'a mut Assets<Mesh>,
+    pub(crate) mats: SurfaceMaterials,
+    pub(crate) cache: HashMap<[i32; 4], Handle<Mesh>>,
     /// Which state owns (and despawns) what we build.
-    scope: AppState,
+    pub(crate) scope: AppState,
     /// When set, blocks are spawned as children of this entity in its local
     /// space, without colliders (used for decorative door assemblies).
-    parent: Option<Entity>,
+    pub(crate) parent: Option<Entity>,
+    /// Generated room this geometry belongs to (for streaming).
+    pub(crate) member: Option<u32>,
 }
 
 impl Builder<'_, '_, '_> {
-    fn mesh(&mut self, size: Vec3, tile: f32) -> Handle<Mesh> {
+    /// Adds the despawn scope and room membership to a root entity.
+    pub(crate) fn tag(&mut self, e: Entity) {
+        let mut ec = self.commands.entity(e);
+        ec.insert(DespawnOnExit(self.scope));
+        if let Some(m) = self.member {
+            ec.insert(crate::floor::RoomMember(m));
+        }
+    }
+
+    pub(crate) fn mesh(&mut self, size: Vec3, tile: f32) -> Handle<Mesh> {
         let key = [size.x, size.y, size.z, tile].map(|v| (v * 1000.0).round() as i32);
         if let Some(h) = self.cache.get(&key) {
             return h.clone();
@@ -166,7 +177,7 @@ impl Builder<'_, '_, '_> {
     }
 
     /// Spawns a textured box from world-space min/max corners.
-    fn block(&mut self, min: Vec3, max: Vec3, mat: &Handle<StandardMaterial>, tile: f32, solid: bool) -> Entity {
+    pub(crate) fn block(&mut self, min: Vec3, max: Vec3, mat: &Handle<StandardMaterial>, tile: f32, solid: bool) -> Entity {
         let size = (max - min).abs();
         let center = (min + max) * 0.5;
         let mesh = self.mesh(size, tile);
@@ -175,7 +186,9 @@ impl Builder<'_, '_, '_> {
             e.insert(ChildOf(p));
             return e.id();
         }
-        e.insert(DespawnOnExit(self.scope));
+        let id = e.id();
+        self.tag(id);
+        let mut e = self.commands.entity(id);
         if solid {
             e.insert(Collider(Aabb { min: min.min(max), max: min.max(max) }));
         }
@@ -183,14 +196,14 @@ impl Builder<'_, '_, '_> {
     }
 
     /// Child box in a parent's local space (used for door details).
-    fn part(&mut self, parent: Entity, center: Vec3, size: Vec3, mat: &Handle<StandardMaterial>, tile: f32) {
+    pub(crate) fn part(&mut self, parent: Entity, center: Vec3, size: Vec3, mat: &Handle<StandardMaterial>, tile: f32) {
         let mesh = self.mesh(size, tile);
         self.commands.entity(parent).with_child((Mesh3d(mesh), MeshMaterial3d(mat.clone()), Transform::from_translation(center)));
     }
 
     /// Builds floor, ceiling, walls (with openings) and interior trim for a room.
     /// Sides in `shared` get trim only (the neighbouring room owns that wall).
-    fn room(&mut self, min: Vec2, max: Vec2, height: f32, style: &RoomStyle, openings: &[Opening], shared: &[Side]) {
+    pub(crate) fn room(&mut self, min: Vec2, max: Vec2, height: f32, style: &RoomStyle, openings: &[Opening], shared: &[Side]) {
         let m = self.mats.clone();
         // Floor and ceiling.
         self.block(Vec3::new(min.x, -0.1, min.y), Vec3::new(max.x, 0.0, max.y), &style.floor, style.floor_tile, false);
@@ -279,7 +292,7 @@ impl Builder<'_, '_, '_> {
     /// A four-panel door with casing, lining, threshold, brass knobs, hinges and
     /// an engraved number plaque, in a north-facing wall whose room-side face
     /// is at z = `line` (the door swings toward -Z).
-    fn door(&mut self, cx: f32, line: f32, number: u32, locked: bool, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) -> Entity {
+    pub(crate) fn door(&mut self, cx: f32, line: f32, number: u32, locked: bool, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) -> Entity {
         let decor = self.parent.is_some();
         let m = self.mats.clone();
         let (w, h, t) = (DOOR_W, DOOR_H, WALL_T);
@@ -304,13 +317,9 @@ impl Builder<'_, '_, '_> {
         let blocker = if decor {
             Entity::PLACEHOLDER
         } else {
-            self.commands
-                .spawn((
-                    Transform::default(),
-                    Collider(Aabb { min: Vec3::new(x0, 0.0, z_far), max: Vec3::new(x1, h, z_room) }),
-                    DespawnOnExit(self.scope),
-                ))
-                .id()
+            let id = self.commands.spawn((Transform::default(), Collider(Aabb { min: Vec3::new(x0, 0.0, z_far), max: Vec3::new(x1, h, z_room) }))).id();
+            self.tag(id);
+            id
         };
 
         let leaf_w = w - 0.04;
@@ -321,15 +330,17 @@ impl Builder<'_, '_, '_> {
             root_cmd.insert(ChildOf(p));
         } else {
             root_cmd.insert((
-                Door { number, locked, open: false, t: 0.0, blocker },
+                Door::new(number, locked, blocker),
                 Interactable {
                     kind: InteractKind::Door,
                     aabb: Aabb { min: Vec3::new(x0, 0.0, z_far - 0.02), max: Vec3::new(x1, h, z_room + 0.05) },
                 },
-                DespawnOnExit(self.scope),
             ));
         }
         let root = root_cmd.id();
+        if self.parent.is_none() {
+            self.tag(root);
+        }
 
         let slab_t = 0.042;
         let half = slab_t / 2.0;
@@ -407,15 +418,16 @@ impl Builder<'_, '_, '_> {
 
     /// A non-interactive door assembly placed with an arbitrary transform
     /// (local +Z = the side the plaque faces).
-    fn decor_door(&mut self, tf: Transform, number: u32, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) {
-        let assembly = self.commands.spawn((tf, Visibility::default(), DespawnOnExit(self.scope))).id();
+    pub(crate) fn decor_door(&mut self, tf: Transform, number: u32, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) {
+        let assembly = self.commands.spawn((tf, Visibility::default())).id();
+        self.tag(assembly);
         self.parent = Some(assembly);
         self.door(0.0, 0.0, number, true, images, std_mats);
         self.parent = None;
     }
 }
 
-fn model(asset_server: &AssetServer, name: &str) -> WorldAssetRoot {
+pub(crate) fn model(asset_server: &AssetServer, name: &str) -> WorldAssetRoot {
     WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(format!("models/{name}/{name}.gltf"))))
 }
 
@@ -430,7 +442,7 @@ fn spawn_test_level(
 ) {
     let mats = materials::build(&asset_server, &mut std_mats);
     commands.insert_resource(mats.clone());
-    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None };
+    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None };
     let height = 3.0;
 
     // ---- Room 000: a faded sitting room -----------------------------------
@@ -473,8 +485,6 @@ fn spawn_test_level(
         ],
         &[Side::South],
     );
-    // Fill the space behind the corridor's far door so it reads as a real doorway.
-    b.block(Vec3::new(-0.6, -0.1, -14.0 - WALL_T - 0.6), Vec3::new(0.6, 2.2, -14.0 - WALL_T), &mats.void, 1.0, true);
 
     // Doors: 001 opens into the corridor; 002 is locked until Phase 2.
     let _ = b.door(0.0, -5.0, 1, false, &mut images, &mut std_mats);
@@ -501,7 +511,7 @@ fn spawn_test_level(
         }
         let owner = b
             .commands
-            .spawn((Drawer { open: false, t: 0.0, loot, searched: false }, Interactable { kind: InteractKind::Drawer, aabb }, DespawnOnExit(AppState::Playing)))
+            .spawn((Drawer { open: false, t: 0.0, loot, searched: false, has_key: false, tag: None }, Interactable { kind: InteractKind::Drawer, aabb }, DespawnOnExit(AppState::Playing)))
             .id();
         let node = ["drawer_cabinet_drawer_01", "drawer_cabinet_drawer_02", "drawer_cabinet_drawer_03", "drawer_cabinet_drawer_04"][i];
         bindings.push(PartBinding { node, owner, motion: PartMotion::Slide(Vec3::Z * 0.32), reset_rotation: false });
@@ -526,7 +536,7 @@ fn spawn_test_level(
         let owner = b
             .commands
             .spawn((
-                Drawer { open: false, t: 0.0, loot: loot_for(10 + i as u64), searched: false },
+                Drawer { open: false, t: 0.0, loot: loot_for(10 + i as u64), searched: false, has_key: false, tag: None },
                 Interactable { kind: InteractKind::Drawer, aabb },
                 DespawnOnExit(AppState::Playing),
             ))
@@ -724,7 +734,7 @@ pub fn spawn_menu_scene(
 ) {
     let mats = materials::build(&asset_server, &mut std_mats);
     let scope = AppState::MainMenu;
-    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope, parent: None };
+    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope, parent: None, member: None };
     let (x0, x1, z0, z1, h) = (-1.7f32, 1.7f32, -42.0f32, 3.0f32, 3.0f32);
     let style = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: true };
     let door_zs: Vec<f32> = (0..6).map(|i| -4.0 - i as f32 * 6.0).collect();
@@ -852,8 +862,14 @@ fn flicker_lights(
     }
 }
 
-fn track_room(player: Query<&Transform, With<Player>>, zones: Query<&RoomZone>, mut run: ResMut<RunState>) {
+fn track_room(player: Query<&Transform, With<Player>>, zones: Query<&RoomZone>, floor: Option<Res<crate::floor::Floor>>, mut run: ResMut<RunState>) {
     let Ok(p) = player.single() else { return };
+    if let Some(i) = floor.as_ref().and_then(|f| f.0.room_at_z(p.translation.z)) {
+        if run.current_room != i {
+            run.current_room = i;
+        }
+        return;
+    }
     let probe = p.translation + Vec3::Y;
     for z in &zones {
         if z.aabb.contains(probe) && run.current_room != z.number {

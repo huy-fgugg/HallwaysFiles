@@ -25,6 +25,7 @@ pub enum Overlay {
     Settings,
     Credits,
     Dead,
+    Summary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,6 +36,7 @@ pub enum Screen {
     Settings,
     Credits,
     Death,
+    Summary,
 }
 
 impl ComputedStates for Screen {
@@ -48,6 +50,7 @@ impl ComputedStates for Screen {
             (AppState::MainMenu, _) => Screen::MainMenu,
             (AppState::Playing, Overlay::Pause) => Screen::Pause,
             (AppState::Playing, Overlay::Dead) => Screen::Death,
+            (AppState::Playing, Overlay::Summary) => Screen::Summary,
             (AppState::Playing, _) => Screen::Hud,
         })
     }

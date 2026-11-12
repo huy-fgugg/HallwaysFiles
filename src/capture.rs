@@ -10,6 +10,16 @@ use bevy::{
 use crate::player::Player;
 use crate::state::AppState;
 
+/// Shots inside generated rooms: (label, room index, yaw). Positioned from the floor plan.
+const ROOM_SHOTS: &[(&str, u32, f32)] = &[
+    ("20_guest_wing", 4, 0.0),
+    ("21_archive", 24, 0.0),
+    ("22_tunnels", 44, 0.0),
+    ("23_quarry", 64, 0.0),
+    ("24_atrium", 84, 0.0),
+    ("25_final_door", 99, 0.0),
+];
+
 /// (label, feet position, yaw, pitch). `None` = main menu for the first
 /// shot, and "hold position, keep the clock running" afterwards (used to
 /// photograph cutscenes mid-play).
@@ -26,12 +36,6 @@ const SHOTS: &[Shot] = &[
     ("06_corner_chair", Some(Vec3::new(0.5, 0.0, 1.0)), 2.3, -0.15),
     ("07_commode", Some(Vec3::new(2.4, 0.0, -2.9)), 0.0, -0.3),
     ("08_corridor", Some(Vec3::new(0.0, 0.0, -6.0)), 0.0, 0.0),
-    // Walking past z = -7.5 triggers The Hollow cutscene; then hold and shoot.
-    ("09_hollow_trigger", Some(Vec3::new(0.0, 0.0, -7.8)), 0.0, 0.0),
-    ("10_hollow_pool", None, 0.0, 0.0),
-    ("11_hollow_rising", None, 0.0, 0.0),
-    ("12_hollow_mask", None, 0.0, 0.0),
-    ("13_hollow_end", None, 0.0, 0.0),
 ];
 
 #[derive(Resource)]
@@ -63,12 +67,43 @@ fn run_capture(
     app_state: Res<State<AppState>>,
     mut player: Query<(&mut Player, &mut Transform)>,
     mut exit: MessageWriter<AppExit>,
+    floor: Option<Res<crate::floor::Floor>>,
+    mut rt: Option<ResMut<crate::floor::FloorRuntime>>,
 ) {
     cap.timer += time.delta_secs();
     cap.frames += 1;
     let Some(&(label, pos, yaw, pitch)) = SHOTS.get(cap.index) else {
-        if cap.timer > 2.0 {
-            exit.write(AppExit::Success);
+        // Generated-floor tour: stand near each room's south side looking at its exit.
+        let k = cap.index - SHOTS.len();
+        let Some(&(label, room, _)) = ROOM_SHOTS.get(k) else {
+            if cap.timer > 2.0 {
+                exit.write(AppExit::Success);
+            }
+            return;
+        };
+        let (Some(floor), Ok((mut pl, mut tf))) = (floor, player.single_mut()) else { return };
+        let Some(r) = floor.0.room(room) else { return };
+        if let Some(rt) = rt.as_mut() {
+            // Pretend the doors behind are open so the view isn't blocked.
+            rt.surges_done.insert(room);
+        }
+        if cap.frames < 6 {
+            tf.translation = Vec3::new(r.entry_x, 0.0, r.max.y - 0.8);
+            let target = Vec3::new(r.exit_x, 0.0, r.min.y);
+            let d = target - tf.translation;
+            pl.yaw = (-d.x).atan2(-d.z);
+            pl.pitch = 0.05;
+        }
+        if cap.timer > 6.0 && cap.frames > 24 && !cap.shot_taken {
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(format!("{}/{}.png", cap.dir, label)));
+            cap.shot_taken = true;
+            cap.frames = 12;
+        }
+        if cap.shot_taken && cap.frames > 18 {
+            cap.index += 1;
+            cap.timer = 0.0;
+            cap.frames = 0;
+            cap.shot_taken = false;
         }
         return;
     };

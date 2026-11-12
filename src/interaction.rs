@@ -41,6 +41,16 @@ pub struct Door {
     pub t: f32,
     /// Entity whose collider must be removed once the door opens.
     pub blocker: Entity,
+    /// A fake door showing the wrong number: opening it hurts.
+    pub mimic: bool,
+    /// Locked until the key from this room's drawers is found.
+    pub key_room: Option<u32>,
+}
+
+impl Door {
+    pub fn new(number: u32, locked: bool, blocker: Entity) -> Self {
+        Self { number, locked, open: false, t: 0.0, blocker, mimic: false, key_room: None }
+    }
 }
 
 #[derive(Component, Debug)]
@@ -49,6 +59,10 @@ pub struct Drawer {
     pub t: f32,
     pub loot: Option<u32>,
     pub searched: bool,
+    /// Holds the key for this room's locked exit door.
+    pub has_key: bool,
+    /// (room, drawer id) for persistence on the generated floor.
+    pub tag: Option<(u32, u8)>,
 }
 
 #[derive(Component, Debug)]
@@ -145,7 +159,9 @@ pub fn prompt_text(
     Some(match kind {
         InteractKind::Door => {
             let d = doors.get(target).ok()?;
-            if d.locked {
+            if d.locked && d.key_room.is_some() {
+                (format!("Door {:03}  (needs key)", d.number), true)
+            } else if d.locked {
                 (format!("Try Door {:03}  (locked)", d.number), true)
             } else {
                 (format!("Open Door {:03}", d.number), false)
@@ -237,6 +253,9 @@ fn interact(
     mut run: ResMut<RunState>,
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
+    mut runtime: Option<ResMut<crate::floor::FloorRuntime>>,
+    mimics: Query<&crate::floor::build::MimicOf>,
+    (mut shake, mut death, mut next_overlay): (ResMut<CameraShake>, ResMut<crate::hollow::DeathCause>, ResMut<NextState<crate::state::Overlay>>),
 ) {
     if !interact_pressed(&keys, &pads) {
         return;
@@ -255,13 +274,55 @@ fn interact(
     match i.kind {
         InteractKind::Door => {
             let Ok(mut door) = doors.get_mut(e) else { return };
-            if door.locked {
-                sfx.write(PlaySfx(Sfx::DoorLocked));
-                subs.write(Subtitle::info("[Handle rattles] It won't budge. The rest of the floor isn't built yet."));
+            if door.mimic {
+                // Mimic: the "door" lunges. Damage, scare, and a lesson.
+                commands.entity(e).remove::<Interactable>();
+                if let (Some(rt), Ok(m)) = (runtime.as_mut(), mimics.get(e)) {
+                    rt.mimics_triggered.insert(m.0);
+                }
+                run.mimics_fooled += 1;
+                shake.add(0.8);
+                sfx.write(PlaySfx(Sfx::Stinger));
+                subs.write(Subtitle::danger(format!("It was a Mimic: the plaque said {:03}. Check the numbers.", door.number)));
+                if run.damage(40.0) {
+                    *death = crate::hollow::DeathCause {
+                        title: "A MIMIC DOOR GOT YOU".into(),
+                        cause: format!("You opened a fake door numbered {:03} in Room {:03}.", door.number, run.current_room),
+                        lesson: "Real doors count up by one. Read the plaque before you open: if the number is wrong, it's a Mimic.".into(),
+                    };
+                    next_overlay.set(crate::state::Overlay::Dead);
+                }
+            } else if door.locked {
+                let has_key = door.key_room.is_some_and(|k| runtime.as_ref().is_some_and(|rt| rt.keys.contains(&k)));
+                if has_key {
+                    door.locked = false;
+                    door.key_room = None;
+                    door.open = true;
+                    if door.blocker != Entity::PLACEHOLDER {
+                        commands.entity(door.blocker).remove::<Collider>();
+                    }
+                    commands.entity(e).remove::<Interactable>();
+                    if let Some(rt) = runtime.as_mut() {
+                        rt.opened.insert(door.number);
+                    }
+                    sfx.write(PlaySfx(Sfx::DoorOpen));
+                    subs.write(Subtitle::info("[The key turns. The door creaks open]"));
+                } else if door.key_room.is_some() {
+                    sfx.write(PlaySfx(Sfx::DoorLocked));
+                    subs.write(Subtitle::info("Locked. The key is in one of this room's drawers."));
+                } else {
+                    sfx.write(PlaySfx(Sfx::DoorLocked));
+                    subs.write(Subtitle::info("[Handle rattles] It won't budge. Not yet."));
+                }
             } else if !door.open {
                 door.open = true;
-                commands.entity(door.blocker).remove::<Collider>();
+                if door.blocker != Entity::PLACEHOLDER {
+                    commands.entity(door.blocker).remove::<Collider>();
+                }
                 commands.entity(e).remove::<Interactable>();
+                if let Some(rt) = runtime.as_mut() {
+                    rt.opened.insert(door.number);
+                }
                 sfx.write(PlaySfx(Sfx::DoorOpen));
                 subs.write(Subtitle::info("[Door creaks open]"));
             }
@@ -273,15 +334,26 @@ fn interact(
                 sfx.write(PlaySfx(Sfx::DrawerOpen));
                 if !drawer.searched {
                     drawer.searched = true;
+                    if let (Some(rt), Some(tag)) = (runtime.as_mut(), drawer.tag) {
+                        rt.searched.insert(tag);
+                        if drawer.has_key {
+                            rt.keys.insert(tag.0);
+                        }
+                    }
+                    if drawer.has_key {
+                        sfx.write(PlaySfx(Sfx::Pickup));
+                        subs.write(Subtitle::info(format!("Found the key to Door {:03}", drawer.tag.map_or(0, |t| t.0 + 1))));
+                    }
                     match drawer.loot.take() {
                         Some(n) => {
                             run.lumens += n;
                             sfx.write(PlaySfx(Sfx::Pickup));
                             subs.write(Subtitle::info(format!("Found {n} Lumens")));
                         }
-                        None => {
+                        None if !drawer.has_key => {
                             subs.write(Subtitle::info("Empty."));
                         }
+                        None => {}
                     }
                 }
             } else {

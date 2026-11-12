@@ -11,11 +11,23 @@ pub struct RunState {
     pub lumens: u32,
     pub elapsed: f32,
     pub vitality: f32,
+    pub damage_taken: f32,
+    pub surges_survived: u32,
+    pub mimics_fooled: u32,
+    /// Highest room reached.
+    pub best_room: u32,
 }
 
 impl RunState {
     pub fn new() -> Self {
-        Self { current_room: 0, lumens: 0, elapsed: 0.0, vitality: 100.0 }
+        Self { vitality: 100.0, ..Default::default() }
+    }
+
+    /// Applies damage; returns true if this was fatal.
+    pub fn damage(&mut self, amount: f32) -> bool {
+        self.vitality = (self.vitality - amount).max(0.0);
+        self.damage_taken += amount;
+        self.vitality <= 0.0
     }
 
     pub fn timer_text(&self) -> String {
@@ -70,6 +82,7 @@ impl Plugin for RunPlugin {
 
 fn tick_timer(time: Res<Time>, mut run: ResMut<RunState>) {
     run.elapsed += time.delta_secs();
+    run.best_room = run.best_room.max(run.current_room);
 }
 
 #[cfg(test)]
@@ -81,6 +94,16 @@ mod tests {
         let mut r = RunState::new();
         r.elapsed = 125.7;
         assert_eq!(r.timer_text(), "02:05");
+    }
+
+    #[test]
+    fn damage_is_fatal_at_zero() {
+        let mut r = RunState::new();
+        assert!(!r.damage(40.0));
+        assert!(!r.damage(40.0));
+        assert!(r.damage(40.0));
+        assert_eq!(r.vitality, 0.0);
+        assert_eq!(r.damage_taken, 120.0);
     }
 
     #[test]

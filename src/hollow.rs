@@ -128,6 +128,10 @@ fn trigger_encounter(
         *fired = false;
     }
     let Ok(p) = player.single() else { return };
+    // The visual-QA capture tour teleports straight past the corridor.
+    if std::env::var_os("HALLWAYS_CAPTURE").is_some() {
+        return;
+    }
     if !*fired && chase.phase == ChasePhase::Dormant && !active.is_playing() && p.translation.z < -7.5 {
         *fired = true;
         play.write(PlayCutscene(THE_HOLLOW.into()));
