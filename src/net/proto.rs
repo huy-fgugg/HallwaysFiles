@@ -18,7 +18,14 @@ pub const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ClientMsg {
     /// Create a room. The server answers with `Welcome` (including the code).
-    Host { name: String, seed: u64, version: u32 },
+    Host {
+        name: String,
+        seed: u64,
+        version: u32,
+        /// Custom floor preset, passed through to everyone who joins.
+        #[serde(default)]
+        config: Option<serde_json::Value>,
+    },
     /// Join a room by code.
     Join { code: String, name: String, version: u32 },
     /// Forward `data` to everyone else in the room.
@@ -37,7 +44,16 @@ pub struct PlayerInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ServerMsg {
-    Welcome { code: String, id: u8, host_id: u8, seed: u64, max: u8, players: Vec<PlayerInfo> },
+    Welcome {
+        code: String,
+        id: u8,
+        host_id: u8,
+        seed: u64,
+        max: u8,
+        players: Vec<PlayerInfo>,
+        #[serde(default)]
+        config: Option<serde_json::Value>,
+    },
     Joined { player: PlayerInfo },
     Left { id: u8 },
     /// The host left; this player now hosts.

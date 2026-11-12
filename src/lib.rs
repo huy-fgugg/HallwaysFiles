@@ -22,6 +22,7 @@ pub mod net;
 pub mod physics;
 pub mod profile;
 pub mod player;
+pub mod presets;
 pub mod rng;
 pub mod run;
 pub mod settings;
@@ -52,6 +53,7 @@ impl Plugin for HallwaysPlugin {
             capture::CapturePlugin,
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
+        app.init_resource::<presets::ActivePreset>();
         app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin));
     }
 }

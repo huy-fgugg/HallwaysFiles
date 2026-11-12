@@ -373,7 +373,8 @@ fn death_actions(mut reader: MessageReader<MenuActivated>, mut next_app: ResMut<
     }
 }
 
-fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::run::RunState>, seed: Res<RunSeed>, profile: Res<crate::profile::Profile>) {
+fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::run::RunState>, seed: Res<RunSeed>, profile: Res<crate::profile::Profile>, floor: Option<Res<crate::floor::Floor>>) {
+    let final_door = floor.map_or(100, |f| f.0.final_door());
     commands
         .spawn((
             Node { width: percent(100), height: percent(100), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
@@ -385,10 +386,10 @@ fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::ru
         .with_children(|root| {
             root.spawn(theme.panel(640.0)).with_children(|p| {
                 p.spawn((Text::new("FLOOR 1 COMPLETE"), theme.font(true, theme.size_heading), TextColor(theme.interact)));
-                p.spawn((Text::new("You walked out through Door 100."), theme.font(false, theme.size_body), TextColor(theme.text_dim)));
+                p.spawn((Text::new(format!("You walked out through Door {:03}.", final_door)), theme.font(false, theme.size_body), TextColor(theme.text_dim)));
                 let rows = [
                     ("Time", run.timer_text()),
-                    ("Doors opened", "100 / 100".to_string()),
+                    ("Doors opened", format!("{final_door} / {final_door}")),
                     ("Lumens collected", run.lumens.to_string()),
                     ("Lumens banked (with modifiers)", format!("{}", (run.lumens as f32 * profile.lumen_multiplier()).round() as u32)),
                     ("Surges survived", run.surges_survived.to_string()),

@@ -20,6 +20,8 @@ pub enum FieldKind {
     Seed,
     Code,
     AdminCode,
+    PresetName,
+    PresetSeed,
 }
 
 impl FieldKind {
@@ -29,6 +31,8 @@ impl FieldKind {
             FieldKind::Seed => "SEED",
             FieldKind::Code => "ROOM CODE",
             FieldKind::AdminCode => "CODE",
+            FieldKind::PresetName => "PRESET NAME",
+            FieldKind::PresetSeed => "SEED",
         }
     }
 
@@ -38,6 +42,8 @@ impl FieldKind {
             FieldKind::Seed => 24,
             FieldKind::Code => 5,
             FieldKind::AdminCode => 5,
+            FieldKind::PresetName => 24,
+            FieldKind::PresetSeed => 24,
         }
     }
 
@@ -47,6 +53,8 @@ impl FieldKind {
             FieldKind::Seed => c.is_ascii_graphic() || c == ' ',
             FieldKind::Code => c.is_ascii_alphanumeric(),
             FieldKind::AdminCode => c.is_ascii_digit(),
+            FieldKind::PresetName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
+            FieldKind::PresetSeed => c.is_ascii_graphic() || c == ' ',
         }
     }
 }
@@ -93,7 +101,7 @@ impl Plugin for PlayMenuPlugin {
                 t.0 = false;
                 *p = Pending::None;
             })
-            .add_systems(Update, type_into_fields.run_if(|s: Option<Res<State<Screen>>>| s.is_some_and(|s| matches!(s.get(), Screen::Play | Screen::Admin))))
+            .add_systems(Update, type_into_fields.run_if(|s: Option<Res<State<Screen>>>| s.is_some_and(|s| matches!(s.get(), Screen::Play | Screen::Admin | Screen::Custom))))
             .add_systems(OnExit(Screen::Admin), |mut t: ResMut<Typing>| t.0 = false)
             .add_systems(Update, (play_actions, refresh_labels, room_ready).chain().after(type_into_fields).run_if(in_state(Screen::Play)));
     }
@@ -134,8 +142,8 @@ fn spawn_play(mut commands: Commands, theme: Res<UiTheme>, profile: Res<Profile>
                     p.spawn(t.dim_text("Click the box and type. Other players see this name over your head."));
                     field_row(p, &t, FieldKind::Seed, &profile.seed_text, 1);
                     p.spawn(t.dim_text("Leave the seed empty for a new floor every run."));
-                    let solo = spawn_button(p, &t, "Solo Run", MenuAction::PlaySolo, 2, true);
-                    let _ = solo;
+                    spawn_button(p, &t, "Solo Run", MenuAction::PlaySolo, 2, true);
+                    spawn_button(p, &t, "Custom Floors", MenuAction::OpenCustom, 2, false);
                     p.spawn((Text::new("ONLINE (UP TO 4 PLAYERS)"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
                     spawn_button(p, &t, "Host Room", MenuAction::HostRoom, 3, false);
                     field_row(p, &t, FieldKind::Code, "", 4);
@@ -170,6 +178,7 @@ fn type_into_fields(
     mut texts: Query<&mut Text, With<FieldText>>,
     theme: Res<UiTheme>,
     mut focus_once: Local<bool>,
+    mut editor: Option<ResMut<crate::ui::custom_menu::CustomEditor>>,
     time: Res<Time<Real>>,
     mut profile: ResMut<Profile>,
 ) {
@@ -216,6 +225,16 @@ fn type_into_fields(
                 FieldKind::Name => {}
                 FieldKind::Seed => profile.seed_text = field.value.clone(),
                 FieldKind::Code | FieldKind::AdminCode => {}
+                FieldKind::PresetName => {
+                    if let Some(ed) = editor.as_mut() {
+                        ed.edit.name = field.value.clone();
+                    }
+                }
+                FieldKind::PresetSeed => {
+                    if let Some(ed) = editor.as_mut() {
+                        ed.edit.seed = field.value.clone();
+                    }
+                }
             }
         }
         let caret = if active && (time.elapsed_secs() * 2.0) as i32 % 2 == 0 { "_" } else { " " };
@@ -223,7 +242,8 @@ fn type_into_fields(
             match field.kind {
                 FieldKind::Seed => "random".to_string(),
                 FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
-                FieldKind::Name => String::new(),
+                FieldKind::PresetSeed => "random".to_string(),
+                FieldKind::Name | FieldKind::PresetName => String::new(),
             }
         } else {
             let v = if field.kind == FieldKind::AdminCode { "*".repeat(field.value.len()) } else { field.value.clone() };
@@ -250,7 +270,7 @@ fn item_name(k: ItemKind) -> &'static str {
 }
 
 /// A fresh seed from the clock (used when the seed box is empty).
-fn random_seed() -> u64 {
+pub fn random_seed() -> u64 {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7);
     let mut r = crate::rng::GameRng::new(nanos ^ 0x9E37_79B9_7F4A_7C15);
     r.next_u64()
@@ -271,6 +291,7 @@ fn play_actions(
     mut pending: ResMut<Pending>,
     fields: Query<&TextField>,
     mut status: Query<&mut Text, With<StatusText>>,
+    mut preset: ResMut<crate::presets::ActivePreset>,
 ) {
     let mut say = |s: String| {
         for mut t in &mut status {
@@ -287,12 +308,15 @@ fn play_actions(
                 profile.name = crate::profile::clean_name(&profile.name);
                 save_profile(&profile);
                 *seed = RunSeed(chosen_seed(&profile));
+                preset.0 = None;
                 next_overlay.set(Overlay::None);
                 next_app.set(AppState::Playing);
             }
+            MenuAction::OpenCustom => next_overlay.set(Overlay::Custom),
             MenuAction::HostRoom => {
                 save_profile(&profile);
-                net.write(NetRequest::Host { name: crate::profile::clean_name(&profile.name), seed: chosen_seed(&profile) });
+                preset.0 = None;
+                net.write(NetRequest::Host { name: crate::profile::clean_name(&profile.name), seed: chosen_seed(&profile), preset: None });
                 *pending = Pending::Online;
                 say("Creating a room... (a sleeping free server can take up to a minute to wake up)".into());
             }
@@ -376,14 +400,16 @@ fn refresh_labels(
     }
 }
 
-fn room_ready(
+pub fn room_ready(
     mut ready: MessageReader<RoomReady>,
+    mut preset: ResMut<crate::presets::ActivePreset>,
     mut seed: ResMut<RunSeed>,
     mut next_app: ResMut<NextState<AppState>>,
     mut next_overlay: ResMut<NextState<Overlay>>,
 ) {
     if let Some(r) = ready.read().last() {
         *seed = RunSeed(r.seed);
+        preset.0 = r.preset.clone();
         next_overlay.set(Overlay::None);
         next_app.set(AppState::Playing);
     }

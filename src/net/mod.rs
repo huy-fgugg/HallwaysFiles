@@ -115,15 +115,17 @@ pub struct Peers(pub HashMap<u8, PeerState>);
 /// Requests from menus.
 #[derive(Message, Debug, Clone)]
 pub enum NetRequest {
-    Host { name: String, seed: u64 },
+    Host { name: String, seed: u64, preset: Option<crate::presets::Preset> },
     Join { name: String, code: String },
     Leave,
 }
 
 /// Fired once when the room is ready (the seed is known): menus start the run.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub struct RoomReady {
     pub seed: u64,
+    /// The host's custom floor (None = classic).
+    pub preset: Option<crate::presets::Preset>,
 }
 
 /// Fired when the host starts the descent.
@@ -196,7 +198,7 @@ fn auto_online(
     match step.0 {
         0 if step.1 > 3.0 => {
             if mode == "host" {
-                req.write(NetRequest::Host { name: "Host".into(), seed: 4242 });
+                req.write(NetRequest::Host { name: "Host".into(), seed: 4242, preset: None });
                 step.0 = 1;
             } else if let Ok(code) = std::fs::read_to_string(&file) {
                 req.write(NetRequest::Join { name: "Guest".into(), code: code.trim().to_string() });
@@ -247,8 +249,9 @@ fn handle_requests(mut commands: Commands, mut reqs: MessageReader<NetRequest>, 
                 *session = NetSession::default();
                 peers.0.clear();
             }
-            NetRequest::Host { name, seed } => {
-                let first = to_text(&ClientMsg::Host { name: name.clone(), seed: *seed, version: PROTOCOL_VERSION });
+            NetRequest::Host { name, seed, preset } => {
+                let config = preset.as_ref().and_then(|p| serde_json::to_value(p).ok());
+                let first = to_text(&ClientMsg::Host { name: name.clone(), seed: *seed, version: PROTOCOL_VERSION, config });
                 commands.insert_resource(connect(server_url(), first));
                 *session = NetSession { status: NetStatus::Connecting, ..default() };
                 peers.0.clear();
@@ -284,9 +287,10 @@ fn pump(
     loop {
         match inc.try_recv() {
             Ok(Incoming::Msg(m)) => match m {
-                ServerMsg::Welcome { code, id, host_id, seed, max, players } => {
+                ServerMsg::Welcome { code, id, host_id, seed, max, players, config } => {
                     *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: false };
-                    ready.write(RoomReady { seed });
+                    let preset = config.and_then(|c| serde_json::from_value::<crate::presets::Preset>(c).ok()).map(crate::presets::Preset::sanitized);
+                    ready.write(RoomReady { seed, preset });
                 }
                 ServerMsg::Joined { player } => {
                     subs.write(crate::run::Subtitle::info(format!("{} joined the lift.", player.name)));
