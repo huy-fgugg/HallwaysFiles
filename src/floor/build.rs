@@ -174,7 +174,7 @@ pub fn spawn_room(
     let base = 340_000.0 * (area_m2 / 40.0).clamp(0.8, 2.6) * if r.area == Area::Atrium { 1.8 } else { 1.0 };
     let (scale, depth) = match r.light {
         LightState::Bright => (1.0, 0.05),
-        LightState::Dim => (0.4, 0.15),
+        LightState::Dim => (0.5, 0.15),
         LightState::Dark => (0.04, 0.8),
     };
     let warm = match r.area {
