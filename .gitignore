@@ -1,0 +1,7 @@
+/target
+/build
+/dist
+*.zip
+*.pdb
+settings.ron
+save.ron

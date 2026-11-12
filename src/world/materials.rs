@@ -1,0 +1,83 @@
+//! PBR materials built from CC0 Poly Haven texture sets (colour, normal and
+//! AO/roughness/metal maps), plus a few solid materials.
+
+use bevy::{
+    image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
+    prelude::*,
+};
+
+#[derive(Resource, Clone)]
+pub struct SurfaceMaterials {
+    pub wallpaper: Handle<StandardMaterial>,
+    pub peeling_wall: Handle<StandardMaterial>,
+    pub plaster_ceiling: Handle<StandardMaterial>,
+    pub wood_floor: Handle<StandardMaterial>,
+    pub carpet: Handle<StandardMaterial>,
+    pub trim_wood: Handle<StandardMaterial>,
+    pub door_wood: Handle<StandardMaterial>,
+    pub panel_wood: Handle<StandardMaterial>,
+    pub brass: Handle<StandardMaterial>,
+    pub iron: Handle<StandardMaterial>,
+    pub void: Handle<StandardMaterial>,
+}
+
+fn repeat_sampler() -> ImageSampler {
+    let mut d = ImageSamplerDescriptor::linear();
+    d.address_mode_u = ImageAddressMode::Repeat;
+    d.address_mode_v = ImageAddressMode::Repeat;
+    d.set_anisotropic_filter(16);
+    ImageSampler::Descriptor(d)
+}
+
+fn load_tex(asset_server: &AssetServer, path: String, srgb: bool) -> Handle<Image> {
+    asset_server
+        .load_builder()
+        .with_settings(move |s: &mut ImageLoaderSettings| {
+            s.is_srgb = srgb;
+            s.sampler = repeat_sampler();
+        })
+        .load(path)
+}
+
+/// Builds a material from `textures/<name>/<name>_{diff,nor,arm}.jpg`.
+fn pbr_set(asset_server: &AssetServer, name: &str, tint: Color) -> StandardMaterial {
+    let p = |suffix: &str| format!("textures/{name}/{name}_{suffix}.jpg");
+    let arm = load_tex(asset_server, p("arm"), false);
+    StandardMaterial {
+        base_color: tint,
+        base_color_texture: Some(load_tex(asset_server, p("diff"), true)),
+        normal_map_texture: Some(load_tex(asset_server, p("nor"), false)),
+        metallic_roughness_texture: Some(arm.clone()),
+        occlusion_texture: Some(arm),
+        perceptual_roughness: 1.0,
+        metallic: 1.0, // scaled by the texture's blue channel
+        ..default()
+    }
+}
+
+pub fn build(asset_server: &AssetServer, materials: &mut Assets<StandardMaterial>) -> SurfaceMaterials {
+    SurfaceMaterials {
+        // Slightly desaturated tints push everything toward the game's cold palette.
+        wallpaper: materials.add(pbr_set(asset_server, "decrepit_wallpaper", Color::srgb(0.85, 0.85, 0.8))),
+        peeling_wall: materials.add(pbr_set(asset_server, "peeling_painted_wall", Color::srgb(0.7, 0.75, 0.75))),
+        plaster_ceiling: materials.add(pbr_set(asset_server, "painted_plaster_wall", Color::srgb(0.85, 0.83, 0.8))),
+        wood_floor: materials.add(pbr_set(asset_server, "old_wood_floor", Color::srgb(0.8, 0.75, 0.7))),
+        carpet: materials.add(pbr_set(asset_server, "dirty_carpet", Color::srgb(0.75, 0.7, 0.7))),
+        trim_wood: materials.add(pbr_set(asset_server, "wood_table_001", Color::srgb(0.55, 0.45, 0.4))),
+        door_wood: materials.add(pbr_set(asset_server, "dark_wooden_planks", Color::srgb(0.9, 0.85, 0.8))),
+        panel_wood: materials.add(pbr_set(asset_server, "wood_table_001", Color::srgb(0.42, 0.33, 0.28))),
+        brass: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.78, 0.6, 0.32),
+            metallic: 1.0,
+            perceptual_roughness: 0.32,
+            ..default()
+        }),
+        iron: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.12, 0.12, 0.13),
+            metallic: 0.9,
+            perceptual_roughness: 0.55,
+            ..default()
+        }),
+        void: materials.add(StandardMaterial { base_color: Color::BLACK, unlit: true, ..default() }),
+    }
+}

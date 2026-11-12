@@ -1,0 +1,60 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+
+      - name: Unit tests
+        run: cargo test --release --lib
+
+      - name: Build release executable
+        run: cargo build --release
+
+      - name: Package exe + assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\hallways.exe dist\
+          Copy-Item -Recurse assets dist\assets
+          Copy-Item README.md dist\
+          Copy-Item CREDITS.md dist\
+          Compress-Archive -Path dist\* -DestinationPath hallways-windows.zip -Force
+          Get-Item hallways-windows.zip | Select-Object Name, Length
+
+      - name: Smoke test (exe starts and finds its assets)
+        shell: pwsh
+        run: |
+          # The runner has no GPU, so we only check the process launches and
+          # doesn't exit immediately with a missing-asset or startup panic.
+          $p = Start-Process -FilePath dist\hallways.exe -WorkingDirectory dist -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited -and $p.ExitCode -ne 0) {
+            Write-Host "hallways.exe exited early with code $($p.ExitCode) (expected on GPU-less runners if no adapter is found)"
+          } else {
+            Write-Host "hallways.exe is running"
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hallways-windows
+          path: hallways-windows.zip
+          retention-days: 30

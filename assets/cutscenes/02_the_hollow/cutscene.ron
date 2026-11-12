@@ -1,0 +1,46 @@
+// HALLWAYS cutscene: The Hollow emerges (triggered deep in the corridor, Room 001).
+// The corridor spans x -1.4..1.4, z -14..-5.2; the locked Door 002 is at z = -14.
+// The built-in music is synced to these times: rumble 0-3.5, swell 3.5-11, HIT at 11.3.
+// If you replace the music, keep your big hit near 11.3 s or move the Ignite event.
+(
+    title: "The Hollow",
+    duration: 16.0,
+    letterbox: true,
+    skippable: true,
+    shots: [
+        (start: 0.0, end: 3.5, fov: 70.0, ease: Linear,
+            from: PlayerEye,
+            to:   At(pos: (0.0, 1.55, -8.6), look: (0.0, 1.0, -13.5))),
+        (start: 3.5, end: 7.5, fov: 50.0, ease: InOut,
+            from: At(pos: (0.9, 0.3, -10.2), look: (0.0, 0.05, -12.6)),
+            to:   At(pos: (0.7, 0.35, -10.8), look: (0.0, 0.1, -12.6))),
+        (start: 7.5, end: 11.0, fov: 55.0, ease: InOut,
+            from: At(pos: (-0.9, 0.7, -9.6), look: (0.0, 0.6, -12.6)),
+            to:   At(pos: (-0.8, 0.9, -9.9), look: (0.0, 2.0, -12.6))),
+        (start: 11.0, end: 13.0, fov: 38.0, ease: Out,
+            from: At(pos: (0.15, 2.05, -10.6), look: (0.0, 2.25, -12.3)),
+            to:   At(pos: (0.05, 2.15, -11.3), look: (0.0, 2.3, -12.3))),
+        (start: 13.0, end: 16.0, fov: 72.0, ease: InOut,
+            from: At(pos: (0.0, 1.6, -7.2), look: (0.0, 1.8, -12.6)),
+            to:   PlayerEye),
+    ],
+    events: [
+        (at: 0.0, do: Sfx(Rumble)),
+        (at: 0.0, do: Lights(color: (1.0, 1.0, 1.0), amount: 0.0, scale: 1.0, flicker: 0.7)),
+        (at: 1.0, do: Subtitle(text: "[The lights stutter]", seconds: 2.0)),
+        (at: 2.5, do: Lights(color: (1.0, 0.1, 0.06), amount: 0.9, scale: 0.75, flicker: 0.25)),
+        (at: 2.5, do: Shake(0.3)),
+        (at: 3.5, do: Hollow(Emerge(at: (0.0, 0.0, -12.6), seconds: 7.5))),
+        (at: 3.6, do: Sfx(Ooze)),
+        (at: 4.0, do: Subtitle(text: "[Something wet spreads across the floor]", seconds: 3.0)),
+        (at: 7.6, do: Sfx(Ooze)),
+        (at: 9.5, do: Subtitle(text: "[It stands up]", seconds: 1.6, danger: true)),
+        (at: 10.5, do: Hollow(Face((0.0, 1.6, -7.5)))),
+        (at: 11.3, do: Hollow(Ignite)),
+        (at: 11.3, do: Shake(0.6)),
+        (at: 11.3, do: Lights(color: (1.0, 0.08, 0.05), amount: 1.0, scale: 0.9, flicker: 0.1)),
+        (at: 12.2, do: Subtitle(text: "HIDE.", seconds: 1.5, danger: true)),
+        (at: 14.0, do: Subtitle(text: "[Get back to the wardrobe in Room 000]", seconds: 2.5, danger: true)),
+    ],
+    end: StartChase,
+)
