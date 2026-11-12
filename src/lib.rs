@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod capture;
 pub mod cutscene;
+pub mod floor;
 pub mod hollow;
 pub mod interaction;
 pub mod music;
@@ -15,6 +16,7 @@ pub mod rng;
 pub mod run;
 pub mod settings;
 pub mod state;
+pub mod surge;
 pub mod theme;
 pub mod ui;
 pub mod world;
@@ -38,6 +40,6 @@ impl Plugin for HallwaysPlugin {
             ui::UiPlugin,
             capture::CapturePlugin,
         ))
-        .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin));
+        .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin));
     }
 }

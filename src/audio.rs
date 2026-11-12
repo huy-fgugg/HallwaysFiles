@@ -32,10 +32,11 @@ pub enum Sfx {
     Whoosh,
     Ding,
     GateRattle,
+    SurgeRoar,
 }
 
 impl Sfx {
-    const ALL: [Sfx; 16] = [
+    const ALL: [Sfx; 17] = [
         Sfx::UiMove,
         Sfx::UiSelect,
         Sfx::DoorOpen,
@@ -52,10 +53,11 @@ impl Sfx {
         Sfx::Whoosh,
         Sfx::Ding,
         Sfx::GateRattle,
+        Sfx::SurgeRoar,
     ];
 
     fn is_stinger(self) -> bool {
-        matches!(self, Sfx::Stinger | Sfx::Rumble)
+        matches!(self, Sfx::Stinger | Sfx::Rumble | Sfx::SurgeRoar)
     }
 }
 
@@ -136,7 +138,19 @@ fn noise(len: usize, seed: u64, smoothing: f32) -> Vec<f32> {
         .collect()
 }
 
+/// Synthesises an effect and limits its peak to 0.95 so nothing clips.
 pub fn synth(sfx: Sfx) -> Vec<f32> {
+    let mut v = synth_raw(sfx);
+    let peak = v.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    if peak > 0.95 {
+        for s in &mut v {
+            *s *= 0.95 / peak;
+        }
+    }
+    v
+}
+
+fn synth_raw(sfx: Sfx) -> Vec<f32> {
     let sr = SAMPLE_RATE as f32;
     match sfx {
         Sfx::UiMove => tone(0.05, |t| (TAU * 660.0 * t).sin() * env(t, 0.004, 0.05) * 0.25),
@@ -203,6 +217,25 @@ pub fn synth(sfx: Sfx) -> Vec<f32> {
                 .collect()
         }
         Sfx::Rumble | Sfx::Ooze | Sfx::Whoosh => extra(sfx),
+        Sfx::SurgeRoar => {
+            // A roar that builds for ~5 s: noise whose brightness rises, a low
+            // growl underneath, and crackle bursts like shorting wiring.
+            let len = n_samples(6.0);
+            let mut rng = GameRng::new(111);
+            let mut lp = 0.0f32;
+            (0..len)
+                .map(|i| {
+                    let t = i as f32 / sr;
+                    let build = (t / 5.0).min(1.0).powf(1.6);
+                    let x = rng.next_f32() * 2.0 - 1.0;
+                    lp += (x - lp) * (0.02 + 0.5 * build);
+                    let growl = (TAU * (42.0 + 30.0 * build) * t).sin() * 0.5;
+                    let crackle = if rng.next_f32() < 0.002 + 0.02 * build { rng.next_f32() * 2.0 - 1.0 } else { 0.0 };
+                    let tail = 1.0 - ((t - 5.4) / 0.6).clamp(0.0, 1.0);
+                    (lp * 2.2 + growl * build + crackle * 0.6) * build * tail * 0.6
+                })
+                .collect()
+        }
         Sfx::Ding => tone(2.2, |t| {
             // Small brass bell: inharmonic partials, long decay.
             [1.0f32, 2.76, 5.4, 8.9].iter().enumerate().map(|(i, h)| (TAU * 988.0 * h * t).sin() * (-t * (2.0 + i as f32 * 1.5)).exp() / (i as f32 + 1.0)).sum::<f32>() * 0.3
@@ -346,7 +379,7 @@ mod tests {
         for sfx in Sfx::ALL {
             let s = synth(sfx);
             assert!(!s.is_empty(), "{sfx:?} empty");
-            assert!(s.iter().all(|v| v.is_finite() && v.abs() <= 1.5), "{sfx:?} out of range");
+            assert!(s.iter().all(|v| v.is_finite() && v.abs() <= 0.951), "{sfx:?} out of range");
         }
         assert!(synth_ambience().iter().all(|v| v.is_finite()));
     }

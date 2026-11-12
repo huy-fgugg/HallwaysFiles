@@ -19,6 +19,18 @@ pub struct SurfaceMaterials {
     pub brass: Handle<StandardMaterial>,
     pub iron: Handle<StandardMaterial>,
     pub void: Handle<StandardMaterial>,
+    // Area materials (Phase 2).
+    pub concrete_wall: Handle<StandardMaterial>,
+    pub concrete_floor: Handle<StandardMaterial>,
+    pub dirt: Handle<StandardMaterial>,
+    pub marble: Handle<StandardMaterial>,
+    pub corrugated: Handle<StandardMaterial>,
+    pub brick: Handle<StandardMaterial>,
+    pub rock: Handle<StandardMaterial>,
+    pub rusty_metal: Handle<StandardMaterial>,
+    pub metal_plate: Handle<StandardMaterial>,
+    pub red_carpet: Handle<StandardMaterial>,
+    pub archive_wall: Handle<StandardMaterial>,
 }
 
 fn repeat_sampler() -> ImageSampler {
@@ -79,5 +91,16 @@ pub fn build(asset_server: &AssetServer, materials: &mut Assets<StandardMaterial
             ..default()
         }),
         void: materials.add(StandardMaterial { base_color: Color::BLACK, unlit: true, ..default() }),
+        concrete_wall: materials.add(pbr_set(asset_server, "concrete_wall_006", Color::srgb(0.75, 0.77, 0.75))),
+        concrete_floor: materials.add(pbr_set(asset_server, "concrete_tiles", Color::srgb(0.7, 0.7, 0.68))),
+        dirt: materials.add(pbr_set(asset_server, "dirt_floor", Color::srgb(0.8, 0.72, 0.62))),
+        marble: materials.add(pbr_set(asset_server, "marble_01", Color::srgb(0.85, 0.83, 0.8))),
+        corrugated: materials.add(pbr_set(asset_server, "corrugated_iron_02", Color::srgb(0.7, 0.72, 0.7))),
+        brick: materials.add(pbr_set(asset_server, "dark_brick_wall", Color::srgb(0.8, 0.75, 0.72))),
+        rock: materials.add(pbr_set(asset_server, "rock_wall_08", Color::srgb(0.8, 0.74, 0.66))),
+        rusty_metal: materials.add(pbr_set(asset_server, "rusty_metal_02", Color::WHITE)),
+        metal_plate: materials.add(pbr_set(asset_server, "metal_plate", Color::srgb(0.75, 0.77, 0.8))),
+        red_carpet: materials.add(pbr_set(asset_server, "dirty_carpet", Color::srgb(0.75, 0.16, 0.14))),
+        archive_wall: materials.add(pbr_set(asset_server, "dark_wooden_planks", Color::srgb(0.62, 0.52, 0.45))),
     }
 }

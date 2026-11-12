@@ -1,7 +1,7 @@
 # Credits
 
 ## HALLWAYS
-Design, code, primitive-built models (doors, elevator, The Hollow, room shells) and the procedural score and sound effects were created for this project.
+Design, code, primitive-built models (doors, elevator, lockers, tool chests, bookshelves, crates, timber frames, The Hollow, The Surge, room shells) and the procedural score and sound effects were created for this project.
 Built with [Bevy](https://bevy.org) (MIT / Apache-2.0).
 
 ## 3D models (Poly Haven, CC0 1.0)
@@ -21,6 +21,13 @@ Built with [Bevy](https://bevy.org) (MIT / Apache-2.0).
 | Peeling Painted Wall | Dimitrios Savva |
 | Wood Table 001 | Dimitrios Savva, Rico Cilliers |
 | Dirty Carpet | Rohit Seervi |
+| Concrete Wall 006 | Dario Barresi, Charlotte Baglioni |
+| Concrete Tiles | Dimitrios Savva |
+| Dirt Floor | eye-candy.xyz |
+| Marble 01, Rusty Metal 02, Metal Plate | Rob Tuytel |
+| Corrugated Iron 02 | Jenelle van Heerden, Sergej Majboroda |
+| Dark Brick Wall | Dario Barresi, Dimitrios Savva |
+| Rock Wall 08 | Amal Kumar |
 
 Source: https://polyhaven.com (CC0: no attribution required; credited anyway).
 

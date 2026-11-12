@@ -18,6 +18,7 @@ impl Plugin for MenusPlugin {
             .add_systems(OnEnter(Screen::MainMenu), (spawn_main_menu, |mut c: ResMut<MenuClock>| c.0 = 0.0))
             .add_systems(OnEnter(Screen::Credits), spawn_credits)
             .add_systems(OnEnter(Screen::Death), spawn_death_screen)
+            .add_systems(OnEnter(Screen::Summary), spawn_summary)
             .add_systems(OnEnter(Screen::Pause), spawn_pause_menu)
             .add_systems(
                 Update,
@@ -31,6 +32,7 @@ impl Plugin for MenusPlugin {
                     animate_main_menu.run_if(in_state(Screen::MainMenu)),
                     credits_actions.run_if(in_state(Screen::Credits)),
                     death_actions.run_if(in_state(Screen::Death)),
+                    death_actions.run_if(in_state(Screen::Summary)),
                 ),
             );
     }
@@ -270,6 +272,10 @@ pub const CREDITS: &[(&str, &[&str])] = &[
             "Dark Wooden Planks, Painted Plaster Wall: Amal Kumar",
             "Peeling Painted Wall: Dimitrios Savva     Dirty Carpet: Rohit Seervi",
             "Wood Table 001: Dimitrios Savva, Rico Cilliers",
+            "Concrete Wall 006: Dario Barresi, Charlotte Baglioni     Concrete Tiles: Dimitrios Savva",
+            "Marble 01, Rusty Metal 02, Metal Plate: Rob Tuytel     Rock Wall 08: Amal Kumar",
+            "Dirt Floor: eye-candy.xyz     Dark Brick Wall: Dario Barresi, Dimitrios Savva",
+            "Corrugated Iron 02: Jenelle van Heerden, Sergej Majboroda",
         ],
     ),
     ("FONT", &["IBM Plex Mono by IBM (SIL Open Font License 1.1)"]),
@@ -358,4 +364,38 @@ fn death_actions(mut reader: MessageReader<MenuActivated>, mut next_app: ResMut<
             _ => {}
         }
     }
+}
+
+fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::run::RunState>, seed: Res<RunSeed>) {
+    commands
+        .spawn((
+            Node { width: percent(100), height: percent(100), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
+            BackgroundColor(Color::BLACK.with_alpha(0.92)),
+            GlobalZIndex(40),
+            DespawnOnExit(Screen::Summary),
+            Name::new("Run summary"),
+        ))
+        .with_children(|root| {
+            root.spawn(theme.panel(640.0)).with_children(|p| {
+                p.spawn((Text::new("FLOOR 1 COMPLETE"), theme.font(true, theme.size_heading), TextColor(theme.interact)));
+                p.spawn((Text::new("You walked out through Door 100."), theme.font(false, theme.size_body), TextColor(theme.text_dim)));
+                let rows = [
+                    ("Time", run.timer_text()),
+                    ("Doors opened", "100 / 100".to_string()),
+                    ("Lumens collected", run.lumens.to_string()),
+                    ("Surges survived", run.surges_survived.to_string()),
+                    ("Mimics that fooled you", run.mimics_fooled.to_string()),
+                    ("Damage taken", format!("{:.0}", run.damage_taken)),
+                    ("Seed", seed.display()),
+                ];
+                for (label, value) in rows {
+                    p.spawn(Node { justify_content: JustifyContent::SpaceBetween, column_gap: px(40), ..default() }).with_children(|r| {
+                        r.spawn((Text::new(label), theme.font(false, theme.size_body), TextColor(theme.text)));
+                        r.spawn((Text::new(value), theme.font(true, theme.size_body), TextColor(theme.interact)));
+                    });
+                }
+                spawn_button(p, &theme, "Play Again", MenuAction::Retry, 0, true);
+                spawn_button(p, &theme, "Return to Main Menu", MenuAction::AbandonRun, 1, false);
+            });
+        });
 }
