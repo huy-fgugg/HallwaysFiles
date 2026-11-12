@@ -1,0 +1,14 @@
+// HALLWAYS entity tuning. Edit freely; if this file is broken the game uses its built-in copy.
+//   min_room   first room the entity may appear in
+//   chance     probability per eligible room (0..1)
+//   cooldown   minimum rooms between two appearances of this entity
+//   warn       seconds of warning cue before it acts (shrinks with depth, never below warn_min)
+//   window     seconds you have to perform the counter (Whisperer / Hush)
+//   damage     vitality lost on failure (100 = death). Surge/Undertow always kill.
+(
+    surge:     (min_room: 6,  chance: 0.16, cooldown: 6,  warn: 5.0, warn_min: 3.2, window: 0.0, damage: 100.0),
+    undertow:  (min_room: 25, chance: 0.10, cooldown: 12, warn: 4.5, warn_min: 3.2, window: 0.0, damage: 100.0),
+    whisperer: (min_room: 8,  chance: 0.55, cooldown: 4,  warn: 2.5, warn_min: 1.6, window: 3.0, damage: 30.0),
+    gallery:   (min_room: 15, chance: 0.10, cooldown: 10, warn: 1.5, warn_min: 1.0, window: 0.0, damage: 9.0),
+    hush:      (min_room: 12, chance: 0.10, cooldown: 8,  warn: 1.4, warn_min: 1.0, window: 3.0, damage: 35.0),
+)

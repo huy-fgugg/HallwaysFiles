@@ -27,10 +27,10 @@ These are original designs. The counters follow genre-standard rules (hide, look
 |---|---|---|---|---|
 | **The Hollow**: stooped figure of black tatters with a cracked porcelain mask and amber eye-slits; rises from a pool of ink | Lights stutter, then turn red; low rumble; ink on the floor | Break line of sight and **hide in a wardrobe**. It searches outside for 3 s, then sinks away | Caught if it reaches you while you're in the open | Done |
 | **The Surge**: a roaring knot of crackling white-blue static shards with trailing streaks | Lights strobe (slow dim with Reduce Flashing), a roar builds over 3.2–5 s (shorter deeper in) | **Hide in a wardrobe or locker** until the lights settle. Surge rooms always have one | Caught in the open | Done |
-| **The Undertow**: like The Surge, but it passes back and forth 2–5 times | Same as The Surge but lower-pitched, with a "double-back" sound | Stay hidden until the lights stop flickering; leave between passes if your hide timer is low | Leaving too early | Phase 3 |
-| **The Whisperer**: a pale shape in dark rooms | Whispering from a random direction in a dark room | **Look straight at it** within 2.5 s | Ignored too long | Phase 3 |
-| **The Gallery**: a cluster of painted eyes that open on the walls | The room dims to violet, with a heartbeat | **Look away**; vitality drains while you look at it | Staring | Phase 3 |
-| **The Hush**: a pressure wave | Screen vignette and "STOP" prompt, all sound muffled | **Stop moving** until the prompt clears (2–4 s) | Moving | Phase 3 |
+| **The Undertow**: like The Surge, but it passes back and forth 2–5 times | Same as The Surge but lower-pitched, with a "double-back" sound | Stay hidden until the green flicker stops. The hide timer pauses while it's out there | Leaving too early | Done |
+| **The Whisperer**: a pale shape in dark rooms | Whispering from a random direction in a dark room | **Look straight at it** within the window (3 s) | 30 damage | Done |
+| **The Gallery**: a cluster of painted eyes that open on the walls | The room dims to violet, with a heartbeat | **Look away** and leave; 9 vitality per second while you look | Staring | Done |
+| **The Hush**: a pressure wave | Screen vignette and "STOP" prompt, all sound muffled | **Stop moving** until it lifts (3 s) | 35 damage | Done |
 | **Mimic Doors** | A second door whose plaque number is wrong (skips, repeats or swaps digits) | **Check the numbers**; open the right one | 40 damage plus a scare; 3 hits is death | Done |
 
 Every entity's cue window is at least 2 s at default difficulty, and scales with floor depth.
@@ -46,8 +46,19 @@ Every entity's cue window is at least 2 s at default difficulty, and scales with
 - **Room types:** Loot, Puzzle (key, lever or plaque clue), Entity, Chase, Safe/Shop, all weighted with cooldowns so a type doesn't repeat back-to-back.
 - **Lighting states:** Bright, Dim, Dark, Blackout. Dark rooms raise Whisperer odds.
 
-## Items (Phase 3)
-Flashlight, Lockpick, Vitamins (speed), Bandage (vitality), Skeleton Key. 3 inventory slots, data-driven RON definitions.
+## Items (Phase 3, done)
+| Item | Effect | Stack |
+|---|---|---|
+| Flashlight | F toggles a torch; about 150 s of battery; another flashlight recharges it | 1 |
+| Lockpick | Opens a key-locked exit door (E on the door) | 3 |
+| Vitamins | 35% faster for 8 s | 3 |
+| Bandage | +35 vitality | 3 |
+| Skeleton Key | Opens any key-locked door | 1 |
+
+3 slots. Picking something up with a full inventory replaces the selected slot, so carrying choices matter. All values live in `assets/data/items.ron`.
+
+## Elevator lobby
+Every fresh run starts in the lift with its own looping music. The lobby waits until every expected player has joined, then counts down 15 s; the host can force-start at any time. Retrying after death skips the lobby.
 
 ## Progression (Phase 5)
 Lumens are earned per room cleared, per item found and for surviving encounters. They buy pre-run items and unlock modifiers ("Blackout rooms only", "More entities"). Save files are versioned, with corrupted-save recovery like the settings file.

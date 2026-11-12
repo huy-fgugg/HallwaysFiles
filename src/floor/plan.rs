@@ -7,6 +7,7 @@
 
 use bevy::math::Vec2;
 
+use crate::data::EntityConfig;
 use crate::rng::GameRng;
 
 pub const FIRST_ROOM: u32 = 2;
@@ -92,6 +93,28 @@ pub enum LightState {
     Dark,
 }
 
+/// Which entity (if any) acts when the player enters a room.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Encounter {
+    /// Rushes through once: hide.
+    Surge,
+    /// Rushes back and forth several times: stay hidden.
+    Undertow,
+    /// Dark rooms: turn and look at it.
+    Whisperer,
+    /// Eyes on the walls: look away.
+    Gallery,
+    /// Pressure wave: stand still.
+    Hush,
+}
+
+impl Encounter {
+    /// Encounters whose counter is hiding.
+    pub fn needs_hiding(self) -> bool {
+        matches!(self, Encounter::Surge | Encounter::Undertow)
+    }
+}
+
 /// A fake door with the wrong number on the north wall.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mimic {
@@ -117,14 +140,18 @@ pub struct RoomPlan {
     pub containers: u8,
     /// At least one wardrobe/locker.
     pub hiding: bool,
-    /// The Surge passes through when you enter this room.
-    pub surge: bool,
+    /// Entity encounter triggered on entering this room.
+    pub encounter: Option<Encounter>,
     pub mimic: Option<Mimic>,
     /// Per-room seed for furniture, loot and decor.
     pub seed: u64,
 }
 
 impl RoomPlan {
+    pub fn surge(&self) -> bool {
+        matches!(self.encounter, Some(Encounter::Surge | Encounter::Undertow))
+    }
+
     pub fn exit_door(&self) -> u32 {
         self.index + 1
     }
@@ -187,11 +214,16 @@ fn wrong_number(rng: &mut GameRng, real: u32) -> u32 {
 }
 
 pub fn generate(seed: u64) -> FloorPlan {
+    generate_with(seed, &EntityConfig::default())
+}
+
+pub fn generate_with(seed: u64, cfg: &EntityConfig) -> FloorPlan {
     let mut rooms: Vec<RoomPlan> = Vec::new();
     let mut entry_x = 0.0f32;
     let mut south = START_Z;
     let mut history: Vec<RoomKind> = Vec::new();
-    let mut last_surge: i64 = -100;
+    let mut last_seen: std::collections::HashMap<Encounter, i64> = std::collections::HashMap::new();
+    let mut last_any: i64 = -100;
     let mut last_key: i64 = -100;
 
     for index in FIRST_ROOM..=LAST_ROOM {
@@ -268,14 +300,33 @@ pub fn generate(seed: u64) -> FloorPlan {
             }
         };
 
-        let surge = index >= 6
-            && kind != RoomKind::Final
-            && kind != RoomKind::Transition
-            && i64::from(index) - last_surge >= 6
-            && rng.next_f32() < 0.16;
-        if surge {
-            last_surge = i64::from(index);
+        // ---- Encounter: at most one per room, never back-to-back rooms ----
+        let encounter = if matches!(kind, RoomKind::Final | RoomKind::Transition) || i64::from(index) - last_any < 2 {
+            None
+        } else {
+            let mut chosen = None;
+            let order = [
+                (Encounter::Whisperer, &cfg.whisperer, light == LightState::Dark),
+                (Encounter::Undertow, &cfg.undertow, true),
+                (Encounter::Surge, &cfg.surge, true),
+                (Encounter::Hush, &cfg.hush, light != LightState::Dark),
+                (Encounter::Gallery, &cfg.gallery, light != LightState::Dark && kind != RoomKind::Hall),
+            ];
+            for (enc, t, allowed) in order {
+                let since = i64::from(index) - last_seen.get(&enc).copied().unwrap_or(-1000);
+                // Always draw the roll so the RNG stream doesn't depend on earlier outcomes.
+                let roll = rng.next_f32();
+                if chosen.is_none() && allowed && index >= t.min_room && since >= i64::from(t.cooldown) && roll < t.chance {
+                    chosen = Some(enc);
+                }
+            }
+            chosen
+        };
+        if let Some(e) = encounter {
+            last_seen.insert(e, i64::from(index));
+            last_any = i64::from(index);
         }
+        let surge = encounter.is_some_and(Encounter::needs_hiding);
 
         let containers = match kind {
             RoomKind::Hall => rng.below(2) as u8,
@@ -310,7 +361,7 @@ pub fn generate(seed: u64) -> FloorPlan {
             exit_x,
             containers,
             hiding,
-            surge,
+            encounter,
             mimic,
             seed: rng.next_u64(),
         });
@@ -388,9 +439,9 @@ mod tests {
         let mut total = 0;
         for seed in 0..100 {
             let plan = generate(seed);
-            let surges: Vec<u32> = plan.rooms.iter().filter(|r| r.surge).map(|r| r.index).collect();
+            let surges: Vec<u32> = plan.rooms.iter().filter(|r| r.encounter == Some(Encounter::Surge)).map(|r| r.index).collect();
             total += surges.len();
-            for r in plan.rooms.iter().filter(|r| r.surge) {
+            for r in plan.rooms.iter().filter(|r| r.surge()) {
                 assert!(r.hiding, "surge room {} must have a hiding spot", r.index);
                 assert!(r.index >= 6);
             }
@@ -399,6 +450,33 @@ mod tests {
             }
         }
         assert!(total > 100, "surge should appear several times per floor on average");
+    }
+
+    #[test]
+    fn encounters_respect_their_rules() {
+        let cfg = EntityConfig::default();
+        let mut seen = std::collections::HashMap::new();
+        for seed in 0..200 {
+            let plan = generate(seed);
+            let mut prev: Option<u32> = None;
+            for r in &plan.rooms {
+                let Some(e) = r.encounter else { continue };
+                *seen.entry(e).or_insert(0) += 1;
+                if let Some(p) = prev {
+                    assert!(r.index - p >= 2, "encounters in adjacent rooms");
+                }
+                prev = Some(r.index);
+                match e {
+                    Encounter::Whisperer => assert_eq!(r.light, LightState::Dark),
+                    Encounter::Gallery | Encounter::Hush => assert_ne!(r.light, LightState::Dark),
+                    Encounter::Undertow => assert!(r.index >= cfg.undertow.min_room && r.hiding),
+                    Encounter::Surge => assert!(r.hiding),
+                }
+            }
+        }
+        for e in [Encounter::Surge, Encounter::Undertow, Encounter::Whisperer, Encounter::Gallery, Encounter::Hush] {
+            assert!(seen.get(&e).copied().unwrap_or(0) > 20, "{e:?} too rare: {seen:?}");
+        }
     }
 
     #[test]

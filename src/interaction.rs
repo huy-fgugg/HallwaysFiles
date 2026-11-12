@@ -63,6 +63,8 @@ pub struct Drawer {
     pub has_key: bool,
     /// (room, drawer id) for persistence on the generated floor.
     pub tag: Option<(u32, u8)>,
+    /// An item found inside instead of (or as well as) Lumens.
+    pub item: Option<crate::items::ItemKind>,
 }
 
 #[derive(Component, Debug)]
@@ -96,6 +98,10 @@ pub struct AnimatedPart {
 
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct InteractTarget(pub Option<Entity>);
+
+/// True while a rushing entity is on its way or passing; pauses the hide timer.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct ThreatActive(pub bool);
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum HidePhase {
@@ -180,6 +186,7 @@ pub struct InteractionPlugin;
 impl Plugin for InteractionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InteractTarget>()
+            .init_resource::<ThreatActive>()
             .init_resource::<HideState>()
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| {
                 c.insert_resource(HideState::default());
@@ -256,6 +263,7 @@ fn interact(
     mut runtime: Option<ResMut<crate::floor::FloorRuntime>>,
     mimics: Query<&crate::floor::build::MimicOf>,
     (mut shake, mut death, mut next_overlay): (ResMut<CameraShake>, ResMut<crate::hollow::DeathCause>, ResMut<NextState<crate::state::Overlay>>),
+    (mut inv, item_cfg): (ResMut<crate::items::Inventory>, Res<crate::data::ItemConfig>),
 ) {
     if !interact_pressed(&keys, &pads) {
         return;
@@ -276,7 +284,7 @@ fn interact(
             let Ok(mut door) = doors.get_mut(e) else { return };
             if door.mimic {
                 // Mimic: the "door" lunges. Damage, scare, and a lesson.
-                commands.entity(e).remove::<Interactable>();
+                commands.entity(e).try_remove::<Interactable>();
                 if let (Some(rt), Ok(m)) = (runtime.as_mut(), mimics.get(e)) {
                     rt.mimics_triggered.insert(m.0);
                 }
@@ -299,17 +307,31 @@ fn interact(
                     door.key_room = None;
                     door.open = true;
                     if door.blocker != Entity::PLACEHOLDER {
-                        commands.entity(door.blocker).remove::<Collider>();
+                        commands.entity(door.blocker).try_remove::<Collider>();
                     }
-                    commands.entity(e).remove::<Interactable>();
+                    commands.entity(e).try_remove::<Interactable>();
                     if let Some(rt) = runtime.as_mut() {
                         rt.opened.insert(door.number);
                     }
                     sfx.write(PlaySfx(Sfx::DoorOpen));
                     subs.write(Subtitle::info("[The key turns. The door creaks open]"));
+                } else if door.key_room.is_some() && (inv.take(crate::items::ItemKind::SkeletonKey) || inv.take(crate::items::ItemKind::Lockpick)) {
+                    door.locked = false;
+                    door.key_room = None;
+                    door.open = true;
+                    if door.blocker != Entity::PLACEHOLDER {
+                        commands.entity(door.blocker).try_remove::<Collider>();
+                    }
+                    commands.entity(e).try_remove::<Interactable>();
+                    if let Some(rt) = runtime.as_mut() {
+                        rt.opened.insert(door.number);
+                    }
+                    sfx.write(PlaySfx(Sfx::DoorLocked));
+                    sfx.write(PlaySfx(Sfx::DoorOpen));
+                    subs.write(Subtitle::info("[Click] You work the lock open."));
                 } else if door.key_room.is_some() {
                     sfx.write(PlaySfx(Sfx::DoorLocked));
-                    subs.write(Subtitle::info("Locked. The key is in one of this room's drawers."));
+                    subs.write(Subtitle::info("Locked. The key is in one of this room's drawers (or use a Lockpick)."));
                 } else {
                     sfx.write(PlaySfx(Sfx::DoorLocked));
                     subs.write(Subtitle::info("[Handle rattles] It won't budge. Not yet."));
@@ -317,9 +339,9 @@ fn interact(
             } else if !door.open {
                 door.open = true;
                 if door.blocker != Entity::PLACEHOLDER {
-                    commands.entity(door.blocker).remove::<Collider>();
+                    commands.entity(door.blocker).try_remove::<Collider>();
                 }
-                commands.entity(e).remove::<Interactable>();
+                commands.entity(e).try_remove::<Interactable>();
                 if let Some(rt) = runtime.as_mut() {
                     rt.opened.insert(door.number);
                 }
@@ -332,6 +354,7 @@ fn interact(
             drawer.open = !drawer.open;
             if drawer.open {
                 sfx.write(PlaySfx(Sfx::DrawerOpen));
+                let had_item = drawer.item.is_some();
                 if !drawer.searched {
                     drawer.searched = true;
                     if let (Some(rt), Some(tag)) = (runtime.as_mut(), drawer.tag) {
@@ -344,13 +367,30 @@ fn interact(
                         sfx.write(PlaySfx(Sfx::Pickup));
                         subs.write(Subtitle::info(format!("Found the key to Door {:03}", drawer.tag.map_or(0, |t| t.0 + 1))));
                     }
+                    if let Some(item) = drawer.item.take() {
+                        use crate::items::AddResult;
+                        let name = item.tuning(&item_cfg).name.clone();
+                        sfx.write(PlaySfx(Sfx::Pickup));
+                        let msg = match inv.add(item, &item_cfg) {
+                            AddResult::Recharged => "Found batteries: flashlight recharged.".to_string(),
+                            AddResult::StackFull => format!("Found a {name}, but you can't carry more."),
+                            AddResult::Replaced(old) => format!("Found a {name}. Dropped your {} to make room.", old.tuning(&item_cfg).name),
+                            _ if item == crate::items::ItemKind::Flashlight => format!("Found a {name}. Press F to switch it on."),
+                            _ => format!("Found a {name}. Select it (1-3) and press Q to use."),
+                        };
+                        subs.write(Subtitle::info(msg));
+                        // Keep the Lumens message from overwriting the item message.
+                        if drawer.loot.is_none() {
+                            return;
+                        }
+                    }
                     match drawer.loot.take() {
                         Some(n) => {
                             run.lumens += n;
                             sfx.write(PlaySfx(Sfx::Pickup));
                             subs.write(Subtitle::info(format!("Found {n} Lumens")));
                         }
-                        None if !drawer.has_key => {
+                        None if !drawer.has_key && !had_item => {
                             subs.write(Subtitle::info("Empty."));
                         }
                         None => {}
@@ -382,6 +422,7 @@ fn update_hiding(
     mut shake: ResMut<CameraShake>,
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
+    threat: Res<ThreatActive>,
 ) {
     let dt = time.delta_secs();
     hide.cooldown = (hide.cooldown - dt).max(0.0);
@@ -412,6 +453,8 @@ fn update_hiding(
         }
         HidePhase::Hidden(t) => {
             spot.doors_target = 0.06; // a crack to peek through
+            // You hold your breath while something is out there: the timer pauses.
+            let dt = if threat.0 { 0.0 } else { dt };
             match hide_tick(t, dt, hide.warned) {
                 HideTick::Nothing => hide.phase = HidePhase::Hidden(t + dt),
                 HideTick::Warn => {

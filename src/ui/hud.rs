@@ -34,6 +34,20 @@ struct SubtitleBox;
 struct SubtitleText;
 #[derive(Component)]
 struct HudRoot;
+#[derive(Component)]
+struct ItemSlot(usize);
+#[derive(Component)]
+struct ItemLabel(usize);
+#[derive(Component)]
+struct ItemCount(usize);
+#[derive(Component)]
+struct ItemStripe(usize);
+#[derive(Component)]
+struct ItemIcon(usize);
+#[derive(Component)]
+struct BatteryBar;
+#[derive(Component)]
+struct BatteryFill;
 
 #[derive(Resource, Default)]
 struct ActiveSubtitle {
@@ -50,7 +64,7 @@ impl Plugin for HudPlugin {
             .add_systems(OnEnter(AppState::Playing), spawn_hud)
             .add_systems(
                 Update,
-                (update_labels, update_prompt, update_hide_overlay, update_subtitles, hud_visibility)
+                (update_labels, update_prompt, update_hide_overlay, update_subtitles, hud_visibility, update_items)
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -119,31 +133,53 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
                     .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(2)), ..default() }, BackgroundColor(t.text.with_alpha(0.85)), VitalityFill));
                 });
 
-            // Bottom-centre: item slots.
+            // Bottom-centre: item slots (+ flashlight battery bar above them).
             root.spawn(Node {
                 position_type: PositionType::Absolute,
                 bottom: px(24),
                 width: percent(100),
-                justify_content: JustifyContent::Center,
-                column_gap: px(10),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(6),
                 ..default()
             })
-            .with_children(|c| {
-                for i in 1..=3 {
-                    c.spawn((
-                        Node {
-                            width: px(64),
-                            height: px(64),
-                            border: UiRect::all(px(t.border)),
-                            border_radius: BorderRadius::all(px(t.radius)),
-                            padding: UiRect::all(px(4)),
-                            ..default()
-                        },
-                        BackgroundColor(t.panel.with_alpha(0.6)),
-                        BorderColor::all(t.panel_border),
-                    ))
-                    .with_child((Text::new(i.to_string()), t.font(true, t.size_small), TextColor(t.text_dim)));
-                }
+            .with_children(|col| {
+                col.spawn((Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() }, Visibility::Hidden, BatteryBar))
+                    .with_children(|b| {
+                        b.spawn((Text::new("BATTERY"), t.font(false, 13.0), TextColor(t.text_dim)));
+                        b.spawn((Node { width: px(150), height: px(6), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(t.panel.with_alpha(0.9))))
+                            .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(crate::items::ItemKind::Flashlight.color()), BatteryFill));
+                    });
+                col.spawn(Node { column_gap: px(10), ..default() }).with_children(|c| {
+                    for i in 0..crate::items::SLOTS {
+                        c.spawn((
+                            Node {
+                                width: px(78),
+                                height: px(84),
+                                border: UiRect::all(px(t.border)),
+                                border_radius: BorderRadius::all(px(t.radius)),
+                                padding: UiRect::all(px(5)),
+                                flex_direction: FlexDirection::Column,
+                                justify_content: JustifyContent::SpaceBetween,
+                                ..default()
+                            },
+                            BackgroundColor(t.panel.with_alpha(0.65)),
+                            BorderColor::all(t.panel_border),
+                            ItemSlot(i),
+                        ))
+                        .with_children(|slot| {
+                            slot.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|top| {
+                                top.spawn((Text::new((i + 1).to_string()), t.font(true, 13.0), TextColor(t.text_dim)));
+                                top.spawn((Text::new(""), t.font(true, 13.0), TextColor(t.text), ItemCount(i)));
+                            });
+                            // Item picture, with its short name underneath.
+                            slot.spawn(Node { width: percent(100), justify_content: JustifyContent::Center, ..default() })
+                                .with_child((ImageNode::default(), Node { width: px(36), height: px(36), ..default() }, Visibility::Hidden, ItemIcon(i)));
+                            slot.spawn((Text::new(""), t.font(true, 11.0), TextColor(t.text), ItemLabel(i), Node { align_self: AlignSelf::Center, ..default() }));
+                            slot.spawn((Node { width: percent(100), height: px(4), border_radius: BorderRadius::all(px(2)), ..default() }, BackgroundColor(Color::NONE), ItemStripe(i)));
+                        });
+                    }
+                });
             });
 
             // Centre: crosshair + prompt.
@@ -367,5 +403,58 @@ fn update_subtitles(
             text.0 = active.text.clone();
         }
         color.0 = if active.danger { theme.danger } else { theme.text };
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn update_items(
+    theme: Res<UiTheme>,
+    inv: Res<crate::items::Inventory>,
+    mut slots: Query<(&ItemSlot, &mut BorderColor)>,
+    mut texts: ParamSet<(Query<(&ItemLabel, &mut Text, &mut TextColor)>, Query<(&ItemCount, &mut Text)>)>,
+    mut stripes: Query<(&ItemStripe, &mut BackgroundColor), Without<BatteryFill>>,
+    mut bar: Query<&mut Visibility, With<BatteryBar>>,
+    mut fill: Query<&mut Node, With<BatteryFill>>,
+    icons: Res<crate::icons::ItemIcons>,
+    mut images: Query<(&ItemIcon, &mut ImageNode, &mut Visibility), Without<BatteryBar>>,
+) {
+    if !inv.is_changed() {
+        return;
+    }
+    for (slot, mut img, mut vis) in &mut images {
+        match inv.slots[slot.0].and_then(|s| icons.0.get(&s.kind)) {
+            Some(h) => {
+                img.image = h.clone();
+                *vis = Visibility::Inherited;
+            }
+            None => *vis = Visibility::Hidden,
+        }
+    }
+    for (slot, mut border) in &mut slots {
+        let c = if slot.0 == inv.selected { theme.interact } else { theme.panel_border };
+        *border = BorderColor::all(c);
+    }
+    for (l, mut text, mut color) in &mut texts.p0() {
+        let st = inv.slots[l.0];
+        text.0 = st.map(|s| s.kind.short().to_string()).unwrap_or_default();
+        color.0 = st.map(|s| s.kind.color()).unwrap_or(theme.text);
+    }
+    for (c, mut text) in &mut texts.p1() {
+        text.0 = match inv.slots[c.0] {
+            Some(s) if s.count > 1 => format!("x{}", s.count),
+            Some(s) if s.kind == crate::items::ItemKind::Flashlight && inv.flashlight_on => "ON".into(),
+            _ => String::new(),
+        };
+    }
+    for (s, mut bg) in &mut stripes {
+        bg.0 = inv.slots[s.0].map(|st| st.kind.color().with_alpha(0.8)).unwrap_or(Color::NONE);
+    }
+    let has_light = inv.has(crate::items::ItemKind::Flashlight);
+    for mut v in &mut bar {
+        *v = if has_light { Visibility::Inherited } else { Visibility::Hidden };
+    }
+    for mut n in &mut fill {
+        let f = if inv.battery_max > 0.0 { inv.battery / inv.battery_max } else { 0.0 };
+        n.width = percent(f * 100.0);
     }
 }

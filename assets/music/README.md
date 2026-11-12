@@ -5,6 +5,7 @@ Put your own tracks here. Name them exactly like this (any of `.ogg`, `.mp3`, `.
 | File name | Where it plays | Loops? |
 |-----------|----------------|--------|
 | `menu.ogg` | Main menu | yes |
+| `elevator.ogg` | Inside the lift while players gather, until everyone has joined (then a 15 s countdown) or the host presses Enter | yes |
 | `ambience.ogg` | Exploring the rooms | yes |
 | `chase.ogg` | While an entity is hunting you | yes |
 

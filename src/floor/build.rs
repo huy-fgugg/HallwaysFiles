@@ -171,11 +171,11 @@ pub fn spawn_room(
 
     // ---- Lighting ----
     let area_m2 = r.width() * r.depth();
-    let base = 340_000.0 * (area_m2 / 40.0).clamp(0.8, 2.6) * if r.area == Area::Atrium { 1.8 } else { 1.0 };
+    let base = 450_000.0 * (area_m2 / 40.0).clamp(0.8, 2.6) * if r.area == Area::Atrium { 1.8 } else { 1.0 };
     let (scale, depth) = match r.light {
         LightState::Bright => (1.0, 0.05),
-        LightState::Dim => (0.5, 0.15),
-        LightState::Dark => (0.04, 0.8),
+        LightState::Dim => (0.62, 0.15),
+        LightState::Dark => (0.07, 0.8),
     };
     let warm = match r.area {
         Area::ServiceTunnels => Color::srgb(0.9, 0.95, 1.0),
@@ -226,8 +226,8 @@ pub fn spawn_room(
         let e = b
             .commands
             .spawn((
-                PointLight { color: warm, intensity: 28_000.0, range: 5.0, ..default() },
-                Flicker { base: 28_000.0, seed: r.index as f32 + dx, depth: 0.06 },
+                PointLight { color: warm, intensity: 40_000.0, range: 6.0, ..default() },
+                Flicker { base: 40_000.0, seed: r.index as f32 + dx, depth: 0.06 },
                 Transform::from_translation(tf.transform_point(Vec3::new(0.0, 0.12, 0.26))),
             ))
             .id();
@@ -286,6 +286,7 @@ pub fn spawn_room(
         b.commands.entity(k).entry::<Drawer>().and_modify(|mut d| {
             d.has_key = true;
             d.loot = None;
+            d.item = None;
         });
     }
     // Decor in the remaining slots.
@@ -334,17 +335,28 @@ pub struct OpenOnSpawn;
 #[derive(Component)]
 pub struct MimicOf(pub u32);
 
-fn drawer_loot(r: &RoomPlan, id: u8) -> Option<u32> {
+/// (Lumens, item) for a drawer, deterministic per room seed.
+pub fn drawer_loot(r: &RoomPlan, id: u8, items: &crate::data::ItemConfig) -> (Option<u32>, Option<crate::items::ItemKind>) {
     let mut rng = GameRng::fork(r.seed, 500 + u64::from(id));
-    if rng.next_f32() < 0.5 { Some(1 + rng.below(6)) } else { None }
+    let roll = rng.next_f32();
+    let pick = rng.next_f32();
+    let amount = 1 + rng.below(6);
+    if roll < items.item_chance {
+        (None, Some(crate::items::ItemKind::roll(items, pick)))
+    } else if roll < items.item_chance + 0.45 {
+        (Some(amount), None)
+    } else {
+        (None, None)
+    }
 }
 
 fn logical_drawer(b: &mut Builder, r: &RoomPlan, rt: &FloorRuntime, id: u8, aabb: Aabb) -> Entity {
     let searched = rt.searched.contains(&(r.index, id));
+    let (loot, item) = if searched { (None, None) } else { drawer_loot(r, id, &rt.items) };
     let e = b
         .commands
         .spawn((
-            Drawer { open: false, t: 0.0, loot: if searched { None } else { drawer_loot(r, id) }, searched, has_key: false, tag: Some((r.index, id)) },
+            Drawer { open: false, t: 0.0, loot, searched, has_key: false, tag: Some((r.index, id)), item },
             Interactable { kind: InteractKind::Drawer, aabb },
         ))
         .id();

@@ -18,7 +18,24 @@ const ROOM_SHOTS: &[(&str, u32, f32)] = &[
     ("23_quarry", 64, 0.0),
     ("24_atrium", 84, 0.0),
     ("25_final_door", 99, 0.0),
+    // Special shots: the room is chosen from the plan (see `pick_room`).
+    ("26_gallery", 0, 0.0),
+    ("27_hush", 0, 0.0),
+    ("28_dark_flashlight", 0, 0.0),
+    ("29_inventory", 4, 0.0),
 ];
+
+/// For special shots, find a suitable room in this seed's floor.
+fn pick_room(label: &str, plan: &crate::floor::plan::FloorPlan) -> Option<(u32, Option<crate::floor::plan::Encounter>)> {
+    use crate::floor::plan::{Encounter, LightState, RoomKind};
+    let lit = |r: &&crate::floor::plan::RoomPlan| r.light != LightState::Dark && r.kind != RoomKind::Hall && r.encounter.is_none();
+    match label {
+        "26_gallery" => plan.rooms.iter().filter(|r| r.index >= 30).find(lit).map(|r| (r.index, Some(Encounter::Gallery))),
+        "27_hush" => plan.rooms.iter().filter(|r| r.index >= 50).find(lit).map(|r| (r.index, Some(Encounter::Hush))),
+        "28_dark_flashlight" => plan.rooms.iter().find(|r| r.light == LightState::Dark && r.index >= 10 && r.encounter.is_none()).map(|r| (r.index, None)),
+        _ => None,
+    }
+}
 
 /// (label, feet position, yaw, pitch). `None` = main menu for the first
 /// shot, and "hold position, keep the clock running" afterwards (used to
@@ -29,6 +46,7 @@ const SHOTS: &[Shot] = &[
     ("01_main_menu", None, 0.0, 0.0),
     ("02_spawn_view", Some(Vec3::new(0.0, 0.0, 3.4)), 0.0, -0.05),
     ("02b_inside_lift", Some(Vec3::new(0.0, 0.0, 6.9)), 0.0, 0.05),
+    ("02d_lobby", Some(Vec3::new(0.0, 0.0, 6.9)), 0.0, 0.05),
     ("02c_lift_from_room", Some(Vec3::new(0.4, 0.0, 1.6)), std::f32::consts::PI, 0.05),
     ("03_drawer_cabinet", Some(Vec3::new(-2.2, 0.0, -1.6)), 1.5708, -0.25),
     ("04_wardrobe", Some(Vec3::new(1.4, 0.0, 1.4)), -1.5708, 0.0),
@@ -69,23 +87,82 @@ fn run_capture(
     mut exit: MessageWriter<AppExit>,
     floor: Option<Res<crate::floor::Floor>>,
     mut rt: Option<ResMut<crate::floor::FloorRuntime>>,
+    (mut force, mut inv): (ResMut<crate::encounters::ForceEncounter>, ResMut<crate::items::Inventory>),
+    (mut run, app_overlay, mut next_overlay): (ResMut<crate::run::RunState>, Res<State<crate::state::Overlay>>, ResMut<NextState<crate::state::Overlay>>),
+    mut lobby: ResMut<crate::lobby::LiftLobby>,
 ) {
     cap.timer += time.delta_secs();
     cap.frames += 1;
+    // HALLWAYS_CAPTURE_ONLY=28 photographs only shots whose label starts with "28".
+    if let Ok(only) = std::env::var("HALLWAYS_CAPTURE_ONLY") {
+        let label = SHOTS.get(cap.index).map(|s| s.0).or_else(|| ROOM_SHOTS.get(cap.index - SHOTS.len().min(cap.index)).map(|s| s.0));
+        if let Some(l) = label
+            && !l.starts_with(&only)
+            && !l.starts_with("01")
+        {
+            cap.index += 1;
+            cap.frames = 0;
+            cap.timer = 0.0;
+            return;
+        }
+    }
     let Some(&(label, pos, yaw, pitch)) = SHOTS.get(cap.index) else {
         // Generated-floor tour: stand near each room's south side looking at its exit.
         let k = cap.index - SHOTS.len();
-        let Some(&(label, room, _)) = ROOM_SHOTS.get(k) else {
+        let Some(&(label, mut room, _)) = ROOM_SHOTS.get(k) else {
             if cap.timer > 2.0 {
                 exit.write(AppExit::Success);
             }
             return;
         };
+        if *app_state.get() != AppState::Playing {
+            next_app.set(AppState::Playing);
+            cap.frames = 0;
+            return;
+        }
         let (Some(floor), Ok((mut pl, mut tf))) = (floor, player.single_mut()) else { return };
+        if room == 0 {
+            let Some((r, enc)) = pick_room(label, &floor.0) else {
+                cap.index += 1;
+                return;
+            };
+            room = r;
+            force.0 = enc.map(|e| (r, e));
+            if enc.is_none() {
+                // e.g. the flashlight shot: nothing should attack.
+                force.0 = None;
+            }
+            if label.contains("flashlight") && cap.frames < 3 {
+                let cfg = crate::data::ItemConfig::default();
+                if !inv.has(crate::items::ItemKind::Flashlight) {
+                    inv.add(crate::items::ItemKind::Flashlight, &cfg);
+                }
+                inv.flashlight_on = true;
+            }
+        }
+        if room != 0 && !label.starts_with("26") && !label.starts_with("27") {
+            force.0 = None;
+        }
+        if label == "29_inventory" && cap.frames < 3 {
+            let cfg = crate::data::ItemConfig::default();
+            *inv = crate::items::Inventory::default();
+            for k in [crate::items::ItemKind::Flashlight, crate::items::ItemKind::Lockpick, crate::items::ItemKind::Lockpick, crate::items::ItemKind::Bandage] {
+                inv.add(k, &cfg);
+            }
+            inv.selected = 1;
+        }
         let Some(r) = floor.0.room(room) else { return };
         if let Some(rt) = rt.as_mut() {
-            // Pretend the doors behind are open so the view isn't blocked.
+            // Keep showcase shots clean: no natural encounters in these rooms.
             rt.surges_done.insert(room);
+            if force.0.is_none() {
+                rt.encounters_done.insert(room);
+            }
+        }
+        // The capture camera can't look away or hide, so it never takes damage.
+        run.vitality = 100.0;
+        if *app_overlay.get() == crate::state::Overlay::Dead {
+            next_overlay.set(crate::state::Overlay::None);
         }
         if cap.frames < 6 {
             tf.translation = Vec3::new(r.entry_x, 0.0, r.max.y - 0.8);
@@ -107,6 +184,8 @@ fn run_capture(
         }
         return;
     };
+    // Show the elevator lobby panel for its shot only.
+    lobby.waiting = label == "02d_lobby";
     // Settle time: longer for the first frames (shader compile + asset load).
     let settle = if cap.index <= 1 { 8.0 } else { 3.0 };
     if let Some(p) = pos {

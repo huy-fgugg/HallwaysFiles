@@ -80,7 +80,11 @@ impl Plugin for RunPlugin {
     }
 }
 
-fn tick_timer(time: Res<Time>, mut run: ResMut<RunState>) {
+fn tick_timer(time: Res<Time>, mut run: ResMut<RunState>, lobby: Option<Res<crate::lobby::LiftLobby>>) {
+    // The clock starts when the lift leaves, not while players gather.
+    if lobby.is_some_and(|l| l.waiting) {
+        return;
+    }
     run.elapsed += time.delta_secs();
     run.best_room = run.best_room.max(run.current_room);
 }

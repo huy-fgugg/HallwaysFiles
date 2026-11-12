@@ -6,6 +6,7 @@
 //! | Track            | Slot (any of .ogg / .mp3 / .wav)        | Plays          |
 //! |------------------|-----------------------------------------|----------------|
 //! | Menu             | `assets/music/menu`                     | loop           |
+//! | Elevator lobby   | `assets/music/elevator`                 | loop           |
 //! | Ambience         | `assets/music/ambience`                 | loop           |
 //! | Chase            | `assets/music/chase`                    | loop           |
 //! | Cutscene `<id>`  | `assets/cutscenes/<id>/music`           | once, synced   |
@@ -37,6 +38,8 @@ pub const FADE_SECS: f32 = 1.5;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MusicTrack {
     Menu,
+    /// Loops in the elevator while players gather.
+    Lift,
     Ambience,
     Chase,
     Cutscene(String),
@@ -51,6 +54,7 @@ impl MusicTrack {
     pub fn slot(&self) -> String {
         match self {
             MusicTrack::Menu => "music/menu".into(),
+            MusicTrack::Lift => "music/elevator".into(),
             MusicTrack::Ambience => "music/ambience".into(),
             MusicTrack::Chase => "music/chase".into(),
             MusicTrack::Cutscene(id) => format!("cutscenes/{id}/music"),
@@ -121,11 +125,19 @@ impl Plugin for MusicPlugin {
 }
 
 /// Baseline choice; cutscene/chase systems override it later in the frame.
-fn default_wants(app: Res<State<AppState>>, mut director: ResMut<MusicDirector>, chase: Option<Res<crate::hollow::ChaseState>>, cut: Option<Res<crate::cutscene::ActiveCutscene>>) {
+fn default_wants(
+    app: Res<State<AppState>>,
+    mut director: ResMut<MusicDirector>,
+    chase: Option<Res<crate::hollow::ChaseState>>,
+    cut: Option<Res<crate::cutscene::ActiveCutscene>>,
+    lobby: Option<Res<crate::lobby::LiftLobby>>,
+) {
     let wanted = match app.get() {
         AppState::MainMenu => Some(MusicTrack::Menu),
         AppState::Playing => {
-            if let Some(c) = cut.as_ref().filter(|c| c.def.is_some()) {
+            if lobby.is_some_and(|l| l.waiting) {
+                Some(MusicTrack::Lift)
+            } else if let Some(c) = cut.as_ref().filter(|c| c.def.is_some()) {
                 Some(MusicTrack::Cutscene(c.id.clone()))
             } else if chase.is_some_and(|c| c.active) {
                 Some(MusicTrack::Chase)
@@ -151,6 +163,7 @@ fn source_for(track: &MusicTrack, asset_server: &AssetServer, cache: &mut ScoreC
         .or_insert_with(|| {
             let samples = match track {
                 MusicTrack::Menu => synth_menu_theme(),
+                MusicTrack::Lift => synth_lift_theme(),
                 MusicTrack::Ambience => synth_ambience(),
                 MusicTrack::Chase => synth_chase_theme(),
                 MusicTrack::Cutscene(id) if id.contains("hollow") => synth_hollow_cue(),
@@ -335,6 +348,60 @@ pub fn synth_menu_theme() -> Vec<f32> {
     normalize(fold_loop(wet, (loop_secs * SR) as usize), 0.8)
 }
 
+/// Elevator music (original): 24 s loop of mellow electric-piano seventh
+/// chords and a walking bass at 80 BPM, with a slow tape wobble that makes it
+/// slightly wrong. Calm on the surface, uneasy underneath.
+pub fn synth_lift_theme() -> Vec<f32> {
+    let loop_secs = 24.0;
+    let len = (loop_secs * SR) as usize + (3.0 * SR) as usize;
+    let mut buf = vec![0.0; len];
+    let beat = 60.0 / 80.0; // 0.75 s; 32 beats = 24 s
+    // Tape wobble: a slow pitch drift applied to every note.
+    let wobble = |t: f32, abs: f32| 1.0 + 0.004 * (TAU * 0.23 * (abs + t)).sin();
+    let epiano = move |t: f32, f: f32, abs: f32| {
+        let w = wobble(t, abs);
+        let env = (-t * 1.4).exp() * (t / 0.006).min(1.0);
+        let trem = 0.85 + 0.15 * (TAU * 4.5 * t).sin();
+        ((TAU * f * w * t).sin() + (TAU * f * w * 2.0 * t).sin() * 0.25 * (-t * 4.0).exp() + (TAU * f * w * 7.1 * t).sin() * 0.04 * (-t * 9.0).exp()) * env * trem * 0.11
+    };
+    // Dmaj7 - Bm7 - Em9 - A13(sus), two bars each (8 beats).
+    let chords: [&[f32]; 4] = [&[50.0, 57.0, 61.0, 66.0], &[47.0, 54.0, 57.0, 62.0], &[52.0, 59.0, 62.0, 66.0], &[45.0, 55.0, 59.0, 64.0]];
+    let roots = [38.0f32, 35.0, 40.0, 33.0];
+    for (ci, chord) in chords.iter().enumerate() {
+        let bar0 = ci as f32 * 8.0 * beat;
+        // Comp on beats 1 and the "and" of 2, both bars.
+        for hit in [0.0f32, 1.5, 4.0, 5.5] {
+            let start = bar0 + hit * beat;
+            for &n in chord.iter() {
+                let f = midi(n);
+                add_note(&mut buf, start, 2.5, move |t| epiano(t, f, start));
+            }
+        }
+        // Walking bass: root, fifth, octave, approach tone.
+        for (k, off) in [0.0f32, 7.0, 12.0, 11.0, 0.0, 7.0, 5.0, 2.0].iter().enumerate() {
+            let f = midi(roots[ci] + off);
+            let start = bar0 + k as f32 * beat;
+            add_note(&mut buf, start, beat * 0.95, move |t| (TAU * f * wobble(t, start) * t).sin() * (-t * 3.0).exp() * (t / 0.01).min(1.0) * 0.22);
+        }
+    }
+    // Soft brushed hi-hat on 2 and 4.
+    for b in 0..32 {
+        if b % 2 == 1 {
+            add_note(&mut buf, b as f32 * beat, 0.2, move |t| {
+                let mut r = GameRng::new(((b as f32 + t) * SR) as u64);
+                (r.next_f32() * 2.0 - 1.0) * (-t * 22.0).exp() * 0.05
+            });
+        }
+    }
+    // A high, slightly detuned music-box line that doesn't quite fit the chords.
+    for (start, n) in [(3.0f32, 78.0f32), (9.0, 76.5), (15.0, 81.0), (21.0, 77.0)] {
+        let f = midi(n);
+        add_note(&mut buf, start, 2.5, move |t| pluck(t, f) * 0.5);
+    }
+    let wet = reverb(&buf, 0.3, 2.0);
+    normalize(fold_loop(wet, (loop_secs * SR) as usize), 0.75)
+}
+
 /// Chase: 120 BPM, 8 bars (16 s) loop: pounding pulse, chromatic bass, shrieking cluster.
 pub fn synth_chase_theme() -> Vec<f32> {
     let loop_secs = 16.0;
@@ -445,6 +512,9 @@ mod tests {
         assert_eq!(menu.len(), (32.0 * SR) as usize);
         let chase = synth_chase_theme();
         assert_eq!(chase.len(), (16.0 * SR) as usize);
+        let lift = synth_lift_theme();
+        assert_eq!(lift.len(), (24.0 * SR) as usize);
+        assert!(lift.iter().all(|s| s.is_finite() && s.abs() <= 1.0));
         assert!(menu.iter().chain(&chase).all(|s| s.is_finite() && s.abs() <= 1.0));
     }
 

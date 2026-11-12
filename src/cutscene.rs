@@ -193,7 +193,7 @@ impl Plugin for CutscenePlugin {
             .add_message::<CutsceneEnded>()
             .init_resource::<ActiveCutscene>()
             .init_resource::<SeenCutscenes>()
-            .add_systems(OnEnter(AppState::Playing), (spawn_cutscene_ui, reset, play_intro_once).chain())
+            .add_systems(OnEnter(AppState::Playing), (spawn_cutscene_ui, reset).chain())
             .add_systems(OnExit(AppState::Playing), |mut a: ResMut<ActiveCutscene>| *a = ActiveCutscene::default())
             .add_systems(
                 Update,
@@ -201,17 +201,6 @@ impl Plugin for CutscenePlugin {
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             );
-    }
-}
-
-/// Every run starts in the lift. The first run of a session plays the full
-/// arrival cutscene; retries just open the gate.
-fn play_intro_once(seen: Res<SeenCutscenes>, mut play: MessageWriter<PlayCutscene>, mut lift: MessageWriter<ElevatorCommand>) {
-    if !seen.0.iter().any(|s| s == INTRO) && std::env::var_os("HALLWAYS_CAPTURE").is_none() {
-        play.write(PlayCutscene(INTRO.into()));
-    } else {
-        lift.write(ElevatorCommand::Needle { to: 1.0, seconds: 0.0 });
-        lift.write(ElevatorCommand::OpenGate { seconds: 0.0 });
     }
 }
 

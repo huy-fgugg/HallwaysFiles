@@ -33,10 +33,12 @@ pub enum Sfx {
     Ding,
     GateRattle,
     SurgeRoar,
+    Whisper,
+    Heartbeat,
 }
 
 impl Sfx {
-    const ALL: [Sfx; 17] = [
+    const ALL: [Sfx; 19] = [
         Sfx::UiMove,
         Sfx::UiSelect,
         Sfx::DoorOpen,
@@ -54,6 +56,8 @@ impl Sfx {
         Sfx::Ding,
         Sfx::GateRattle,
         Sfx::SurgeRoar,
+        Sfx::Whisper,
+        Sfx::Heartbeat,
     ];
 
     fn is_stinger(self) -> bool {
@@ -236,6 +240,27 @@ fn synth_raw(sfx: Sfx) -> Vec<f32> {
                 })
                 .collect()
         }
+        Sfx::Whisper => {
+            // Breathy, syllable-like bursts of band-limited noise.
+            let len = n_samples(2.4);
+            let mut rng = GameRng::new(131);
+            let (mut lp, mut hp_prev, mut hp) = (0.0f32, 0.0f32, 0.0f32);
+            (0..len)
+                .map(|i| {
+                    let t = i as f32 / sr;
+                    let x = rng.next_f32() * 2.0 - 1.0;
+                    lp += (x - lp) * 0.35;
+                    hp = 0.9 * (hp + lp - hp_prev);
+                    hp_prev = lp;
+                    let syll = ((TAU * 3.1 * t).sin() * (TAU * 1.3 * t + 1.0).sin()).max(0.0).powf(0.7);
+                    hp * syll * env(t, 0.2, 2.4) * 1.4
+                })
+                .collect()
+        }
+        Sfx::Heartbeat => tone(0.6, |t| {
+            let thump = |t0: f32| if t >= t0 { (TAU * 52.0 * (t - t0)).sin() * (-(t - t0) * 18.0).exp() } else { 0.0 };
+            (thump(0.0) + thump(0.22) * 0.7) * 0.8
+        }),
         Sfx::Ding => tone(2.2, |t| {
             // Small brass bell: inharmonic partials, long decay.
             [1.0f32, 2.76, 5.4, 8.9].iter().enumerate().map(|(i, h)| (TAU * 988.0 * h * t).sin() * (-t * (2.0 + i as f32 * 1.5)).exp() / (i as f32 + 1.0)).sum::<f32>() * 0.3

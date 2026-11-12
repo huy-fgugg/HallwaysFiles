@@ -42,17 +42,25 @@ cargo test --lib
 | Sprint | Shift | L3 / LT |
 | Crouch | Ctrl or C | B / R3 |
 | Interact / hide / leave hiding | E | X |
+| Flashlight on/off | F | D-pad up |
+| Select item slot | 1 / 2 / 3, mouse wheel | LT / RT, D-pad left/right |
+| Use selected item | Q or right mouse | Y |
+| Start the lift (host) | Enter | A |
 | Pause | Esc | Start |
 | Menus | Arrows/WASD, Enter/Space, Esc | D-pad, A, B |
 | Skip cutscene | Hold Space | Hold A |
 
 ## Your own music and cutscenes
 
-- `assets/music/`: drop `menu.ogg`, `ambience.ogg` and `chase.ogg` here. Loops must be **20 s to 5 min**. See `assets/music/README.md`.
+- `assets/music/`: drop `menu.ogg`, `elevator.ogg`, `ambience.ogg` and `chase.ogg` here. Loops must be **20 s to 5 min**. See `assets/music/README.md`.
 - `assets/cutscenes/<name>/`: each cutscene has its own folder with an editable `cutscene.ron` timeline and a `music.ogg` slot. Cutscene music must be **at least the cutscene's length (14 s intro, 16 s Hollow) and at most 60 s**. See `assets/cutscenes/README.md`.
 - Credit any music you add in `assets/music/CREDITS.txt`; the in-game Credits screen shows it. Only add music you have permission to use.
 
 Empty slots fall back to the built-in original score.
+
+## Tuning
+
+`assets/data/entities.ron` (spawn chances, warning times, damage) and `assets/data/items.ron` (item rarity, battery, healing) are plain text. Edit them and restart the game. A broken edit falls back to the built-in values.
 
 ## Settings and saves
 
@@ -78,6 +86,12 @@ src/
   player.rs          first-person controller
   interaction.rs     doors, drawers, hiding spots, hide timer
   hollow.rs          The Hollow entity: emergence, chase AI, catch
+  surge.rs           The Surge and The Undertow (rushing entities)
+  encounters.rs      The Whisperer, The Gallery, The Hush
+  items.rs, icons.rs inventory, flashlight, item effects, pixel-art icons
+  lobby.rs           elevator lobby (players / host force-start)
+  floor/             100-door generator (plan.rs) and room builder (build.rs)
+  data.rs            loads assets/data/*.ron tuning
   cutscene.rs        data-driven cutscene engine (RON timelines)
   music.rs           music director, drop-in slots, original procedural score
   audio.rs           procedural sound effects

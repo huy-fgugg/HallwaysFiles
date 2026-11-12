@@ -35,9 +35,17 @@
 - [x] Tests: determinism, chaining, door fit, areas, cooldowns, surge hiding, mimic numbers, z lookup, streaming window, surge path and timing
 
 ## Phase 3: Entities and items
-- [ ] The Undertow, The Whisperer, The Gallery, The Hush, as data-driven RON configs
-- [ ] Inventory and items (flashlight, lockpick, vitamins, bandage, skeleton key)
-- [ ] Deterministic entity-schedule tests per seed
+- [x] Data-driven tuning: `assets/data/entities.ron`, `assets/data/items.ron` (with built-in fallbacks)
+- [x] The Undertow (multi-pass rusher), The Whisperer (look at it), The Gallery (look away), The Hush (stand still)
+- [x] One encounter per room, never in adjacent rooms; Whisperer only in dark rooms, Gallery and Hush only in lit ones
+- [x] Hide timer pauses while a rushing entity is out there
+- [x] 3-slot inventory with stacking and swap-on-full; Flashlight (battery), Lockpick, Vitamins, Bandage, Skeleton Key
+- [x] Drawers roll items; every run's first drawer has a flashlight
+- [x] Pixel-art item icons in the HUD; battery bar
+- [x] Elevator lobby: lift music loops until everyone joins (then a countdown) or the host force-starts
+- [x] Brighter rooms
+- [x] Deterministic encounter-schedule tests per seed
+- [x] Robustness: commands on streamed-out entities no longer crash the game
 
 ## Phase 4: UI polish
 - [ ] Item icons, vitality damage feedback, run summary with next unlock
@@ -54,4 +62,5 @@
 ## Known issues / not verified
 - Visual checks were done with software rendering (Mesa lavapipe) on Linux; real-GPU performance on Windows is unmeasured.
 - The CI smoke test cannot render (no GPU on GitHub runners); it only confirms the exe and assets package correctly.
-- Dark rooms have no flashlight yet (Phase 3); exit sconces keep them navigable.
+- Spot lights don't render on the Linux software renderer used for QA, so the flashlight also casts a point-light pool that works everywhere; the spot beam is unverified on real GPUs.
+- The lobby is single-player for now (always 1/1); networking will fill in the player counts.

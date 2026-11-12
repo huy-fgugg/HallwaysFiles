@@ -85,7 +85,7 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(GlobalAmbientLight { color: Color::srgb(0.55, 0.62, 0.8), brightness: 260.0, ..default() })
+        app.insert_resource(GlobalAmbientLight { color: Color::srgb(0.55, 0.62, 0.8), brightness: 340.0, ..default() })
             .init_resource::<Mood>()
             .add_plugins(elevator::ElevatorPlugin)
             .add_systems(OnEnter(AppState::Playing), (spawn_test_level, |mut m: ResMut<Mood>| *m = Mood::default()))
@@ -507,11 +507,13 @@ fn spawn_test_level(
         let aabb = world_aabb(Vec3::new(-0.52, *y0, 0.15), Vec3::new(0.52, *y1, 0.56), &cab_tf);
         let mut loot = loot_for(i as u64);
         if i == 0 && loot.is_none() {
-            loot = Some(3); // Phase 1: guarantee something to find
+            loot = Some(3); // guarantee something to find
         }
+        // Every run's first drawer holds a flashlight.
+        let item = (i == 0).then_some(crate::items::ItemKind::Flashlight);
         let owner = b
             .commands
-            .spawn((Drawer { open: false, t: 0.0, loot, searched: false, has_key: false, tag: None }, Interactable { kind: InteractKind::Drawer, aabb }, DespawnOnExit(AppState::Playing)))
+            .spawn((Drawer { open: false, t: 0.0, loot, searched: false, has_key: false, tag: None, item }, Interactable { kind: InteractKind::Drawer, aabb }, DespawnOnExit(AppState::Playing)))
             .id();
         let node = ["drawer_cabinet_drawer_01", "drawer_cabinet_drawer_02", "drawer_cabinet_drawer_03", "drawer_cabinet_drawer_04"][i];
         bindings.push(PartBinding { node, owner, motion: PartMotion::Slide(Vec3::Z * 0.32), reset_rotation: false });
@@ -536,7 +538,7 @@ fn spawn_test_level(
         let owner = b
             .commands
             .spawn((
-                Drawer { open: false, t: 0.0, loot: loot_for(10 + i as u64), searched: false, has_key: false, tag: None },
+                Drawer { open: false, t: 0.0, loot: loot_for(10 + i as u64), searched: false, has_key: false, tag: None, item: None },
                 Interactable { kind: InteractKind::Drawer, aabb },
                 DespawnOnExit(AppState::Playing),
             ))
@@ -627,13 +629,13 @@ fn spawn_test_level(
     b.commands.spawn((
         PointLight {
             color: Color::srgb(1.0, 0.78, 0.52),
-            intensity: 650_000.0,
+            intensity: 800_000.0,
             range: 16.0,
             radius: 0.05,
             shadow_maps_enabled: true,
             ..default()
         },
-        Flicker { base: 650_000.0, seed: 1.3, depth: 0.05 },
+        Flicker { base: 800_000.0, seed: 1.3, depth: 0.05 },
         Transform::from_xyz(0.0, height - 1.0, 0.6),
         DespawnOnExit(AppState::Playing),
     ));
@@ -652,13 +654,13 @@ fn spawn_test_level(
         b.commands.spawn((
             PointLight {
                 color: Color::srgb(1.0, 0.86, 0.6),
-                intensity: 90_000.0,
+                intensity: 120_000.0,
                 range: 10.0,
                 radius: 0.03,
                 shadow_maps_enabled: true,
                 ..default()
             },
-            Flicker { base: 90_000.0, seed: 4.7 + i as f32 * 3.1, depth: 0.35 },
+            Flicker { base: 120_000.0, seed: 4.7 + i as f32 * 3.1, depth: 0.35 },
             Transform::from_translation(tf.transform_point(Vec3::new(0.0, 0.12, 0.26))),
             DespawnOnExit(AppState::Playing),
         ));
@@ -672,8 +674,8 @@ fn spawn_test_level(
         let tf = Transform::from_xyz(x, 1.9, z).with_rotation(Quat::from_rotation_y(yaw));
         b.commands.spawn((model(&asset_server, "industrial_wall_sconce"), tf, DespawnOnExit(AppState::Playing)));
         b.commands.spawn((
-            PointLight { color: Color::srgb(1.0, 0.72, 0.45), intensity: 110_000.0, range: 9.0, radius: 0.03, shadow_maps_enabled: i < 2, ..default() },
-            Flicker { base: 110_000.0, seed: 9.1 + i as f32, depth: 0.08 },
+            PointLight { color: Color::srgb(1.0, 0.72, 0.45), intensity: 140_000.0, range: 9.0, radius: 0.03, shadow_maps_enabled: i < 2, ..default() },
+            Flicker { base: 140_000.0, seed: 9.1 + i as f32, depth: 0.08 },
             Transform::from_translation(tf.transform_point(Vec3::new(0.0, 0.12, 0.26))),
             DespawnOnExit(AppState::Playing),
         ));
@@ -817,7 +819,8 @@ fn bind_model_parts(
                     if binding.reset_rotation {
                         base.rotation = Quat::IDENTITY;
                     }
-                    commands.entity(e).insert((AnimatedPart { owner: binding.owner, base, motion: binding.motion }, base));
+                    // The room may have streamed out while its glTF finished loading.
+                    commands.entity(e).try_insert((AnimatedPart { owner: binding.owner, base, motion: binding.motion }, base));
                 }
                 break;
             }
