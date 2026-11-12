@@ -131,6 +131,8 @@ pub struct Opening {
     pub center: f32,
     pub width: f32,
     pub height: f32,
+    /// Sill height above the floor (raised doors on stair landings).
+    pub bottom: f32,
 }
 
 pub struct RoomStyle {
@@ -154,6 +156,8 @@ pub struct Builder<'a, 'w, 's> {
     pub(crate) parent: Option<Entity>,
     /// Generated room this geometry belongs to (for streaming).
     pub(crate) member: Option<u32>,
+    /// Floor height for doors built next (raised landings).
+    pub(crate) base_y: f32,
 }
 
 impl Builder<'_, '_, '_> {
@@ -249,8 +253,12 @@ impl Builder<'_, '_, '_> {
                     }
                 }
                 for o in &side_openings {
-                    let (lo, hi) = to_box(o.center - o.width / 2.0, o.center + o.width / 2.0, o.height, height, -WALL_T, 0.0);
+                    let (lo, hi) = to_box(o.center - o.width / 2.0, o.center + o.width / 2.0, o.bottom + o.height, height, -WALL_T, 0.0);
                     self.block(lo, hi, &style.wall, style.wall_tile, true);
+                    if o.bottom > 0.001 {
+                        let (lo, hi) = to_box(o.center - o.width / 2.0, o.center + o.width / 2.0, 0.0, o.bottom, -WALL_T, 0.0);
+                        self.block(lo, hi, &style.wall, style.wall_tile, true);
+                    }
                 }
             }
 
@@ -298,33 +306,55 @@ impl Builder<'_, '_, '_> {
         let (w, h, t) = (DOOR_W, DOOR_H, WALL_T);
         let (x0, x1) = (cx - w / 2.0, cx + w / 2.0);
         let (z_room, z_far) = (line, line - t);
+        // Raised doors (stair landings) shift everything up by the builder's base height.
+        let by = self.base_y;
 
         // Casing on both wall faces.
         for (zf, dir) in [(z_room, 1.0), (z_far, -1.0)] {
             let (za, zb) = (zf, zf + dir * 0.028);
-            self.block(Vec3::new(x0 - 0.095, 0.0, za), Vec3::new(x0, h + 0.095, zb), &m.trim_wood, 0.8, false);
-            self.block(Vec3::new(x1, 0.0, za), Vec3::new(x1 + 0.095, h + 0.095, zb), &m.trim_wood, 0.8, false);
-            self.block(Vec3::new(x0 - 0.12, h + 0.095, za), Vec3::new(x1 + 0.12, h + 0.135, zb + dir * 0.012), &m.trim_wood, 0.8, false);
-            self.block(Vec3::new(x0, h, za), Vec3::new(x1, h + 0.095, zb), &m.trim_wood, 0.8, false);
+            self.block(Vec3::new(x0 - 0.095, by, za), Vec3::new(x0, by + h + 0.095, zb), &m.trim_wood, 0.8, false);
+            self.block(Vec3::new(x1, by, za), Vec3::new(x1 + 0.095, by + h + 0.095, zb), &m.trim_wood, 0.8, false);
+            self.block(Vec3::new(x0 - 0.12, by + h + 0.095, za), Vec3::new(x1 + 0.12, by + h + 0.135, zb + dir * 0.012), &m.trim_wood, 0.8, false);
+            self.block(Vec3::new(x0, by + h, za), Vec3::new(x1, by + h + 0.095, zb), &m.trim_wood, 0.8, false);
         }
         // Lining inside the wall thickness and a threshold.
-        self.block(Vec3::new(x0, 0.0, z_far), Vec3::new(x0 + 0.018, h, z_room), &m.trim_wood, 0.8, false);
-        self.block(Vec3::new(x1 - 0.018, 0.0, z_far), Vec3::new(x1, h, z_room), &m.trim_wood, 0.8, false);
-        self.block(Vec3::new(x0, h - 0.018, z_far), Vec3::new(x1, h, z_room), &m.trim_wood, 0.8, false);
-        self.block(Vec3::new(x0, -0.1, z_far - 0.01), Vec3::new(x1, 0.012, z_room + 0.01), &m.trim_wood, 0.6, false);
+        self.block(Vec3::new(x0, by, z_far), Vec3::new(x0 + 0.018, by + h, z_room), &m.trim_wood, 0.8, false);
+        self.block(Vec3::new(x1 - 0.018, by, z_far), Vec3::new(x1, by + h, z_room), &m.trim_wood, 0.8, false);
+        self.block(Vec3::new(x0, by + h - 0.018, z_far), Vec3::new(x1, by + h, z_room), &m.trim_wood, 0.8, false);
+        self.block(Vec3::new(x0, by + -0.1, z_far - 0.01), Vec3::new(x1, by + 0.012, z_room + 0.01), &m.trim_wood, 0.6, false);
+
+        // Big back-lit number sign on the wall above the frame, readable from across the room.
+        let sign_img = images.add(plaque::sign_image(number));
+        let sign_mat = std_mats.add(StandardMaterial {
+            base_color_texture: Some(sign_img.clone()),
+            emissive_texture: Some(sign_img),
+            emissive: LinearRgba::rgb(2.2, 1.9, 1.5),
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+        let sign_y = by + h + 0.33;
+        self.block(Vec3::new(cx - 0.3, sign_y - 0.125, z_room), Vec3::new(cx + 0.3, sign_y + 0.125, z_room + 0.03), &m.brass, 1.0, false);
+        let sign_quad = self.meshes.add(Rectangle::new(0.56, 0.21));
+        let mut sign = self.commands.spawn((Mesh3d(sign_quad), MeshMaterial3d(sign_mat), Transform::from_xyz(cx, sign_y, z_room + 0.032)));
+        if let Some(p) = self.parent {
+            sign.insert(ChildOf(p));
+        } else {
+            let id = sign.id();
+            self.tag(id);
+        }
 
         // The blocker collider stays put while the leaf swings.
         let blocker = if decor {
             Entity::PLACEHOLDER
         } else {
-            let id = self.commands.spawn((Transform::default(), Collider(Aabb { min: Vec3::new(x0, 0.0, z_far), max: Vec3::new(x1, h, z_room) }))).id();
+            let id = self.commands.spawn((Transform::default(), Collider(Aabb { min: Vec3::new(x0, by, z_far), max: Vec3::new(x1, by + h, z_room) }))).id();
             self.tag(id);
             id
         };
 
         let leaf_w = w - 0.04;
         let leaf_h = h - 0.025;
-        let hinge = Vec3::new(x0 + 0.02, 0.0, line - t / 2.0);
+        let hinge = Vec3::new(x0 + 0.02, by, line - t / 2.0);
         let mut root_cmd = self.commands.spawn((Transform::from_translation(hinge), Visibility::default(), Name::new(format!("Door {number:03}"))));
         if let Some(p) = self.parent {
             root_cmd.insert(ChildOf(p));
@@ -333,7 +363,7 @@ impl Builder<'_, '_, '_> {
                 Door::new(number, locked, blocker),
                 Interactable {
                     kind: InteractKind::Door,
-                    aabb: Aabb { min: Vec3::new(x0, 0.0, z_far - 0.02), max: Vec3::new(x1, h, z_room + 0.05) },
+                    aabb: Aabb { min: Vec3::new(x0, by, z_far - 0.02), max: Vec3::new(x1, by + h, z_room + 0.05) },
                 },
             ));
         }
@@ -442,7 +472,7 @@ fn spawn_test_level(
 ) {
     let mats = materials::build(&asset_server, &mut std_mats);
     commands.insert_resource(mats.clone());
-    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None };
+    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None, base_y: 0.0 };
     let height = 3.0;
 
     // ---- Room 000: a faded sitting room -----------------------------------
@@ -453,8 +483,8 @@ fn spawn_test_level(
         height,
         &room0,
         &[
-            Opening { side: Side::North, center: 0.0, width: DOOR_W, height: DOOR_H },
-            Opening { side: Side::South, center: 0.0, width: 2.0, height: 2.25 },
+            Opening { side: Side::North, center: 0.0, width: DOOR_W, height: DOOR_H, bottom: 0.0 },
+            Opening { side: Side::South, center: 0.0, width: 2.0, height: 2.25, bottom: 0.0 },
         ],
         &[],
     );
@@ -480,8 +510,8 @@ fn spawn_test_level(
         2.7,
         &corridor,
         &[
-            Opening { side: Side::South, center: 0.0, width: DOOR_W, height: DOOR_H },
-            Opening { side: Side::North, center: 0.0, width: DOOR_W, height: DOOR_H },
+            Opening { side: Side::South, center: 0.0, width: DOOR_W, height: DOOR_H, bottom: 0.0 },
+            Opening { side: Side::North, center: 0.0, width: DOOR_W, height: DOOR_H, bottom: 0.0 },
         ],
         &[Side::South],
     );
@@ -736,16 +766,16 @@ pub fn spawn_menu_scene(
 ) {
     let mats = materials::build(&asset_server, &mut std_mats);
     let scope = AppState::MainMenu;
-    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope, parent: None, member: None };
+    let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope, parent: None, member: None, base_y: 0.0 };
     let (x0, x1, z0, z1, h) = (-1.7f32, 1.7f32, -42.0f32, 3.0f32, 3.0f32);
     let style = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: true };
     let door_zs: Vec<f32> = (0..6).map(|i| -4.0 - i as f32 * 6.0).collect();
     let mut openings = vec![];
     for &z in &door_zs {
-        openings.push(Opening { side: Side::West, center: z, width: DOOR_W, height: DOOR_H });
-        openings.push(Opening { side: Side::East, center: z - 3.0, width: DOOR_W, height: DOOR_H });
+        openings.push(Opening { side: Side::West, center: z, width: DOOR_W, height: DOOR_H, bottom: 0.0 });
+        openings.push(Opening { side: Side::East, center: z - 3.0, width: DOOR_W, height: DOOR_H, bottom: 0.0 });
     }
-    openings.push(Opening { side: Side::North, center: 0.0, width: DOOR_W, height: DOOR_H });
+    openings.push(Opening { side: Side::North, center: 0.0, width: DOOR_W, height: DOOR_H, bottom: 0.0 });
     b.room(Vec2::new(x0, z0), Vec2::new(x1, z1), h, &style, &openings, &[]);
     let mut number = 100;
     for &z in &door_zs {

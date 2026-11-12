@@ -6,10 +6,10 @@
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use super::plan::{Area, LightState, RoomKind, RoomPlan, FINAL_DOOR, WALL_T};
+use super::plan::{steps_for, Area, Feature, LightState, RoomKind, RoomPlan, FINAL_DOOR, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
 use super::{FloorRuntime, RoomMember};
 use crate::interaction::{AnimatedPart, Door, Drawer, HidingSpot, InteractKind, Interactable, PartMotion};
-use crate::physics::{Aabb, Collider};
+use crate::physics::{Aabb, Collider, Ground};
 use crate::rng::GameRng;
 use crate::world::{model, world_aabb, yaw_facing, Builder, Flicker, ModelBindings, Opening, PartBinding, RoomStyle, Side, DOOR_H, DOOR_W};
 
@@ -83,14 +83,16 @@ struct Slot {
     z: f32,
     yaw: f32,
     inward: f32,
+    /// Floor height under the slot (lofts).
+    y: f32,
 }
 
 fn side_slots(r: &RoomPlan, rng: &mut GameRng) -> Vec<Slot> {
     let mut slots = vec![];
     let mut z = r.max.y - 1.1;
     while z > r.min.y + 1.1 {
-        slots.push(Slot { x: r.min.x, z, yaw: FRAC_PI_2, inward: 1.0 });
-        slots.push(Slot { x: r.max.x, z, yaw: -FRAC_PI_2, inward: -1.0 });
+        slots.push(Slot { x: r.min.x, z, yaw: FRAC_PI_2, inward: 1.0, y: 0.0 });
+        slots.push(Slot { x: r.max.x, z, yaw: -FRAC_PI_2, inward: -1.0, y: 0.0 });
         z -= 1.95;
     }
     // Shuffle deterministically.
@@ -117,14 +119,24 @@ pub fn spawn_room(
     let h = r.height;
 
     // ---- Shell with exit (and mimic) openings ----
-    let openings = vec![Opening { side: Side::North, center: r.exit_x, width: DOOR_W, height: DOOR_H }];
+    let raised = match r.feature {
+        Some(Feature::RaisedExit { height }) => height,
+        _ => 0.0,
+    };
+    let mut openings = vec![Opening { side: Side::North, center: r.exit_x, width: DOOR_W, height: DOOR_H, bottom: raised }];
+    // Fake doors get real openings too (so their leaves show), bricked up behind.
+    for m in &r.mimics {
+        openings.push(Opening { side: Side::North, center: m.x, width: DOOR_W, height: DOOR_H, bottom: 0.0 });
+    }
     b.room(r.min, r.max, h, &style, &openings, &[Side::South]);
 
     // ---- Exit door (and mimic) ----
     let saved = with_area_door_mats(b, r.area);
     let exit_no = r.exit_door();
     let opened = rt.opened.contains(&exit_no);
+    b.base_y = raised;
     let door = b.door(r.exit_x, r.min.y, exit_no, false, images, std_mats);
+    b.base_y = 0.0;
     let blocker = {
         let mut d = Door::new(exit_no, false, Entity::PLACEHOLDER);
         d.key_room = (r.kind == RoomKind::KeyPuzzle && !rt.keys.contains(&r.index)).then_some(r.index);
@@ -145,11 +157,15 @@ pub fn spawn_room(
         // The blocker collider is a separate entity; find and clear it once spawned.
         b.commands.entity(door).insert(OpenOnSpawn);
     }
-    if let Some(m) = r.mimic {
+    for (slot, m) in r.mimics.iter().enumerate() {
+        let slot = slot as u8;
         // A full door assembly set flush against the wall, with no opening behind it.
         let tf = Transform::from_xyz(m.x, 0.0, r.min.y);
         b.decor_door(tf, m.shown_number, images, std_mats);
-        if !rt.mimics_triggered.contains(&r.index) {
+        let back = style.wall.clone();
+        let tile = style.wall_tile;
+        b.block(Vec3::new(m.x - DOOR_W / 2.0, 0.0, r.min.y - WALL_T), Vec3::new(m.x + DOOR_W / 2.0, DOOR_H, r.min.y - WALL_T + 0.03), &back, tile, true);
+        if !rt.mimics_triggered.contains(&(r.index, slot)) {
             let mut d = Door::new(m.shown_number, false, Entity::PLACEHOLDER);
             d.mimic = true;
             let e = b
@@ -157,7 +173,7 @@ pub fn spawn_room(
                 .spawn((
                     Transform::from_xyz(m.x, 0.0, r.min.y),
                     d,
-                    MimicOf(r.index),
+                    MimicOf(r.index, slot),
                     Interactable {
                         kind: InteractKind::Door,
                         aabb: Aabb { min: Vec3::new(m.x - 0.5, 0.0, r.min.y - 0.05), max: Vec3::new(m.x + 0.5, DOOR_H, r.min.y + 0.12) },
@@ -220,7 +236,7 @@ pub fn spawn_room(
         if x < r.min.x + 0.3 || x > r.max.x - 0.3 {
             continue;
         }
-        let tf = Transform::from_xyz(x, 2.05, r.min.y);
+        let tf = Transform::from_xyz(x, 2.05 + raised, r.min.y);
         let e = b.commands.spawn((model(asset_server, "industrial_wall_sconce"), tf)).id();
         b.tag(e);
         let e = b
@@ -248,8 +264,61 @@ pub fn spawn_room(
         b.block(Vec3::new(x - 0.8, 0.0, z0), Vec3::new(x + 0.8, 0.012, z1), &runner, 1.4, false);
     }
 
+    // ---- Stairs, landings and lofts ----
+    let mut blocked: Vec<(Vec2, Vec2)> = vec![];
+    let stair_mat = match r.area {
+        Area::ServiceTunnels | Area::QuarryLift => b.mats.metal_plate.clone(),
+        Area::Atrium => b.mats.marble.clone(),
+        _ => b.mats.trim_wood.clone(),
+    };
+    if raised > 0.0 {
+        let (x0, x1) = ((r.exit_x - 0.85).max(r.min.x), (r.exit_x + 0.85).min(r.max.x));
+        landing(b, Vec3::new(x0, 0.0, r.min.y), Vec3::new(x1, raised, r.min.y + LANDING_DEPTH), &stair_mat, true);
+        // Walkable strip through the wall to the next room's landing.
+        ground_only(b, Vec3::new(r.exit_x - 0.5, raised - 0.05, r.min.y - WALL_T - 0.02), Vec3::new(r.exit_x + 0.5, raised, r.min.y));
+        let end = stairs(b, r.exit_x - 0.6, r.exit_x + 0.6, r.min.y + LANDING_DEPTH, 1.0, raised, &stair_mat);
+        railing(b, Vec3::new(x0, raised, r.min.y + 0.05), Vec3::new(x0, raised, r.min.y + LANDING_DEPTH));
+        railing(b, Vec3::new(x1, raised, r.min.y + 0.05), Vec3::new(x1, raised, r.min.y + LANDING_DEPTH));
+        blocked.push((Vec2::new(x0 - 0.2, r.min.y), Vec2::new(x1 + 0.2, end + 0.4)));
+    }
+    if r.entry_height > 0.0 {
+        let hgt = r.entry_height;
+        let (x0, x1) = ((r.entry_x - 0.85).max(r.min.x), (r.entry_x + 0.85).min(r.max.x));
+        landing(b, Vec3::new(x0, 0.0, r.max.y - LANDING_DEPTH), Vec3::new(x1, hgt, r.max.y), &stair_mat, true);
+        let end = stairs(b, r.entry_x - 0.6, r.entry_x + 0.6, r.max.y - LANDING_DEPTH, -1.0, hgt, &stair_mat);
+        railing(b, Vec3::new(x0, hgt, r.max.y - LANDING_DEPTH), Vec3::new(x0, hgt, r.max.y - 0.05));
+        railing(b, Vec3::new(x1, hgt, r.max.y - LANDING_DEPTH), Vec3::new(x1, hgt, r.max.y - 0.05));
+        blocked.push((Vec2::new(x0 - 0.2, end - 0.4), Vec2::new(x1 + 0.2, r.max.y)));
+    }
+    let mut loft_slot = None;
+    if let Some(Feature::KeyLoft { east }) = r.feature {
+        let (wall, inward) = if east { (r.max.x, -1.0f32) } else { (r.min.x, 1.0f32) };
+        let (z0, z1) = (r.min.y + 1.6, r.min.y + 3.8);
+        let xa = wall + inward * 1.7;
+        let (lx0, lx1) = (wall.min(xa), wall.max(xa));
+        landing(b, Vec3::new(lx0, 0.0, z0), Vec3::new(lx1, LOFT_HEIGHT, z1), &stair_mat, false);
+        let xb = wall + inward * 1.0;
+        let end = stairs(b, wall.min(xb), wall.max(xb), z1, 1.0, LOFT_HEIGHT, &stair_mat);
+        // Rails on the open edges of the loft.
+        railing(b, Vec3::new(xa, LOFT_HEIGHT, z0), Vec3::new(xa, LOFT_HEIGHT, z1));
+        railing(b, Vec3::new(lx0, LOFT_HEIGHT, z0), Vec3::new(lx1, LOFT_HEIGHT, z0));
+        // A warm lamp so the loft reads as the place to go.
+        let e = b
+            .commands
+            .spawn((PointLight { color: warm, intensity: 60_000.0, range: 5.0, ..default() }, Transform::from_xyz(wall + inward * 0.8, LOFT_HEIGHT + 1.6, (z0 + z1) / 2.0)))
+            .id();
+        b.tag(e);
+        blocked.push((Vec2::new(lx0 - 0.1, z0 - 0.2), Vec2::new(lx1 + 0.1, end + 0.3)));
+        loft_slot = Some(Slot { x: wall, z: (z0 + z1) / 2.0 - 0.3, yaw: if east { -FRAC_PI_2 } else { FRAC_PI_2 }, inward, y: LOFT_HEIGHT });
+    }
+
     // ---- Furniture ----
     let mut slots = side_slots(r, &mut rng);
+    slots.retain(|s| {
+        let (ax, bx) = (s.x, s.x + s.inward * 1.0);
+        let (fx0, fx1) = (ax.min(bx), ax.max(bx));
+        !blocked.iter().any(|(lo, hi)| fx0 < hi.x && fx1 > lo.x && s.z - 0.65 < hi.y && s.z + 0.65 > lo.y)
+    });
     // Atrium columns occupy the side walls; furniture stands between them.
     let narrow = r.width() < 4.0;
     let mut drawer_id: u8 = 0;
@@ -279,6 +348,11 @@ pub fn spawn_room(
             }
         };
         all_drawers.extend(ids);
+    }
+    // The loft's chest always holds the key.
+    if let Some(s) = loft_slot {
+        let ids = tool_chest(b, s, r, rt, &mut drawer_id, 1);
+        all_drawers = ids;
     }
     // Hide the key in one drawer for key puzzles.
     if r.kind == RoomKind::KeyPuzzle && !rt.keys.contains(&r.index) && !all_drawers.is_empty() {
@@ -311,7 +385,8 @@ pub fn spawn_room(
         }
     }
     // Archive: reading table with a green banker's lamp in the middle of large rooms.
-    if r.area == Area::Archive && r.width() > 6.5 && r.kind != RoomKind::Hall {
+    let center_free = !blocked.iter().any(|(lo, hi)| center.x + 1.2 > lo.x && center.x - 1.2 < hi.x && center.y + 0.8 > lo.y && center.y - 0.8 < hi.y);
+    if r.area == Area::Archive && r.width() > 6.5 && r.kind != RoomKind::Hall && center_free {
         reading_table(b, props, Vec3::new(center.x, 0.0, center.y), r.light != LightState::Dark);
     }
     // Pictures on the side walls in the Guest Wing.
@@ -331,9 +406,9 @@ pub fn spawn_room(
 #[derive(Component)]
 pub struct OpenOnSpawn;
 
-/// Marks the logical entity of a mimic door with its room index.
+/// Marks the logical entity of a fake door with its room index and slot.
 #[derive(Component)]
-pub struct MimicOf(pub u32);
+pub struct MimicOf(pub u32, pub u8);
 
 /// (Lumens, item) for a drawer, deterministic per room seed.
 pub fn drawer_loot(r: &RoomPlan, id: u8, items: &crate::data::ItemConfig) -> (Option<u32>, Option<crate::items::ItemKind>) {
@@ -364,8 +439,62 @@ fn logical_drawer(b: &mut Builder, r: &RoomPlan, rt: &FloorRuntime, id: u8, aabb
     e
 }
 
+/// A solid block you can stand on.
+fn landing(b: &mut Builder, min: Vec3, max: Vec3, mat: &Handle<StandardMaterial>, trim: bool) {
+    let e = b.block(min, max, mat, 1.0, true);
+    b.commands.entity(e).insert(Ground(Aabb { min, max }));
+    if trim {
+        // Darker nosing along the top edges.
+        let iron = b.mats.iron.clone();
+        b.block(Vec3::new(min.x, max.y - 0.03, max.z - 0.04), Vec3::new(max.x, max.y + 0.005, max.z + 0.005), &iron, 1.0, false);
+    }
+}
+
+/// Invisible walkable strip (doorway thresholds between rooms).
+fn ground_only(b: &mut Builder, min: Vec3, max: Vec3) {
+    let e = b.commands.spawn((Transform::default(), Ground(Aabb { min, max }))).id();
+    b.tag(e);
+}
+
+/// A straight flight of steps climbing to `height` at `z_top`; the flight
+/// extends from `z_top` in direction `dir` (+1 = south / +Z). Returns the far z.
+fn stairs(b: &mut Builder, x0: f32, x1: f32, z_top: f32, dir: f32, height: f32, mat: &Handle<StandardMaterial>) -> f32 {
+    let n = steps_for(height);
+    let rise = height / n as f32;
+    let iron = b.mats.iron.clone();
+    for k in 1..n {
+        let top = height - k as f32 * rise;
+        let za = z_top + dir * (k - 1) as f32 * STEP_RUN;
+        let zb = z_top + dir * k as f32 * STEP_RUN;
+        let (lo, hi) = (Vec3::new(x0, 0.0, za.min(zb)), Vec3::new(x1, top, za.max(zb)));
+        let e = b.block(lo, hi, mat, 1.0, true);
+        b.commands.entity(e).insert(Ground(Aabb { min: lo, max: hi }));
+        // Nosing strip on the leading edge.
+        let edge = za.max(zb) * (dir + 1.0) / 2.0 + za.min(zb) * (1.0 - dir) / 2.0;
+        b.block(Vec3::new(x0, top - 0.025, edge - 0.03), Vec3::new(x1, top + 0.004, edge + 0.03), &iron, 1.0, false);
+    }
+    z_top + dir * (n - 1) as f32 * STEP_RUN
+}
+
+/// Iron handrail with posts between two points at floor height `a.y`.
+fn railing(b: &mut Builder, a: Vec3, c: Vec3) {
+    let iron = b.mats.iron.clone();
+    let len = (c - a).length();
+    if len < 0.05 {
+        return;
+    }
+    let posts = (len / 0.9).ceil() as usize;
+    for i in 0..=posts {
+        let p = a.lerp(c, i as f32 / posts as f32);
+        b.block(Vec3::new(p.x - 0.025, a.y, p.z - 0.025), Vec3::new(p.x + 0.025, a.y + 0.95, p.z + 0.025), &iron, 1.0, false);
+    }
+    let (lo, hi) = (a.min(c), a.max(c));
+    b.block(Vec3::new(lo.x - 0.035, a.y + 0.92, lo.z - 0.035), Vec3::new(hi.x + 0.035, a.y + 0.98, hi.z + 0.035), &iron, 1.0, false);
+    b.block(Vec3::new(lo.x - 0.015, a.y + 0.45, lo.z - 0.015), Vec3::new(hi.x + 0.015, a.y + 0.48, hi.z + 0.015), &iron, 1.0, false);
+}
+
 fn slot_tf(s: Slot, depth_half: f32) -> Transform {
-    Transform::from_xyz(s.x + s.inward * (depth_half + 0.02), 0.0, s.z).with_rotation(Quat::from_rotation_y(s.yaw))
+    Transform::from_xyz(s.x + s.inward * (depth_half + 0.02), s.y, s.z).with_rotation(Quat::from_rotation_y(s.yaw))
 }
 
 fn drawer_cabinet(b: &mut Builder, asset_server: &AssetServer, s: Slot, r: &RoomPlan, rt: &FloorRuntime, next: &mut u8) -> Vec<Entity> {
