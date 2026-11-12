@@ -135,12 +135,14 @@ fn trigger_encounter(
 }
 
 fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3) -> Entity {
+    // Wet ink: near-black with a tight highlight, low environment reflection
+    // so it doesn't read as grey under the ambient light.
     let ink = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.01, 0.01, 0.012),
-        perceptual_roughness: 0.08,
-        reflectance: 0.6,
-        clearcoat: 1.0,
-        clearcoat_perceptual_roughness: 0.05,
+        base_color: Color::srgb(0.004, 0.003, 0.004),
+        perceptual_roughness: 0.12,
+        reflectance: 0.25,
+        clearcoat: 0.4,
+        clearcoat_perceptual_roughness: 0.1,
         ..default()
     });
     let cloth = mats.add(StandardMaterial { base_color: Color::srgb(0.03, 0.028, 0.03), perceptual_roughness: 0.9, ..default() });
@@ -224,9 +226,23 @@ fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut A
                 ));
             }
         });
-        // Lower body dissolves into a trailing column of ink.
-        r.spawn((Mesh3d(meshes.add(Cone { radius: 0.45, height: 1.2 })), MeshMaterial3d(ink.clone()), Transform::from_xyz(0.0, 0.55, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::PI))));
-        r.spawn((Mesh3d(meshes.add(capsule(0.2, 0.7))), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 0.9, -0.02)));
+        // Lower body: a ragged robe of floor-length strips over a thin core,
+        // trailing into the ink.
+        r.spawn((Mesh3d(meshes.add(capsule(0.17, 0.75))), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 0.75, -0.02)));
+        r.spawn((Mesh3d(meshes.add(Cone { radius: 0.22, height: 0.6 })), MeshMaterial3d(ink.clone()), Transform::from_xyz(0.0, 0.3, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::PI))));
+        for i in 0..18 {
+            let a = i as f32 / 18.0 * std::f32::consts::TAU + 0.17;
+            let len = 1.05 + ((i * 5) % 7) as f32 * 0.05;
+            let width = 0.07 + ((i * 3) % 4) as f32 * 0.015;
+            let lean = 0.08 + ((i * 11) % 5) as f32 * 0.03;
+            r.spawn((
+                Mesh3d(meshes.add(Cuboid::new(width, len, 0.012))),
+                MeshMaterial3d(cloth.clone()),
+                Transform::from_xyz(a.sin() * 0.24, 1.15 - len / 2.0, a.cos() * 0.2)
+                    .with_rotation(Quat::from_rotation_y(a) * Quat::from_rotation_x(-lean)),
+                HollowTatter(a),
+            ));
+        }
     });
     root
 }
