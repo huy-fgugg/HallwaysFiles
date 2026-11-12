@@ -5,17 +5,18 @@ Open numbered doors, search drawers, read the cues, and use the right counter: h
 
 > Working title. Check trademark and Steam store availability before any commercial release.
 
-## Download the Windows build
+## Download
 
-Every push builds a ready-to-run ZIP with GitHub Actions:
+Open the repository's **Releases** page and download the latest version:
 
-1. Open the repository's **Actions** tab, then **Build Windows EXE**, then the latest green run.
-2. Download the **hallways-windows** artifact and unzip it anywhere.
-3. Double-click **`hallways.exe`**.
+- **Windows:** `hallways-<version>-windows.zip`. Unzip it anywhere and double-click **`HALLWAYS\hallways.exe`**. Keep the `assets` folder next to the exe. Windows SmartScreen may warn because the exe isn't code-signed: click **More info → Run anyway**.
+- **Linux (Debian, Ubuntu, Mint, Pop!_OS...):** `hallways_<version>_amd64.deb`. Install with
+  `sudo apt install ./hallways_<version>_amd64.deb`
+  then start **HALLWAYS** from the app menu or type `hallways`. Uninstall with `sudo apt remove hallways`. The game lives in `/opt/hallways/`; drop music into `/opt/hallways/assets/music/<folder>/`.
 
-**The `assets` folder must stay next to `hallways.exe`.** The game loads its models, textures, fonts, cutscenes and music from it.
+A graphics card with Vulkan (Linux) or DirectX 12/Vulkan (Windows) is needed.
 
-To build manually, go to **Actions**, then **Build Windows EXE**, then **Run workflow**.
+Releases are built by the **Release** workflow (Actions → Release → Run workflow, or a commit message containing `[release]`). Every push also builds a test ZIP in **Actions → Build Windows EXE**.
 
 ## Run from source
 
