@@ -5,3 +5,4 @@
 *.pdb
 settings.ron
 save.ron
+server/target/

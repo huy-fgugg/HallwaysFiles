@@ -31,7 +31,7 @@ pub struct Player {
     pub crouching: bool,
     pub sprinting: bool,
     pub speed: f32,
-    bob_phase: f32,
+    pub bob_phase: f32,
     step_accum: f32,
     /// Vertical speed while dropping off a ledge.
     pub fall: f32,

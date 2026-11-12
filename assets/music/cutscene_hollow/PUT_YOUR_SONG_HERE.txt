@@ -1,0 +1,7 @@
+THE HOLLOW CUTSCENE music. Plays once.
+
+Drop ONE audio file in this folder (.ogg, .mp3 or .wav). Any file name works.
+If there are several, the first one alphabetically is used.
+Length: at least 16 seconds, at most 60 seconds. The big hit lands at 11.3 s.
+Remove the file to go back to the built-in music.
+The Credits screen (main menu) shows which song the game found.

@@ -47,16 +47,48 @@ cargo test --lib
 | Use selected item | Q or right mouse | Y |
 | Start the lift (host) | Enter | A |
 | Pause | Esc | Start |
-| Menus | Arrows/WASD, Enter/Space, Esc | D-pad, A, B |
+| Menus | Arrows/WASD, Enter/Space, Esc (letters type while a text box is selected) | D-pad, A, B |
 | Skip cutscene | Hold Space | Hold A |
+
+## Play screen: solo, online rooms, shop, modifiers
+
+Main menu → **Play**:
+
+- **Name** and **Seed** boxes: click one (or arrow to it) and type. An empty seed gives a new floor each run; type any word or number to replay the same floor.
+- **Solo Run** starts alone.
+- **Host Room** creates an online room and shows a 5-letter **room code** in the lift. Friends type that code into **Room Code** and press **Join Room** (up to 4 players). The lift music loops until all 4 are in (then a 15 s countdown) or the host presses **Enter**.
+- **Shop**: Lumens you collect are banked when a run ends. Spend them on up to 3 items to start your next run with. **Refund Last** gives the Lumens back. No random rewards, no real money.
+- **Modifiers**: Lights Low, Restless and Fragile make runs harder and pay more Lumens.
+
+What's shared online: every player gets the same floor (the host's seed), sees teammates' characters walk, crouch, carry items, shine flashlights, reach and use items, and doors opened by anyone open for everyone. Entities run separately on each player's machine, so each player survives their own encounters.
+
+## The online server (Render)
+
+Online rooms need the small server in `server/` running somewhere. It's set up for [Render](https://render.com):
+
+1. Sign in to Render with GitHub.
+2. **New → Blueprint**, pick this repository, then **Apply**. Render reads `render.yaml`, builds `server/Dockerfile` and starts the service on the free plan.
+3. When it's live, open `https://<service-name>.onrender.com/health`. It should say `ok`.
+4. If your service name isn't `hallways-server`, put `wss://<service-name>.onrender.com/ws` in `assets/server.txt` (next to the game) before playing or packaging.
+
+Free Render services fall asleep after about 15 minutes without players; the first **Host Room** after that can take up to a minute while it wakes up.
+To test locally: `cd server && cargo run`, then start the game with `HALLWAYS_SERVER=ws://127.0.0.1:8080/ws`.
 
 ## Your own music and cutscenes
 
-- `assets/music/`: drop `menu.ogg`, `elevator.ogg`, `ambience.ogg` and `chase.ogg` here. Loops must be **20 s to 5 min**. See `assets/music/README.md`.
-- `assets/cutscenes/<name>/`: each cutscene has its own folder with an editable `cutscene.ron` timeline and a `music.ogg` slot. Cutscene music must be **at least the cutscene's length (14 s intro, 16 s Hollow) and at most 60 s**. See `assets/cutscenes/README.md`.
-- Credit any music you add in `assets/music/CREDITS.txt`; the in-game Credits screen shows it. Only add music you have permission to use.
+Every song has its own folder in `assets/music/`. Drop **one** audio file (`.ogg`, `.mp3` or `.wav`, any name) into a folder:
 
-Empty slots fall back to the built-in original score.
+| Folder | Plays | Length |
+|---|---|---|
+| `menu/` | Main menu (loops) | 20 s – 5 min |
+| `elevator/` | Lift lobby (loops until everyone joins or the host starts) | 20 s – 5 min |
+| `ambience/` | Exploring (loops) | 20 s – 5 min |
+| `chase/` | Being hunted (loops) | 20 s – 5 min |
+| `cutscene_intro/` | Elevator arrival cutscene (once) | 14 s – 60 s |
+| `cutscene_hollow/` | The Hollow cutscene (once) | 16 s – 60 s |
+
+Main menu → **Credits** → "YOUR MUSIC" shows which file each slot found. Empty folders use the built-in original score.
+Cutscene timelines are editable in `assets/cutscenes/<name>/cutscene.ron`. Credit any music you add in `assets/music/CREDITS.txt`; only add music you have permission to use.
 
 ## Tuning
 
@@ -64,7 +96,7 @@ Empty slots fall back to the built-in original score.
 
 ## Settings and saves
 
-Settings are saved to `%APPDATA%\Hallways\settings.ron` on Windows (or `~/.config/hallways` on Linux). Delete the file to reset. A corrupt file is ignored and the defaults are used.
+Settings and your profile (banked Lumens, shop items, modifiers, name) are saved to `%APPDATA%\Hallways\` on Windows (or `~/.config/hallways` on Linux) as `settings.ron` and `profile.ron`. Profiles are versioned and older saves upgrade automatically. A corrupt profile is kept as `profile.bad.ron` and a fresh one starts.
 
 ## Visual QA capture
 

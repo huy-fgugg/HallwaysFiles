@@ -29,6 +29,14 @@ pub enum MenuAction {
     OpenCredits,
     CloseCredits,
     Retry,
+    OpenPlay,
+    ClosePlay,
+    PlaySolo,
+    HostRoom,
+    JoinRoom,
+    Buy(crate::items::ItemKind),
+    Refund,
+    ToggleModifier(crate::profile::Modifier),
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -152,23 +160,26 @@ fn keyboard_and_gamepad_navigation(
     mut activated: MessageWriter<MenuActivated>,
     mut adjust: MessageWriter<AdjustRequested>,
     mut sfx: MessageWriter<PlaySfx>,
+    typing: Res<crate::ui::play_menu::Typing>,
 ) {
     let mut step = IVec2::ZERO;
     let mut activate = false;
+    // While a text box has focus, letters and Space type instead of navigating.
+    let letters = !typing.0;
 
-    if keys.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+    if keys.just_pressed(KeyCode::ArrowUp) || (letters && keys.just_pressed(KeyCode::KeyW)) {
         step.y -= 1;
     }
-    if keys.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS, KeyCode::Tab]) {
+    if keys.any_just_pressed([KeyCode::ArrowDown, KeyCode::Tab]) || (letters && keys.just_pressed(KeyCode::KeyS)) {
         step.y += 1;
     }
-    if keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+    if (letters && keys.just_pressed(KeyCode::KeyA)) || (letters && keys.just_pressed(KeyCode::ArrowLeft)) {
         step.x -= 1;
     }
-    if keys.any_just_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+    if (letters && keys.just_pressed(KeyCode::KeyD)) || (letters && keys.just_pressed(KeyCode::ArrowRight)) {
         step.x += 1;
     }
-    if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::NumpadEnter]) {
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || (letters && keys.just_pressed(KeyCode::Space)) {
         activate = true;
     }
 

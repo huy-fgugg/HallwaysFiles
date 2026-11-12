@@ -52,6 +52,7 @@ type Shot = (&'static str, Option<Vec3>, f32, f32);
 
 const SHOTS: &[Shot] = &[
     ("01_main_menu", None, 0.0, 0.0),
+    ("01b_play_menu", None, 0.0, 0.0),
     ("02_spawn_view", Some(Vec3::new(0.0, 0.0, 3.4)), 0.0, -0.05),
     ("02b_inside_lift", Some(Vec3::new(0.0, 0.0, 6.9)), 0.0, 0.05),
     ("02d_lobby", Some(Vec3::new(0.0, 0.0, 6.9)), 0.0, 0.05),
@@ -113,6 +114,15 @@ fn run_capture(
             cap.timer = 0.0;
             return;
         }
+    }
+    // The Play screen shot opens that overlay; every other shot closes it.
+    let cur = SHOTS.get(cap.index).map(|s| s.0);
+    if cur == Some("01b_play_menu") {
+        if *app_overlay.get() != crate::state::Overlay::Play {
+            next_overlay.set(crate::state::Overlay::Play);
+        }
+    } else if *app_overlay.get() == crate::state::Overlay::Play {
+        next_overlay.set(crate::state::Overlay::None);
     }
     let Some(&(label, pos, yaw, pitch)) = SHOTS.get(cap.index) else {
         // Generated-floor tour: stand near each room's south side looking at its exit.
@@ -222,7 +232,7 @@ fn run_capture(
     }
     // Wait for both wall time and frames (software renderers can run at ~1 fps).
     // Cutscene holds wait on game time instead, so they land on story beats.
-    let ready = if pos.is_none() && cap.index > 0 { cap.timer > 2.0 && cap.frames > 8 } else { cap.timer > settle && cap.frames > 12 };
+    let ready = if pos.is_none() && cap.index > 1 { cap.timer > 2.0 && cap.frames > 8 } else { cap.timer > settle && cap.frames > 12 };
     if ready && !cap.shot_taken {
         let path = format!("{}/{}.png", cap.dir, label);
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));

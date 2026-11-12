@@ -58,3 +58,17 @@ jobs:
           name: hallways-windows
           path: hallways-windows.zip
           retention-days: 30
+
+  server-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: server
+      - name: Room server tests
+        working-directory: server
+        run: cargo test

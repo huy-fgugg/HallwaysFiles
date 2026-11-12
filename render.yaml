@@ -1,0 +1,15 @@
+# Render Blueprint: deploys the HALLWAYS online room server.
+# In Render: New > Blueprint > pick this repository > Apply.
+services:
+  - type: web
+    name: hallways-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - server/**
+        - src/net/proto.rs

@@ -19,7 +19,7 @@ use crate::state::{gameplay_active, AppState};
 
 pub const SLOTS: usize = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ItemKind {
     Flashlight,
     Lockpick,
@@ -171,8 +171,16 @@ impl Plugin for ItemsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inventory>()
             .init_resource::<SpeedBoost>()
-            .add_systems(OnEnter(AppState::Playing), |mut c: Commands| {
-                c.insert_resource(Inventory::default());
+            .add_systems(OnEnter(AppState::Playing), |mut c: Commands, mut profile: ResMut<crate::profile::Profile>, cfg: Res<ItemConfig>| {
+                // Items bought in the shop are handed over once, at the start of a run.
+                let mut inv = Inventory::default();
+                if !profile.loadout.is_empty() {
+                    for k in std::mem::take(&mut profile.loadout) {
+                        inv.add(k, &cfg);
+                    }
+                    crate::profile::save_profile(&profile);
+                }
+                c.insert_resource(inv);
                 c.insert_resource(SpeedBoost::default());
             })
             .add_systems(Update, (attach_flashlight, (select_and_use, drain).chain().run_if(gameplay_active), drive_flashlight).run_if(in_state(AppState::Playing)))
@@ -252,6 +260,7 @@ fn select_and_use(
     mut run: ResMut<RunState>,
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
+    mut arms: MessageWriter<crate::viewmodel::ArmAnim>,
 ) {
     for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3].into_iter().enumerate() {
         if keys.just_pressed(k) {
@@ -293,6 +302,9 @@ fn select_and_use(
         return;
     }
     let Some(stack) = inv.slots[inv.selected] else { return };
+    if matches!(stack.kind, ItemKind::Flashlight | ItemKind::Vitamins) || (stack.kind == ItemKind::Bandage && run.vitality < 100.0) {
+        arms.write(crate::viewmodel::ArmAnim(crate::viewmodel::Gesture::Use));
+    }
     match stack.kind {
         ItemKind::Flashlight => {
             if inv.battery > 0.0 {

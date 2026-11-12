@@ -4,6 +4,7 @@
 //! tested with `cargo test` without opening a window.
 
 pub mod audio;
+pub mod avatar;
 pub mod capture;
 pub mod cutscene;
 pub mod data;
@@ -15,7 +16,9 @@ pub mod interaction;
 pub mod items;
 pub mod lobby;
 pub mod music;
+pub mod net;
 pub mod physics;
+pub mod profile;
 pub mod player;
 pub mod rng;
 pub mod run;
@@ -24,6 +27,7 @@ pub mod state;
 pub mod surge;
 pub mod theme;
 pub mod ui;
+pub mod viewmodel;
 pub mod world;
 
 use bevy::prelude::*;
@@ -45,6 +49,7 @@ impl Plugin for HallwaysPlugin {
             ui::UiPlugin,
             capture::CapturePlugin,
         ))
-        .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin));
+        .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
+        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin));
     }
 }

@@ -265,7 +265,7 @@ fn interact(
     mut runtime: Option<ResMut<crate::floor::FloorRuntime>>,
     mimics: Query<&crate::floor::build::MimicOf>,
     (mut shake, mut death, mut next_overlay): (ResMut<CameraShake>, ResMut<crate::hollow::DeathCause>, ResMut<NextState<crate::state::Overlay>>),
-    (mut inv, item_cfg): (ResMut<crate::items::Inventory>, Res<crate::data::ItemConfig>),
+    (mut inv, item_cfg, mut arms): (ResMut<crate::items::Inventory>, Res<crate::data::ItemConfig>, MessageWriter<crate::viewmodel::ArmAnim>),
 ) {
     if !interact_pressed(&keys, &pads) {
         return;
@@ -281,6 +281,7 @@ fn interact(
     }
     let Some(e) = target.0 else { return };
     let Ok(i) = interactables.get(e) else { return };
+    arms.write(crate::viewmodel::ArmAnim(crate::viewmodel::Gesture::Reach));
     match i.kind {
         InteractKind::Door => {
             let Ok(mut door) = doors.get_mut(e) else { return };

@@ -2,9 +2,9 @@
 //! looping music while players gather. When everyone has joined, a countdown
 //! starts; the host can force-start at any time (Enter / gamepad A).
 //!
-//! Multiplayer isn't implemented yet, so the party is always 1 / 1. The
-//! lobby is written so a future networking layer only has to update
-//! `players_joined` / `players_expected` and `is_host`.
+//! Solo runs are 1 / 1. In an online room the counts come from the room
+//! (up to 4 players); only the host can start, and everyone departs together
+//! when the server relays the host's Start.
 
 use bevy::prelude::*;
 
@@ -95,17 +95,48 @@ fn begin(mut lobby: ResMut<LiftLobby>, skip: Res<SkipLobby>, mut lift: MessageWr
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_lobby(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     mut lobby: ResMut<LiftLobby>,
     mut play: MessageWriter<PlayCutscene>,
+    session: Res<crate::net::NetSession>,
+    mut start: MessageWriter<crate::net::RequestStart>,
+    mut started: MessageReader<crate::net::DescentStarted>,
+    mut asked: Local<bool>,
 ) {
+    let online = session.online();
+    if online {
+        // The room decides: everyone in the room, out of the room's limit.
+        lobby.players_joined = session.players.len().max(1) as u32;
+        lobby.players_expected = u32::from(session.max.max(1));
+        lobby.is_host = session.is_host();
+    }
+    // The room's started flag (not just the one-off message) so a guest who was
+    // still loading when the host started still leaves with everyone.
+    started.clear();
+    let mut depart = online && session.started && lobby.waiting;
     let force = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || pads.iter().any(|p| p.just_pressed(GamepadButton::South));
     if lobby.tick(time.delta_secs(), force) == LobbyTick::Depart {
+        if online {
+            // Ask the server; everyone (us included) leaves when it says Start.
+            if lobby.is_host && !*asked {
+                start.write(crate::net::RequestStart);
+                *asked = true;
+            }
+        } else {
+            depart = true;
+        }
+    }
+    if !lobby.waiting {
+        *asked = false;
+    }
+    if depart {
         lobby.waiting = false;
         lobby.countdown = None;
+        *asked = false;
         // The descent is the intro cutscene (skippable by holding Space).
         play.write(PlayCutscene(INTRO.into()));
     }
@@ -146,6 +177,7 @@ fn spawn_panel(mut commands: Commands, theme: Res<UiTheme>) {
 #[allow(clippy::type_complexity)]
 fn update_panel(
     lobby: Res<LiftLobby>,
+    session: Res<crate::net::NetSession>,
     mut panel: Query<&mut Visibility, With<LobbyPanel>>,
     mut texts: ParamSet<(Query<&mut Text, With<LobbyStatus>>, Query<&mut Text, With<LobbyHint>>)>,
 ) {
@@ -167,10 +199,14 @@ fn update_panel(
             t.0 = status.clone();
         }
     }
-    let hint = if lobby.is_host { "Press [Enter] / [A] to start now  -  look around while you wait" } else { "Waiting for the host to start" };
+    let code = if session.online() { format!("ROOM CODE  {}   -   ", session.code) } else { String::new() };
+    let hint = format!(
+        "{code}{}",
+        if lobby.is_host { "Press [Enter] / [A] to start now  -  look around while you wait" } else { "Waiting for the host to start" }
+    );
     for mut t in &mut texts.p1() {
         if t.0 != hint {
-            t.0 = hint.into();
+            t.0 = hint.clone();
         }
     }
 }
