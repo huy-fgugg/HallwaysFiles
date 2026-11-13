@@ -248,6 +248,9 @@ fn announce_areas(run: Res<RunState>, floor: Option<Res<Floor>>, mut last: Local
             RoomKind::Transition => {
                 subs.write(Subtitle { text: format!("-  {}  -", r.area.name().to_uppercase()), seconds: 3.5, danger: false });
             }
+            RoomKind::KeyPuzzle if r.feature == Some(plan::Feature::ReadingHall) => {
+                subs.write(Subtitle { text: format!("-  THE READING HALL  -   Door {:03} is locked. The key is somewhere among the shelves.", r.exit_door()), seconds: 6.0, danger: false });
+            }
             RoomKind::KeyPuzzle => {
                 subs.write(Subtitle::info(format!("Door {:03} is locked. The key must be in here somewhere.", r.exit_door())));
             }

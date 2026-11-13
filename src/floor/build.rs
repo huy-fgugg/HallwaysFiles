@@ -383,6 +383,26 @@ pub fn spawn_room(
         loft_slot = Some(Slot { x: wall, z: (z0 + z1) / 2.0 - 0.3, yaw: if east { -FRAC_PI_2 } else { FRAC_PI_2 }, inward, y: LOFT_HEIGHT });
     }
 
+    // ---- Dividers: zigzag walls, chase barricades, Reading Hall shelves ----
+    for d in r.dividers() {
+        for (x0, x1) in [(r.min.x, d.gap.0), (d.gap.1, r.max.x)] {
+            if x1 - x0 < 0.3 {
+                continue;
+            }
+            match r.feature {
+                Some(Feature::ReadingHall) => shelf_row(b, props, x0, x1, d.z, &mut rng),
+                _ if r.pursuit => barricade(b, x0, x1, d.z, &mut rng),
+                _ => {
+                    b.block(Vec3::new(x0, 0.0, d.z - 0.1), Vec3::new(x1, h, d.z + 0.1), &style.wall, style.wall_tile, true);
+                    // A dark skirting line so the partition reads as a wall.
+                    let trim = b.mats.trim_wood.clone();
+                    b.block(Vec3::new(x0, 0.0, d.z - 0.12), Vec3::new(x1, 0.14, d.z + 0.12), &trim, 1.0, false);
+                }
+            }
+        }
+        blocked.push((Vec2::new(r.min.x, d.z - 0.6), Vec2::new(r.max.x, d.z + 0.6)));
+    }
+
     // ---- Furniture ----
     let mut slots = side_slots(r, &mut rng);
     slots.retain(|s| {
@@ -777,6 +797,50 @@ fn bookshelf(b: &mut Builder, props: &PropMaterials, s: Slot, rng: &mut GameRng)
             c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(m), t));
         }
     });
+}
+
+/// A double-sided row of tall shelves across the room (Reading Hall).
+fn shelf_row(b: &mut Builder, props: &PropMaterials, x0: f32, x1: f32, z: f32, rng: &mut GameRng) {
+    let n = ((x1 - x0) / 1.7).floor().max(1.0) as usize;
+    let used = n as f32 * 1.7;
+    let start = x0 + ((x1 - x0) - used) / 2.0 + 0.85;
+    for i in 0..n {
+        let x = start + i as f32 * 1.7;
+        // Back to back: one faces south, one faces north.
+        bookshelf(b, props, Slot { x, z: z + 0.22, yaw: 0.0, inward: 0.0, y: 0.0 }, rng);
+        bookshelf(b, props, Slot { x, z: z - 0.22, yaw: PI, inward: 0.0, y: 0.0 }, rng);
+    }
+    // Fill any sliver at the ends so nobody slips through between shelves and wall.
+    let wood = b.mats.trim_wood.clone();
+    if start - 0.85 - x0 > 0.05 {
+        b.block(Vec3::new(x0, 0.0, z - 0.45), Vec3::new(start - 0.85, 2.6, z + 0.45), &wood, 1.0, true);
+    }
+    let end = start - 0.85 + used;
+    if x1 - end > 0.05 {
+        b.block(Vec3::new(end, 0.0, z - 0.45), Vec3::new(x1, 2.6, z + 0.45), &wood, 1.0, true);
+    }
+}
+
+/// Chase obstacles: a line of crates and toppled planks you have to run around.
+fn barricade(b: &mut Builder, x0: f32, x1: f32, z: f32, rng: &mut GameRng) {
+    let mut x = x0 + 0.05;
+    while x < x1 - 0.3 {
+        let size = rng.range_f32(0.75, 0.95).min(x1 - x - 0.02);
+        if size < 0.3 {
+            break;
+        }
+        let c = Vec3::new(x + size / 2.0, size / 2.0, z + rng.range_f32(-0.12, 0.12));
+        crate_box(b, c, size, rng.range_f32(-0.15, 0.15), true);
+        // Some stacks are two high.
+        if rng.next_f32() < 0.4 {
+            let s2 = size * 0.8;
+            crate_box(b, Vec3::new(c.x, size + s2 / 2.0, c.z), s2, rng.range_f32(-0.3, 0.3), false);
+        }
+        x += size + 0.02;
+    }
+    // A solid band behind the crates so there are no gaps to squeeze through.
+    let planks = b.mats.door_wood.clone();
+    b.block(Vec3::new(x0, 0.0, z - 0.08), Vec3::new(x1, 1.1, z + 0.08), &planks, 1.0, true);
 }
 
 fn reading_table(b: &mut Builder, props: &PropMaterials, at: Vec3, lit: bool) {

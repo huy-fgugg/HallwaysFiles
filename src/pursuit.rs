@@ -50,6 +50,8 @@ pub enum PursuitPhase {
 pub struct Pursuit {
     pub phase: PursuitPhase,
     path: Vec<Vec3>,
+    /// Door 047 has slammed shut behind the survivors.
+    pub door_shut: bool,
 }
 
 impl Pursuit {
@@ -59,34 +61,37 @@ impl Pursuit {
     }
 }
 
-/// Ground-level route from Room 040's middle through every chase room to
-/// just inside Room 047.
+/// Ground-level route: rising right behind Door 041 (in Room 040), then
+/// through every chase room's openings between the barricades, to just
+/// inside Room 047.
 pub fn pursuit_path(plan: &FloorPlan) -> Vec<Vec3> {
     let mut pts = vec![];
     if let Some(r) = plan.room(PURSUIT_FIRST - 1) {
-        pts.push(Vec3::new(r.exit_x, 0.0, (r.min.y + r.max.y) / 2.0));
-        pts.push(Vec3::new(r.exit_x, 0.0, r.min.y + 0.6));
+        pts.push(Vec3::new(r.exit_x, 0.0, r.min.y + 1.2));
+        pts.push(Vec3::new(r.exit_x, 0.0, r.min.y + 0.4));
     }
     for i in PURSUIT_FIRST..=PURSUIT_LAST + 1 {
         let Some(r) = plan.room(i) else { continue };
-        let y = r.entry_height;
-        pts.push(Vec3::new(r.entry_x, y, r.max.y + WALL_T + 0.4));
-        pts.push(Vec3::new(r.entry_x, y, r.max.y - 0.6));
+        // Through the doorway.
+        pts.push(Vec3::new(r.entry_x, r.entry_height, r.max.y + WALL_T + 0.4));
+        let route = r.route();
         if i == PURSUIT_LAST + 1 {
+            pts.push(Vec3::new(route[0].x, r.entry_height, route[0].y));
             break;
         }
-        pts.push(Vec3::new(r.exit_x, 0.0, r.min.y + 0.6));
+        for (k, p) in route.iter().enumerate() {
+            let y = if k == 0 { r.entry_height } else { 0.0 };
+            pts.push(Vec3::new(p.x, y, p.y));
+        }
     }
     pts
 }
 
-/// Index of the path point nearest to `p` (by XZ distance).
-fn nearest_index(path: &[Vec3], p: Vec3) -> usize {
-    let flat = |v: Vec3| Vec2::new(v.x, v.z);
-    path.iter()
-        .enumerate()
-        .min_by(|a, b| flat(*a.1).distance(flat(p)).total_cmp(&flat(*b.1).distance(flat(p))))
-        .map_or(0, |(i, _)| i)
+/// How far along the route `p` is: the last route point not ahead of it
+/// (the route only ever heads toward -Z). From there a straight line to the
+/// player never crosses a barricade.
+fn progress_index(path: &[Vec3], p: Vec3) -> usize {
+    path.iter().rposition(|v| v.z >= p.z - 0.05).unwrap_or(0)
 }
 
 pub struct PursuitPlugin;
@@ -95,10 +100,15 @@ impl Plugin for PursuitPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pursuit>()
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| c.insert_resource(Pursuit::default()))
-            .add_systems(Update, (trigger, run_pursuit, auto_doors).chain().run_if(gameplay_active));
+            .add_systems(Update, (trigger, run_pursuit, auto_doors, shut_door_behind).chain().run_if(gameplay_active));
         // QA: HALLWAYS_WARP=40 starts the run at Room 040 (the opening chase counts as survived).
         if std::env::var_os("HALLWAYS_WARP").is_some() {
             app.add_systems(Update, dev_warp.run_if(gameplay_active));
+        }
+        // QA: HALLWAYS_BOT=1 sprints along each room's route (through every
+        // opening), colliding with walls like a player would.
+        if std::env::var_os("HALLWAYS_BOT").is_some() {
+            app.add_systems(Update, dev_bot.after(crate::player::CameraSet).run_if(gameplay_active));
         }
     }
 }
@@ -155,7 +165,7 @@ fn run_pursuit(
 ) {
     let dt = time.delta_secs();
     if std::env::var_os("HALLWAYS_WARP").is_some() && time.elapsed_secs() % 1.0 < dt {
-        info!("QA pursuit {:?} room {} mood {:?}", pursuit.phase, run.current_room, *mood);
+        info!("QA pursuit {:?} room {} pos {:?}", pursuit.phase, run.current_room, player.single().map(|p| p.translation).ok());
     }
     let Ok(p) = player.single() else { return };
     let Some((e, mut h, mut tf)) = hollow.iter_mut().next() else {
@@ -183,7 +193,7 @@ fn run_pursuit(
                 return;
             }
             let path = &pursuit.path;
-            let player_idx = nearest_index(path, p.translation);
+            let player_idx = progress_index(path, p.translation);
             let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
             let gap = flat(p.translation).distance(flat(tf.translation));
             let speed = if gap > CATCH_UP_GAP { CATCH_UP_SPEED } else { PURSUIT_SPEED };
@@ -263,7 +273,7 @@ fn dev_warp(
     let (Some(floor), Ok(mut tf)) = (floor, player.single_mut()) else { return };
     // A room number, or an entity name ("Listener") for the first room it haunts.
     let want = std::env::var("HALLWAYS_WARP").unwrap_or_default();
-    let Some(room) = want.parse::<u32>().ok().or_else(|| floor.0.rooms.iter().find(|r| r.encounter.is_some_and(|e| format!("{e:?}").eq_ignore_ascii_case(&want))).map(|r| r.index)) else { return };
+    let Some(room) = want.parse::<u32>().ok().or_else(|| floor.0.rooms.iter().find(|r| r.encounter.is_some_and(|e| format!("{e:?}").eq_ignore_ascii_case(&want)) || r.feature.is_some_and(|f| format!("{f:?}").eq_ignore_ascii_case(&want))).map(|r| r.index)) else { return };
     if *done || run.elapsed < 1.0 {
         return;
     }
@@ -273,6 +283,112 @@ fn dev_warp(
     chase.phase = crate::hollow::ChasePhase::Done;
     chase.active = false;
     tf.translation = Vec3::new(r.entry_x, r.entry_height + 0.05, r.max.y - 0.8);
+}
+
+fn dev_bot(
+    time: Res<Time>,
+    run: Res<RunState>,
+    floor: Option<Res<Floor>>,
+    colliders: Query<&Collider>,
+    mut player: Query<(&mut crate::player::Player, &mut Transform)>,
+) {
+    let (Some(floor), Ok((mut pl, mut tf))) = (floor, player.single_mut()) else { return };
+    if run.elapsed < 1.5 {
+        return;
+    }
+    let Some(r) = floor.0.room(run.current_room) else { return };
+    let p = tf.translation;
+    let mut route = r.route();
+    route.push(Vec2::new(r.exit_x, r.min.y - WALL_T - 0.8));
+    let Some(t) = route.iter().find(|v| v.y < p.z - 0.25) else { return };
+    let to = Vec3::new(t.x - p.x, 0.0, t.y - p.z);
+    if to.length() < 0.05 {
+        return;
+    }
+    let step = to.normalize() * crate::player::SPRINT_SPEED * time.delta_secs();
+    let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
+    let n = ((step.length() / 0.12).ceil() as usize).max(1);
+    let mut pos = p;
+    for _ in 0..n {
+        pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, p.y + 0.38, p.y + 1.7, &boxes);
+    }
+    tf.translation = pos;
+    pl.yaw = (-to.x).atan2(-to.z);
+}
+
+/// Once every living player is through Door 047, it slams shut behind
+/// them and stays locked: the chase is over for good.
+#[allow(clippy::too_many_arguments)]
+fn shut_door_behind(
+    mut commands: Commands,
+    mut pursuit: ResMut<Pursuit>,
+    floor: Option<Res<Floor>>,
+    run: Res<RunState>,
+    peers: Res<crate::net::Peers>,
+    player: Query<&Transform, With<Player>>,
+    mut doors: Query<(Entity, &mut Door)>,
+    mut rt: Option<ResMut<FloorRuntime>>,
+    mut shake: ResMut<CameraShake>,
+    mut sfx: MessageWriter<PlaySfx>,
+    mut subs: MessageWriter<Subtitle>,
+) {
+    if pursuit.door_shut || pursuit.phase == PursuitPhase::Idle {
+        return;
+    }
+    let (Some(floor), Ok(p)) = (floor, player.single()) else { return };
+    let Some(r) = floor.0.room(PURSUIT_LAST) else { return };
+    let door_z = r.min.y - WALL_T;
+    if !door_should_shut(p.translation.z, run.vitality > 0.0, peers.0.values().map(|s| (s.p[2], s.alive)), door_z) {
+        return;
+    }
+    let number = PURSUIT_LAST + 1;
+    for (e, mut d) in &mut doors {
+        if d.number != number || d.mimic {
+            continue;
+        }
+        d.open = false;
+        d.locked = true;
+        d.key_room = None;
+        if d.blocker != Entity::PLACEHOLDER {
+            let (x0, x1) = (r.exit_x - crate::world::DOOR_W / 2.0, r.exit_x + crate::world::DOOR_W / 2.0);
+            commands.entity(d.blocker).try_insert(Collider(crate::physics::Aabb {
+                min: Vec3::new(x0, 0.0, r.min.y - WALL_T),
+                max: Vec3::new(x1, crate::world::DOOR_H, r.min.y),
+            }));
+        }
+        commands.entity(e).try_remove::<Interactable>();
+    }
+    if let Some(rt) = rt.as_mut() {
+        rt.opened.remove(&number);
+    }
+    pursuit.door_shut = true;
+    info!("Door {number:03} shut behind the survivors");
+    shake.add(0.6);
+    sfx.write(PlaySfx(Sfx::DoorLocked));
+    sfx.write(PlaySfx(Sfx::Stinger));
+    subs.write(Subtitle::info("[BANG] Door 047 slams shut behind you. Keep going."));
+}
+
+/// Pure rule: shut once the local player (if alive) and every living teammate
+/// are at least a step past the door (rooms run toward -Z).
+pub fn door_should_shut(me_z: f32, me_alive: bool, peers: impl Iterator<Item = (f32, bool)>, door_z: f32) -> bool {
+    let past = |z: f32| z < door_z - 1.2;
+    let mut anyone = false;
+    if me_alive {
+        if !past(me_z) {
+            return false;
+        }
+        anyone = true;
+    }
+    for (z, alive) in peers {
+        if alive {
+            if !past(z) {
+                return false;
+            }
+            anyone = true;
+        }
+    }
+    anyone
 }
 
 /// During the chase, real doors on the route open as the player reaches them.
@@ -325,6 +441,20 @@ mod tests {
         for w in path.windows(2) {
             assert!(w[1].z <= w[0].z + 0.01, "path doubles back: {w:?}");
         }
+        // It weaves through the barricade openings, not straight lines.
+        let turns = path.windows(2).filter(|w| (w[1].x - w[0].x).abs() > 2.0).count();
+        assert!(turns >= 6, "only {turns} turns");
+    }
+
+    #[test]
+    fn door_waits_for_every_living_player() {
+        let door = -100.0;
+        assert!(!door_should_shut(-99.0, true, std::iter::empty(), door), "still in the doorway");
+        assert!(door_should_shut(-102.0, true, std::iter::empty(), door));
+        assert!(!door_should_shut(-102.0, true, [(-90.0, true)].into_iter(), door), "a teammate is still behind");
+        assert!(door_should_shut(-102.0, true, [(-90.0, false)].into_iter(), door), "the dead don't hold the door");
+        assert!(door_should_shut(-50.0, false, [(-103.0, true)].into_iter(), door), "spectating while friends got through");
+        assert!(!door_should_shut(-50.0, false, std::iter::empty(), door), "nobody alive");
     }
 
     #[test]
