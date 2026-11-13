@@ -284,6 +284,11 @@ fn close_pause(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut next:
 
 /// Alt-tabbing out of a run pauses it, so nothing can kill you while away.
 fn pause_on_focus_lost(mut reader: MessageReader<WindowFocused>, mut next: ResMut<NextState<Overlay>>) {
+    // Automated QA runs on a virtual display that never has focus.
+    if std::env::var_os("HALLWAYS_THEATER").is_some() || std::env::var_os("HALLWAYS_CAPTURE").is_some() {
+        reader.clear();
+        return;
+    }
     for ev in reader.read() {
         if !ev.focused {
             next.set(Overlay::Pause);
