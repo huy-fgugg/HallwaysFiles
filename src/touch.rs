@@ -70,6 +70,8 @@ struct TouchState {
     /// Keys tapped this frame, released next frame.
     tapped: Vec<KeyCode>,
     pressed_buttons: Vec<(u64, Action)>,
+    /// Movement keys the joystick is currently holding down (and must release).
+    moving: Vec<KeyCode>,
 }
 
 const STICK_RADIUS: f32 = 70.0;
@@ -149,6 +151,29 @@ fn spawn_controls(mut commands: Commands, theme: Res<UiTheme>) {
         });
 }
 
+/// Keys for a joystick offset (logical pixels from where the thumb landed).
+/// A small dead zone in the middle means no movement.
+pub fn stick_keys(offset: Vec2) -> Vec<KeyCode> {
+    let d = offset.clamp_length_max(STICK_RADIUS) / STICK_RADIUS;
+    let mut keys = vec![];
+    if d.length() < 0.25 {
+        return keys;
+    }
+    if d.y < -0.38 {
+        keys.push(KeyCode::KeyW);
+    }
+    if d.y > 0.38 {
+        keys.push(KeyCode::KeyS);
+    }
+    if d.x < -0.38 {
+        keys.push(KeyCode::KeyA);
+    }
+    if d.x > 0.38 {
+        keys.push(KeyCode::KeyD);
+    }
+    keys
+}
+
 /// Which touch button (if any) covers a point in physical pixels.
 fn button_at(buttons: &Query<(&TouchButton, &ComputedNode, &UiGlobalTransform, &InheritedVisibility)>, p: Vec2) -> Option<Action> {
     buttons.iter().find(|(_, node, tf, vis)| vis.get() && node.contains_point(**tf, p)).map(|(b, ..)| b.0)
@@ -165,15 +190,18 @@ fn handle_touches(
     screen: Option<Res<State<Screen>>>,
     inv: Option<Res<crate::items::Inventory>>,
 ) {
-    // The Android back button acts like Esc.
-    if keys.just_pressed(KeyCode::BrowserBack) {
-        keys.press(KeyCode::Escape);
-    }
+
     if touches.iter().next().is_some() || touches.iter_just_pressed().next().is_some() {
         state.enabled = true;
     }
     for k in std::mem::take(&mut state.tapped) {
         keys.release(k);
+    }
+    // The Android back button acts like a tap of Esc (pressed, then released
+    // next frame, so it works every time).
+    if keys.just_pressed(KeyCode::BrowserBack) {
+        keys.press(KeyCode::Escape);
+        state.tapped.push(KeyCode::Escape);
     }
     if !state.enabled {
         return;
@@ -227,39 +255,42 @@ fn handle_touches(
             state.look = None;
         }
     }
-    // Joystick → WASD.
+    // Touches that vanished without an "ended" event (app switch, system
+    // gesture) must not leave the stick, look or a button stuck on.
+    if let Some((id, _)) = state.stick {
+        if touches.get_pressed(id).is_none() {
+            state.stick = None;
+        }
+    }
+    if let Some(id) = state.look {
+        if touches.get_pressed(id).is_none() {
+            state.look = None;
+        }
+    }
+    state.pressed_buttons.retain(|(id, _)| touches.get_pressed(*id).is_some());
+    // Joystick → WASD. Only keys the joystick pressed are released by it, so
+    // a real keyboard keeps working alongside.
     let mut want: Vec<KeyCode> = vec![];
     if let Some((id, origin)) = state.stick {
         if let Some(t) = touches.get_pressed(id) {
             state.stick_pos = t.position();
-            let d = (t.position() - origin).clamp_length_max(STICK_RADIUS) / STICK_RADIUS;
-            if d.y < -0.35 {
-                want.push(KeyCode::KeyW);
-            }
-            if d.y > 0.35 {
-                want.push(KeyCode::KeyS);
-            }
-            if d.x < -0.35 {
-                want.push(KeyCode::KeyA);
-            }
-            if d.x > 0.35 {
-                want.push(KeyCode::KeyD);
+            if in_game {
+                want = stick_keys(t.position() - origin);
             }
         }
     }
     for k in MOVE_KEYS {
         let on = want.contains(&k);
-        if on && !keys.pressed(k) {
+        let ours = state.moving.contains(&k);
+        if on && !ours {
             keys.press(k);
-        } else if !on && keys.pressed(k) && state.stick.is_some() {
+            state.moving.push(k);
+        } else if !on && ours {
             keys.release(k);
-        }
-    }
-    if state.stick.is_none() && !in_game {
-        for k in MOVE_KEYS {
-            if keys.pressed(k) {
-                keys.release(k);
-            }
+            state.moving.retain(|m| *m != k);
+        } else if on && !keys.pressed(k) {
+            // Something (focus loss) released it under us: hold it again.
+            keys.press(k);
         }
     }
     // Drag to look.
@@ -344,5 +375,21 @@ fn soft_keyboard(typing: Res<crate::ui::play_menu::Typing>, mut was: Local<bool>
         } else {
             app.hide_soft_input(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn joystick_directions_and_dead_zone() {
+        assert!(stick_keys(Vec2::new(5.0, -5.0)).is_empty(), "dead zone");
+        assert_eq!(stick_keys(Vec2::new(0.0, -60.0)), vec![KeyCode::KeyW]);
+        assert_eq!(stick_keys(Vec2::new(0.0, 60.0)), vec![KeyCode::KeyS]);
+        assert_eq!(stick_keys(Vec2::new(-60.0, 0.0)), vec![KeyCode::KeyA]);
+        assert_eq!(stick_keys(Vec2::new(50.0, -50.0)), vec![KeyCode::KeyW, KeyCode::KeyD]);
+        // Far past the ring still clamps to a direction.
+        assert_eq!(stick_keys(Vec2::new(0.0, -500.0)), vec![KeyCode::KeyW]);
     }
 }
