@@ -162,11 +162,7 @@ fn whisperer(
     if !*spawned && *t >= tune.warn_for(room) {
         // Appear behind the player, kept inside the room.
         let r = floor.as_ref().and_then(|f| f.0.room(room));
-        let mut p = cpos - Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero() * 2.6;
-        if let Some(r) = r {
-            p.x = p.x.clamp(r.min.x + 0.5, r.max.x - 0.5);
-            p.z = p.z.clamp(r.min.y + 0.5, r.max.y - 0.5);
-        }
+        let mut p = whisperer_spawn(cpos, fwd, r.map(|r| (r.min, r.max)));
         p.y = 1.5;
         spawn_whisperer(&mut commands, &mut meshes, &mut mats, p);
         *spawned = true;
@@ -345,6 +341,33 @@ fn hush_ui(time: Res<Time>, state: Res<EncounterState>, cfg: Res<EntityConfig>, 
     }
 }
 
+/// Where The Whisperer appears: behind the player, inside the room. With
+/// the player's back to a wall, it picks the behind-left/right spot that
+/// is farthest from them, so it never pops up in their face or in view.
+pub fn whisperer_spawn(cpos: Vec3, fwd: Vec3, bounds: Option<(Vec2, Vec2)>) -> Vec3 {
+    let f = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or(Vec3::NEG_Z);
+    let side = Vec3::new(-f.z, 0.0, f.x);
+    let clamp = |mut p: Vec3| {
+        if let Some((min, max)) = bounds {
+            p.x = p.x.clamp(min.x + 0.5, max.x - 0.5);
+            p.z = p.z.clamp(min.y + 0.5, max.y - 0.5);
+        }
+        p
+    };
+    let flat = |p: Vec3| Vec3::new(p.x - cpos.x, 0.0, p.z - cpos.z);
+    // Score: far enough away, not in front, ideally straight behind.
+    let score = |p: Vec3| {
+        let d = flat(p);
+        let ahead = d.normalize_or_zero().dot(f);
+        d.length().min(2.6) - 4.0 * ahead.max(0.0) - 0.5 * ahead
+    };
+    [-f * 2.6, (-f + side).normalize() * 2.6, (-f - side).normalize() * 2.6, side * 2.8, -side * 2.8]
+        .into_iter()
+        .map(|o| clamp(cpos + o))
+        .max_by(|a, b| score(*a).total_cmp(&score(*b)))
+        .unwrap_or(cpos - f * 2.6)
+}
+
 fn spawn_whisperer(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3) {
     let pale = mats.add(StandardMaterial { base_color: Color::srgb(0.78, 0.8, 0.82), emissive: LinearRgba::rgb(0.08, 0.09, 0.11), perceptual_roughness: 0.6, ..default() });
     let socket = mats.add(StandardMaterial { base_color: Color::BLACK, unlit: true, ..default() });
@@ -450,6 +473,20 @@ fn animate_eyes(time: Res<Time>, player: Query<&Transform, (With<Player>, Withou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whisperer_never_spawns_in_your_face() {
+        // Back to the south wall of a 6 x 10 room, looking north.
+        let bounds = Some((Vec2::new(-3.0, -10.0), Vec2::new(3.0, 0.0)));
+        let cam = Vec3::new(0.0, 1.6, -0.6);
+        let p = whisperer_spawn(cam, Vec3::NEG_Z, bounds);
+        let d = Vec3::new(p.x - cam.x, 0.0, p.z - cam.z);
+        assert!(d.length() > 1.8, "too close: {d:?}");
+        assert!(!is_looking_at(cam, Vec3::NEG_Z, Vec3::new(p.x, 1.65, p.z), LOOK_COS), "spawned in view");
+        // In the open it is straight behind.
+        let p = whisperer_spawn(Vec3::new(0.0, 1.6, -5.0), Vec3::NEG_Z, bounds);
+        assert!((p.z - (-5.0 + 2.6)).abs() < 1e-3 && p.x.abs() < 1e-3);
+    }
 
     #[test]
     fn looking_requires_facing_target() {

@@ -62,9 +62,14 @@ fn open_editor(mut commands: Commands, old: Option<Res<CustomEditor>>) {
 }
 
 fn small(parent: &mut ChildSpawnerCommands, t: &UiTheme, label: &str, action: MenuAction, order: i32, w: f32) {
-    let e = spawn_button(parent, t, label, action, order, false);
+    small_focus(parent, t, label, action, order, w, false);
+}
+
+fn small_focus(parent: &mut ChildSpawnerCommands, t: &UiTheme, label: &str, action: MenuAction, order: i32, w: f32, initial: bool) {
+    let e = spawn_button(parent, t, label, action, order, initial);
     parent.commands().entity(e).entry::<Node>().and_modify(move |mut n| {
         n.width = px(w);
+        n.min_width = px(w);
         n.min_height = px(36);
         n.padding = UiRect::axes(px(6), px(4));
     });
@@ -124,7 +129,8 @@ fn spawn_screen(mut commands: Commands, theme: Res<UiTheme>) {
                 .into_iter()
                 .enumerate()
                 {
-                    small(row, &t, label, action, 70 + i as i32, 160.0);
+                    // Play is focused on open: pick a floor with < >, then press it.
+                    small_focus(row, &t, label, action, 70 + i as i32, 160.0, i == 0);
                 }
             });
             root.spawn((Text::new(""), t.font(false, t.size_small), TextColor(t.text_dim), CustomStatus, Node { max_width: px(900), ..default() }));

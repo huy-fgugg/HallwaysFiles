@@ -91,6 +91,17 @@
 - [x] Victory screen: animated gold VICTORY title, original victory theme; drop-in folders music/victory and music/cutscene_ending
 - [x] Android APK built by the Release workflow
 
+## 1.0.4
+- [x] Door 40 chase: stepping through Door 041 turns the lights red and The Hollow rises behind you; it follows you through rooms 41-46 (faster than walking, slower than sprinting), doors on the way open as you reach them, and it sinks away at Room 047 (+15 Lumens). Chase rooms have no locks, fake doors or other entities
+- [x] Every entity (Surge, Undertow, Whisperer, Gallery, Hush, Listener) now appears in every full run; the Listener can also haunt the Archive
+- [x] Custom Floors start straight in the first room of the chosen floor (no lift, Room 000 or opening chase); rooms still stream in a few at a time
+- [x] Custom Floors screen: Play Solo is focused on open, small buttons keep their size
+- [x] Fix: The Whisperer could appear in your face (and flee at once) when your back was to a wall
+- [x] Fix: subtitles overlapped the battery bar and hide meter
+- [x] Fix: the opening Hollow is removed once it sinks; each Hollow lights its own eyes
+- [x] Fix: Play screen focus order (name box first on a new profile; Solo Run and Custom Floors no longer share a slot)
+- [x] Playtested on Linux with simulated keyboard/mouse: menus, custom floor, every entity, the Door 40 chase, death and retry
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
 - [x] .deb installed and launched in a clean Linux container (menu renders, assets found)

@@ -142,14 +142,15 @@ fn spawn_play(mut commands: Commands, theme: Res<UiTheme>, profile: Res<Profile>
                     p.spawn(t.dim_text("Click the box and type. Other players see this name over your head."));
                     field_row(p, &t, FieldKind::Seed, &profile.seed_text, 1);
                     p.spawn(t.dim_text("Leave the seed empty for a new floor every run."));
-                    spawn_button(p, &t, "Solo Run", MenuAction::PlaySolo, 2, true);
-                    spawn_button(p, &t, "Custom Floors", MenuAction::OpenCustom, 2, false);
+                    // First visit (default name): the name box gets the cursor instead.
+                    spawn_button(p, &t, "Solo Run", MenuAction::PlaySolo, 2, profile.name != "Player");
+                    spawn_button(p, &t, "Custom Floors", MenuAction::OpenCustom, 3, false);
                     p.spawn((Text::new("ONLINE (UP TO 4 PLAYERS)"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
-                    spawn_button(p, &t, "Host Room", MenuAction::HostRoom, 3, false);
-                    field_row(p, &t, FieldKind::Code, "", 4);
-                    spawn_button(p, &t, "Join Room", MenuAction::JoinRoom, 5, false);
+                    spawn_button(p, &t, "Host Room", MenuAction::HostRoom, 4, false);
+                    field_row(p, &t, FieldKind::Code, "", 5);
+                    spawn_button(p, &t, "Join Room", MenuAction::JoinRoom, 6, false);
                     p.spawn((Text::new(""), t.font(false, t.size_small), TextColor(t.text_dim), StatusText, Node { max_width: px(400), ..default() }));
-                    spawn_button(p, &t, "Back", MenuAction::ClosePlay, 6, false);
+                    spawn_button(p, &t, "Back", MenuAction::ClosePlay, 7, false);
                 });
                 // ---- Right: shop and modifiers ----
                 cols.spawn(t.panel(470.0)).with_children(|p| {

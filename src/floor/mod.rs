@@ -87,7 +87,7 @@ impl Plugin for FloorPlugin {
             .add_systems(OnEnter(AppState::Playing), setup_floor)
             .add_systems(
                 Update,
-                (stream_rooms, fix_open_doors, unlock_gate_after_hollow, announce_areas, finish_floor).run_if(in_state(AppState::Playing)),
+                (custom_quick_start, stream_rooms, fix_open_doors, unlock_gate_after_hollow, announce_areas, finish_floor).run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -167,6 +167,39 @@ fn stream_rooms(
     }
 }
 
+/// Custom floors skip the opening (lift, Room 000 and The Hollow's corridor):
+/// once the lift has left (online) or straight away (solo), the player stands
+/// in the first room of the floor they picked.
+#[allow(clippy::too_many_arguments)]
+fn custom_quick_start(
+    preset: Res<crate::presets::ActivePreset>,
+    floor: Option<Res<Floor>>,
+    run: Res<RunState>,
+    lobby: Res<crate::lobby::LiftLobby>,
+    cutscene: Res<crate::cutscene::ActiveCutscene>,
+    mut chase: ResMut<ChaseState>,
+    mut player: Query<(&mut crate::player::Player, &mut Transform)>,
+    mut subs: MessageWriter<Subtitle>,
+    mut done: Local<bool>,
+) {
+    if run.elapsed < 0.2 {
+        *done = false;
+    }
+    let (Some(p), Some(floor)) = (preset.0.as_ref(), floor) else { return };
+    if *done || lobby.waiting || cutscene.is_playing() || std::env::var_os("HALLWAYS_CAPTURE").is_some() {
+        return;
+    }
+    let Ok((mut pl, mut tf)) = player.single_mut() else { return };
+    let Some(r) = floor.0.room(FIRST_ROOM) else { return };
+    *done = true;
+    chase.phase = ChasePhase::Done;
+    chase.active = false;
+    tf.translation = Vec3::new(r.entry_x, r.entry_height, r.max.y - 0.9);
+    pl.yaw = 0.0;
+    pl.pitch = 0.0;
+    subs.write(Subtitle { text: format!("-  {}  -   {}", p.name.to_uppercase(), r.area.name().to_uppercase()), seconds: 4.0, danger: false });
+}
+
 /// Doors rebuilt in the "already open" state lose their blocking collider.
 fn fix_open_doors(mut commands: Commands, doors: Query<(Entity, &Door), Added<OpenOnSpawn>>) {
     for (e, d) in &doors {
@@ -178,7 +211,14 @@ fn fix_open_doors(mut commands: Commands, doors: Query<(Entity, &Door), Added<Op
 }
 
 /// Surviving The Hollow unlocks Door 002 into the generated floor.
-fn unlock_gate_after_hollow(chase: Res<ChaseState>, mut doors: Query<&mut Door>, mut subs: MessageWriter<Subtitle>, mut done: Local<bool>, run: Res<RunState>) {
+fn unlock_gate_after_hollow(
+    chase: Res<ChaseState>,
+    preset: Res<crate::presets::ActivePreset>,
+    mut doors: Query<&mut Door>,
+    mut subs: MessageWriter<Subtitle>,
+    mut done: Local<bool>,
+    run: Res<RunState>,
+) {
     if run.elapsed < 0.2 {
         *done = false;
     }
@@ -189,7 +229,10 @@ fn unlock_gate_after_hollow(chase: Res<ChaseState>, mut doors: Query<&mut Door>,
         if d.number == 2 && d.locked {
             d.locked = false;
             *done = true;
-            subs.write(Subtitle { text: "[Somewhere ahead, a lock clicks open. Door 002.]".into(), seconds: 4.0, danger: false });
+            // Custom floors start past this door: no need to announce it.
+            if preset.0.is_none() {
+                subs.write(Subtitle { text: "[Somewhere ahead, a lock clicks open. Door 002.]".into(), seconds: 4.0, danger: false });
+            }
         }
     }
 }

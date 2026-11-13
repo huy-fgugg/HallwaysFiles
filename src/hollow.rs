@@ -83,6 +83,7 @@ pub struct Hollow {
     pub eyes_target: f32,
     pub facing: f32,
     pool: Entity,
+    eyes_mat: Handle<StandardMaterial>,
 }
 
 #[derive(Component)]
@@ -144,7 +145,7 @@ fn trigger_encounter(
     }
 }
 
-fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3) -> Entity {
+pub fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3) -> Entity {
     // Wet ink: near-black with a tight highlight, low environment reflection
     // so it doesn't read as grey under the ambient light.
     let ink = mats.add(StandardMaterial {
@@ -175,7 +176,7 @@ fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut A
         .spawn((
             Transform::from_translation(at - Vec3::Y * 2.6),
             Visibility::default(),
-            Hollow { emerge: 0.0, emerge_rate: 0.0, eyes: 0.0, eyes_target: 0.0, facing: 0.0, pool },
+            Hollow { emerge: 0.0, emerge_rate: 0.0, eyes: 0.0, eyes_target: 0.0, facing: 0.0, pool, eyes_mat: eyes.clone() },
             DespawnOnExit(AppState::Playing),
             Name::new("The Hollow"),
         ))
@@ -345,7 +346,8 @@ fn chase(
     hide: Res<HideState>,
     spots: Query<&HidingSpot>,
     player: Query<&Transform, (With<Player>, Without<Hollow>)>,
-    mut hollows: Query<(&mut Hollow, &mut Transform)>,
+    mut hollows: Query<(Entity, &mut Hollow, &mut Transform), Without<crate::pursuit::PursuitHollow>>,
+    mut commands: Commands,
     mut mood: ResMut<Mood>,
     mut shake: ResMut<CameraShake>,
     mut run: ResMut<RunState>,
@@ -359,7 +361,8 @@ fn chase(
     }
     let dt = time.delta_secs();
     let Ok(p) = player.single() else { return };
-    let Ok((mut h, mut tf)) = hollows.single_mut() else { return };
+    // The start-of-floor Hollow (a leftover from a viewed cutscene can't stall it).
+    let Some((hollow_e, mut h, mut tf)) = hollows.iter_mut().next() else { return };
     let hidden = hide.is_hiding();
     let spot_front = hide.spot.and_then(|s| spots.get(s).ok()).map(|s| s.exit);
 
@@ -418,10 +421,11 @@ fn chase(
             if t >= SINK_SECS {
                 chase.phase = ChasePhase::Done;
                 chase.active = false;
+                commands.entity(hollow_e).try_despawn();
                 *mood = Mood::default();
                 run.lumens += 10;
                 sfx.write(PlaySfx(Sfx::Pickup));
-                subs.write(Subtitle { text: "It sank away. You survived The Hollow (+10 Lumens). End of the Phase 1 test floor.".into(), seconds: 6.0, danger: false });
+                subs.write(Subtitle { text: "It sank away. You survived The Hollow (+10 Lumens). Door 002 is unlocked.".into(), seconds: 6.0, danger: false });
             }
         }
         _ => {}
@@ -435,7 +439,6 @@ fn animate_hollow(
     mut bodies: Query<&mut Transform, (With<HollowBody>, Without<Hollow>, Without<HollowArm>, Without<HollowTatter>)>,
     mut arms: Query<(&HollowArm, &mut Transform), (Without<Hollow>, Without<HollowBody>, Without<HollowTatter>)>,
     mut tatters: Query<(&HollowTatter, &mut Transform), (Without<Hollow>, Without<HollowBody>, Without<HollowArm>)>,
-    eyes: Query<&MeshMaterial3d<StandardMaterial>, With<HollowEyes>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
@@ -458,11 +461,9 @@ fn animate_hollow(
             pool.translation.x = tf.translation.x;
             pool.translation.z = tf.translation.z;
         }
-        for mat in &eyes {
-            if let Some(mut m) = mats.get_mut(&mat.0) {
-                let pulse = 0.85 + 0.15 * (t * 9.0).sin();
-                m.emissive = LinearRgba::rgb(9.0, 4.2, 0.8) * (h.eyes * pulse);
-            }
+        if let Some(mut m) = mats.get_mut(&h.eyes_mat) {
+            let pulse = 0.85 + 0.15 * (t * 9.0).sin();
+            m.emissive = LinearRgba::rgb(9.0, 4.2, 0.8) * (h.eyes * pulse);
         }
     }
     for mut b in &mut bodies {

@@ -85,9 +85,17 @@ impl Plugin for LobbyPlugin {
     }
 }
 
-fn begin(mut lobby: ResMut<LiftLobby>, skip: Res<SkipLobby>, mut lift: MessageWriter<ElevatorCommand>) {
+fn begin(
+    mut lobby: ResMut<LiftLobby>,
+    skip: Res<SkipLobby>,
+    preset: Res<crate::presets::ActivePreset>,
+    session: Res<crate::net::NetSession>,
+    mut lift: MessageWriter<ElevatorCommand>,
+) {
     let capture = std::env::var_os("HALLWAYS_CAPTURE").is_some();
-    *lobby = LiftLobby { waiting: !(skip.0 || capture), ..default() };
+    // A solo custom floor starts straight in its first room (see floor::custom_quick_start).
+    let custom_solo = preset.0.is_some() && !session.online();
+    *lobby = LiftLobby { waiting: !(skip.0 || capture || custom_solo), ..default() };
     if !lobby.waiting {
         // Retry / capture: you're already on the floor; the gate is open.
         lift.write(ElevatorCommand::Needle { to: 1.0, seconds: 0.0 });
