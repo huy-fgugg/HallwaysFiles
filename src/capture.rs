@@ -30,6 +30,9 @@ const ROOM_SHOTS: &[(&str, u32, f32)] = &[
     ("37_grounds", 53, 0.0),
     ("37b_grounds_entry", 51, 0.0),
     ("38_listener", 0, 0.0),
+    ("39a_final_room", 99, 0.0),
+    ("39b_door_100_opens", 99, 0.0),
+    ("39c_results", 99, 0.0),
     ("35_admin_panel", 4, 0.0),
     ("36_jumpscare", 4, 0.0),
 ];
@@ -106,6 +109,7 @@ fn run_capture(
     (mut run, app_overlay, mut next_overlay): (ResMut<crate::run::RunState>, Res<State<crate::state::Overlay>>, ResMut<NextState<crate::state::Overlay>>),
     mut lobby: ResMut<crate::lobby::LiftLobby>,
     (mut admin, mut effects): (ResMut<crate::admin::AdminUnlocked>, MessageWriter<crate::admin::AdminEffect>),
+    mut doors: Query<&mut crate::interaction::Door>,
 ) {
     cap.timer += time.delta_secs();
     cap.frames += 1;
@@ -193,6 +197,20 @@ fn run_capture(
             }
         } else if *app_overlay.get() == crate::state::Overlay::Admin {
             next_overlay.set(crate::state::Overlay::None);
+        }
+        if label.starts_with("39b") && cap.frames > 10 {
+            let last = floor.0.final_door();
+            for mut d in &mut doors {
+                if d.number == last && !d.mimic {
+                    d.open = true;
+                    d.locked = false;
+                }
+            }
+        }
+        if label.starts_with("39c") && cap.frames > 8 {
+            if let Some(rt) = rt.as_mut() {
+                rt.opened.insert(floor.0.final_door());
+            }
         }
         if label.starts_with("36") && cap.frames > 20 {
             effects.write(crate::admin::AdminEffect { action: crate::admin::AdminAction::Jumpscare, by: "QA".into() });
