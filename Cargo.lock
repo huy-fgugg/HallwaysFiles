@@ -3086,7 +3086,7 @@ dependencies = [
 
 [[package]]
 name = "hallways"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "bevy",
  "rand 0.10.3",

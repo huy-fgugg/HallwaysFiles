@@ -121,12 +121,18 @@ impl UiTheme {
         )
     }
 
+    /// A card that scrolls vertically when its contents are taller than the
+    /// screen allows (mouse wheel, touch drag, or keyboard focus).
     pub fn panel(&self, min_width: f32) -> impl Bundle {
         (
             Node {
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Stretch,
                 min_width: px(min_width),
+                // QA: HALLWAYS_PANEL_VH squeezes panels to test scrolling.
+                max_height: vh(std::env::var("HALLWAYS_PANEL_VH").ok().and_then(|v| v.parse().ok()).unwrap_or(64.0)),
+                min_height: px(0),
+                overflow: Overflow::scroll_y(),
                 padding: UiRect::all(px(self.pad)),
                 row_gap: px(self.gap),
                 border: UiRect::all(px(self.border)),
@@ -135,6 +141,7 @@ impl UiTheme {
             },
             BackgroundColor(self.panel),
             BorderColor::all(self.panel_border),
+            ScrollPosition::default(),
         )
     }
 
