@@ -14,6 +14,7 @@ pub mod encounters;
 pub mod ending;
 pub mod floor;
 pub mod graphics;
+pub mod guide;
 pub mod hollow;
 pub mod icons;
 pub mod interaction;
@@ -63,6 +64,6 @@ impl Plugin for HallwaysPlugin {
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
         app.init_resource::<presets::ActivePreset>();
         app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin, touch::TouchPlugin, ending::EndingPlugin, theater::TheaterPlugin, trailer::TrailerPlugin));
-        app.add_plugins(pursuit::PursuitPlugin);
+        app.add_plugins((pursuit::PursuitPlugin, guide::GuidePlugin));
     }
 }

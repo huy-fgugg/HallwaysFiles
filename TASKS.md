@@ -101,6 +101,13 @@
 - [x] Fix: the opening Hollow is removed once it sinks; each Hollow lights its own eyes
 - [x] Fix: Play screen focus order (name box first on a new profile; Solo Run and Custom Floors no longer share a slot)
 - [x] Playtested on Linux with simulated keyboard/mouse: menus, custom floor, every entity, the Door 40 chase, death and retry
+- [x] Chase rooms (41-46) are big halls with crate barricades; the openings alternate sides so you have to weave. The Hollow rises right behind Door 041 and follows the same route
+- [x] Door 047 slams shut and locks once every living player is through it
+- [x] Zigzag rooms: partition walls with openings at alternating ends
+- [x] The Reading Hall (through Door 050): a large dim archive with rows of double-sided shelves; Door 051 is locked and the key is in one of seven drawers
+- [x] Guiding light: after 35 s in a locked room (55 s in the Reading Hall) without the key, a pale wisp appears and floats to the drawer that hides it
+- [x] Movement is resolved in short sub-steps so slow frames can't carry you through thin walls
+- [x] QA switches: HALLWAYS_WARP=<room|entity|Zigzag|ReadingHall>, HALLWAYS_BOT=1 (autopilot along room routes), HALLWAYS_GUIDE_SECS
 
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)

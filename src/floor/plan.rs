@@ -23,6 +23,11 @@ pub const FAKE_SPACING: f32 = 1.8;
 /// Rooms of the Door 40 chase: The Hollow pursues you from Room 041 to 046.
 pub const PURSUIT_FIRST: u32 = 41;
 pub const PURSUIT_LAST: u32 = 46;
+/// Room entered through Door 050: the Reading Hall, a big archive room whose
+/// exit is locked until you find the key among its shelves.
+pub const READING_HALL: u32 = 50;
+/// Width of the opening in a divider (a wall, barricade or shelf row).
+pub const DIVIDER_GAP: f32 = 1.8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Area {
@@ -143,6 +148,19 @@ pub enum Feature {
     RaisedExit { height: f32 },
     /// The key waits in a chest on a loft up a staircase along a side wall.
     KeyLoft { east: bool },
+    /// Walls across the room with an opening at alternating ends: the way
+    /// through turns back and forth.
+    Zigzag,
+    /// The Reading Hall (see [`READING_HALL`]): rows of tall shelves.
+    ReadingHall,
+}
+
+/// A line across the room (constant z) that is solid except for an opening.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Divider {
+    pub z: f32,
+    /// Opening, x from..to.
+    pub gap: (f32, f32),
 }
 
 pub const LOFT_HEIGHT: f32 = 1.6;
@@ -212,6 +230,46 @@ impl RoomPlan {
 
     pub fn depth(&self) -> f32 {
         self.max.y - self.min.y
+    }
+
+    /// Lines across the room that force the way through to turn: walls in
+    /// zigzag rooms, barricades in the chase, shelf rows in the Reading Hall.
+    pub fn dividers(&self) -> Vec<Divider> {
+        let max_n = match self.feature {
+            Some(Feature::Zigzag) => 3,
+            Some(Feature::ReadingHall) => 4,
+            _ if self.pursuit => 4,
+            _ => return vec![],
+        };
+        // Keep clear of the entry landing and its stairs down.
+        let stairs = if self.entry_height > 0.0 { LANDING_DEPTH + self.entry_height / STEP_RISE * STEP_RUN + 0.6 } else { 0.0 };
+        let (z_s, z_n) = (self.max.y - 2.6 - stairs, self.min.y + 2.6);
+        if z_s <= z_n || self.width() < DIVIDER_GAP + 2.0 {
+            return vec![];
+        }
+        let n = (((z_s - z_n) / 3.2).floor() as usize + 1).clamp(1, max_n);
+        let mut east = self.seed & 1 == 1;
+        (0..n)
+            .map(|i| {
+                let z = if n == 1 { (z_s + z_n) / 2.0 } else { z_s - i as f32 * (z_s - z_n) / (n - 1) as f32 };
+                let gap = if east { (self.max.x - DIVIDER_GAP, self.max.x) } else { (self.min.x, self.min.x + DIVIDER_GAP) };
+                east = !east;
+                Divider { z, gap }
+            })
+            .collect()
+    }
+
+    /// Walking route through the room at floor level, from just inside the
+    /// entry door, through every divider opening, to just before the exit.
+    pub fn route(&self) -> Vec<Vec2> {
+        let mut pts = vec![Vec2::new(self.entry_x, self.max.y - 0.6)];
+        for d in self.dividers() {
+            let gx = (d.gap.0 + d.gap.1) / 2.0;
+            pts.push(Vec2::new(gx, d.z + 0.9));
+            pts.push(Vec2::new(gx, d.z - 0.9));
+        }
+        pts.push(Vec2::new(self.exit_x, self.min.y + 0.6));
+        pts
     }
 }
 
@@ -368,6 +426,8 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         } else {
             kind
         };
+        let reading_hall = index == READING_HALL && last >= READING_HALL + 2 && !first_of_area && !pursuit;
+        let kind = if reading_hall { RoomKind::KeyPuzzle } else { kind };
         if kind == RoomKind::KeyPuzzle {
             last_key = i64::from(index);
         }
@@ -385,6 +445,14 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             (6.0, depth)
         } else if area == Area::Grounds && !matches!(kind, RoomKind::Final | RoomKind::Transition) && rng.next_f32() < 0.35 {
             (width, (depth * 1.5).min(24.0))
+        } else {
+            (width, depth)
+        };
+        // The chase runs through big rooms; the Reading Hall is the biggest.
+        let (width, depth) = if reading_hall {
+            (13.0, 19.0)
+        } else if pursuit {
+            (rng.range_f32(9.0, 12.0), rng.range_f32(14.0, 19.0))
         } else {
             (width, depth)
         };
@@ -412,6 +480,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         };
 
         let light = match kind {
+            _ if reading_hall => LightState::Dim,
             RoomKind::Dark => LightState::Dark,
             RoomKind::Transition | RoomKind::Final => LightState::Bright,
             _ => {
@@ -421,7 +490,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         };
 
         // ---- Encounter: at most one per room, never back-to-back rooms ----
-        let encounter = if pursuit || matches!(kind, RoomKind::Final | RoomKind::Transition) || i64::from(index) - last_any < 2 {
+        let encounter = if pursuit || reading_hall || matches!(kind, RoomKind::Final | RoomKind::Transition) || i64::from(index) - last_any < 2 {
             None
         } else {
             let mut chosen = None;
@@ -452,6 +521,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         let containers = match kind {
             RoomKind::Hall => rng.below(2) as u8,
             RoomKind::Loot => 2 + rng.below(2) as u8,
+            RoomKind::KeyPuzzle if reading_hall => 7,
             RoomKind::KeyPuzzle => 3,
             RoomKind::Final => 0,
             _ => 1 + rng.below(2) as u8,
@@ -461,8 +531,11 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
 
         // ---- Weird architecture ----
         let feature_roll = rng.next_f32();
+        let zig_roll = rng.next_f32();
         let feature = if pursuit {
             None
+        } else if reading_hall {
+            Some(Feature::ReadingHall)
         } else if kind == RoomKind::KeyPuzzle && width >= 5.5 && depth >= 7.6 && feature_roll < 0.6 * opt.stairs.clamp(0.0, 1.6) {
             Some(Feature::KeyLoft { east: rng.next_f32() < 0.5 })
         } else if index >= 8
@@ -475,6 +548,16 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         {
             let height = if rng.next_f32() < 0.5 { 1.2 } else { 1.6 };
             Some(Feature::RaisedExit { height })
+        } else if index >= 6
+            && entry_height == 0.0
+            && !matches!(area, Area::Grounds | Area::Atrium)
+            && encounter.is_none_or(|e| e != Encounter::Listener)
+            && matches!(kind, RoomKind::Loot | RoomKind::Dark)
+            && width >= 5.0
+            && depth >= 8.0
+            && zig_roll < 0.16 * opt.stairs.clamp(0.0, 4.0)
+        {
+            Some(Feature::Zigzag)
         } else {
             None
         };
@@ -529,7 +612,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
 
         rooms.push(RoomPlan {
             index,
-            area,
+            area: if reading_hall { Area::Archive } else { area },
             kind,
             light,
             min,
@@ -597,6 +680,7 @@ fn ensure_every_encounter(rooms: &mut [RoomPlan], cfg: &EntityConfig, seed: u64)
             };
             slot_ok
                 && !r.pursuit
+                && r.feature != Some(Feature::ReadingHall)
                 && fits
                 && r.index >= t.min_room
                 && !matches!(r.kind, RoomKind::Final | RoomKind::Transition)
@@ -605,11 +689,42 @@ fn ensure_every_encounter(rooms: &mut [RoomPlan], cfg: &EntityConfig, seed: u64)
         if candidates.is_empty() {
             candidates = (0..rooms.len()).filter(|i| ok(*i, rooms, false)).collect();
         }
+        let mut cleared_neighbours = false;
+        if candidates.is_empty() {
+            // Last resort: a free room whose only neighbouring entities are
+            // repeats; those neighbours step aside.
+            let dup = |e: Encounter, rooms: &[RoomPlan]| rooms.iter().filter(|x| x.encounter == Some(e)).count() >= 2;
+            candidates = (0..rooms.len())
+                .filter(|&i| {
+                    let mut probe = rooms.to_vec();
+                    let near = [i.checked_sub(1), Some(i + 1)];
+                    let ok_near = near.iter().flatten().all(|&n| probe.get(n).is_none_or(|x| x.encounter.is_none_or(|e| dup(e, rooms))));
+                    for &n in near.iter().flatten() {
+                        if let Some(x) = probe.get_mut(n) {
+                            x.encounter = None;
+                        }
+                    }
+                    ok_near && ok(i, &probe, true)
+                })
+                .collect();
+            cleared_neighbours = true;
+        }
         if candidates.is_empty() {
             continue;
         }
         let i = candidates[rng.below(candidates.len() as u32) as usize];
+        if cleared_neighbours {
+            for n in [i.checked_sub(1), Some(i + 1)].into_iter().flatten() {
+                if let Some(x) = rooms.get_mut(n) {
+                    x.encounter = None;
+                }
+            }
+        }
         rooms[i].encounter = Some(enc);
+        // The Listener patrols the whole room: no zigzag walls in its way.
+        if enc == Encounter::Listener && rooms[i].feature == Some(Feature::Zigzag) {
+            rooms[i].feature = None;
+        }
         if enc.needs_hiding() {
             rooms[i].hiding = true;
         }
@@ -781,7 +896,7 @@ mod tests {
                         lofts += 1;
                         assert_eq!(r.kind, RoomKind::KeyPuzzle);
                     }
-                    None => {}
+                    Some(Feature::Zigzag | Feature::ReadingHall) | None => {}
                 }
                 if i == 0 {
                     assert_eq!(r.entry_height, 0.0);
@@ -855,6 +970,7 @@ mod tests {
                 let r = plan.room(i).unwrap();
                 assert!(r.pursuit);
                 assert!(r.encounter.is_none() && r.mimics.is_empty() && r.feature.is_none());
+                assert!(r.dividers().len() >= 2, "chase rooms are big with obstacles");
                 assert_ne!(r.kind, RoomKind::KeyPuzzle);
             }
             assert!(!plan.room(PURSUIT_LAST + 1).unwrap().pursuit);
@@ -862,6 +978,47 @@ mod tests {
         // Short custom floors have no chase.
         let short = generate_custom(1, &EntityConfig::default(), &GenOptions { last_room: 30, ..GenOptions::default() });
         assert!(short.rooms.iter().all(|r| !r.pursuit));
+    }
+
+    #[test]
+    fn reading_hall_at_door_50() {
+        for seed in 0..20 {
+            let plan = generate(seed);
+            let r = plan.room(READING_HALL).unwrap();
+            assert_eq!(r.feature, Some(Feature::ReadingHall));
+            assert_eq!(r.kind, RoomKind::KeyPuzzle);
+            assert_eq!(r.area, Area::Archive);
+            assert!(r.encounter.is_none() && r.dividers().len() >= 3);
+        }
+    }
+
+    #[test]
+    fn dividers_leave_a_way_through() {
+        let mut zig = 0;
+        for seed in 0..30 {
+            for r in generate(seed).rooms {
+                let ds = r.dividers();
+                if r.feature == Some(Feature::Zigzag) {
+                    zig += 1;
+                }
+                for (i, d) in ds.iter().enumerate() {
+                    assert!(d.z < r.max.y - 2.0 && d.z > r.min.y + 2.0);
+                    if r.entry_height > 0.0 {
+                        let foot = r.max.y - LANDING_DEPTH - r.entry_height / STEP_RISE * STEP_RUN;
+                        assert!(d.z < foot - 0.5, "divider cuts the entry stairs in room {}", r.index);
+                    }
+                    assert!(d.gap.0 >= r.min.x - 1e-3 && d.gap.1 <= r.max.x + 1e-3);
+                    assert!((d.gap.1 - d.gap.0 - DIVIDER_GAP).abs() < 1e-3);
+                    if i > 0 {
+                        assert!(ds[i - 1].z - d.z >= 2.4, "dividers too close");
+                        assert_ne!(ds[i - 1].gap.0, d.gap.0, "openings alternate sides");
+                    }
+                }
+                let route = r.route();
+                assert_eq!(route.len(), 2 + 2 * ds.len());
+            }
+        }
+        assert!(zig > 10, "zigzag rooms should turn up: {zig}");
     }
 
     #[test]

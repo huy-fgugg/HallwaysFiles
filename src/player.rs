@@ -19,6 +19,8 @@ pub const CROUCH_EYE: f32 = 1.0;
 pub const RADIUS: f32 = 0.3;
 /// Tallest ledge the player walks up without jumping (stair risers are 0.2).
 pub const STEP_UP: f32 = 0.38;
+/// Longest move resolved against walls in one go (m).
+const MAX_SUBSTEP: f32 = 0.12;
 const GRAVITY: f32 = 18.0;
 const BASE_MOUSE: f32 = 0.0022;
 const BASE_STICK: f32 = 2.6;
@@ -148,12 +150,18 @@ fn movement(
     let vel = planar_velocity(input, player.yaw, speed);
 
     let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
-    let target = transform.translation + vel * dt;
     let eye_target = if crouch { CROUCH_EYE } else { STAND_EYE };
     player.eye += (eye_target - player.eye) * (dt * 10.0).min(1.0);
     let feet = transform.translation.y;
     // Low boxes (stair steps) are stepped over; ground snapping lifts the player.
-    let mut resolved = resolve_cylinder(target, RADIUS, feet + STEP_UP, feet + player.eye + 0.1, &boxes);
+    // Long frames (slow devices, hitches) move in short sub-steps so the player
+    // can't skip through thin walls and obstacles.
+    let travel = vel * dt;
+    let steps = ((travel.length() / MAX_SUBSTEP).ceil() as usize).clamp(1, 12);
+    let mut resolved = transform.translation;
+    for _ in 0..steps {
+        resolved = resolve_cylinder(resolved + travel / steps as f32, RADIUS, feet + STEP_UP, feet + player.eye + 0.1, &boxes);
+    }
     let floors: Vec<_> = grounds.iter().map(|g| g.0).collect();
     let ground = crate::physics::ground_height(resolved, feet, STEP_UP, &floors);
     if ground >= feet {
