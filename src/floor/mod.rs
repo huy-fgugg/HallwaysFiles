@@ -107,7 +107,7 @@ fn setup_floor(
     use crate::profile::Modifier;
     let mut cfg = cfg.clone();
     if profile.has(Modifier::Restless) {
-        for t in [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush] {
+        for t in [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush, &mut cfg.listener] {
             t.chance = (t.chance * 1.6).min(0.9);
             t.cooldown = t.cooldown.saturating_sub(t.cooldown / 3);
         }

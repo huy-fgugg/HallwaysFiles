@@ -32,6 +32,13 @@ pub struct EntityConfig {
     pub whisperer: EntityTuning,
     pub gallery: EntityTuning,
     pub hush: EntityTuning,
+    /// Blind outdoor patroller that hunts by sound. Older files without it get the default.
+    #[serde(default = "default_listener")]
+    pub listener: EntityTuning,
+}
+
+fn default_listener() -> EntityTuning {
+    EntityTuning { min_room: 51, chance: 0.45, cooldown: 2, warn: 2.0, warn_min: 2.0, window: 0.0, damage: 100.0 }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

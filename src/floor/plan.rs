@@ -79,7 +79,7 @@ impl Area {
             Area::GuestWing => ((5.0, 8.0), (5.0, 8.0)),
             Area::Archive => ((7.0, 10.0), (7.0, 10.0)),
             Area::ServiceTunnels => ((4.5, 6.5), (7.0, 12.0)),
-            Area::Grounds => ((8.0, 12.0), (8.0, 13.0)),
+            Area::Grounds => ((11.0, 16.0), (10.0, 16.0)),
             Area::QuarryLift => ((5.0, 8.0), (6.0, 10.0)),
             Area::Atrium => ((10.0, 13.0), (9.0, 13.0)),
         }
@@ -121,6 +121,8 @@ pub enum Encounter {
     Gallery,
     /// Pressure wave: stand still.
     Hush,
+    /// Outdoors: a blind patroller that hears footsteps. Crouch.
+    Listener,
 }
 
 impl Encounter {
@@ -360,6 +362,14 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             RoomKind::Transition => (w1, d0.max(6.0)),
             _ => (rng.range_f32(w0, w1), rng.range_f32(d0, d1)),
         };
+        // Outdoor gardens: wide, and some stretch out much longer.
+        let (width, depth) = if area == Area::Grounds && kind == RoomKind::Hall {
+            (6.0, depth)
+        } else if area == Area::Grounds && !matches!(kind, RoomKind::Final | RoomKind::Transition) && rng.next_f32() < 0.35 {
+            (width, (depth * 1.5).min(24.0))
+        } else {
+            (width, depth)
+        };
         // Custom size, never so small that doors or stairs stop fitting.
         let k = opt.size.clamp(0.5, 1.8);
         let (width, depth) = if kind == RoomKind::Hall { (width, depth * k) } else { ((width * k).max(4.0), (depth * k).max(5.0)) };
@@ -398,6 +408,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         } else {
             let mut chosen = None;
             let order = [
+                (Encounter::Listener, &cfg.listener, area == Area::Grounds && light != LightState::Dark),
                 (Encounter::Whisperer, &cfg.whisperer, light == LightState::Dark),
                 (Encounter::Undertow, &cfg.undertow, true),
                 (Encounter::Surge, &cfg.surge, true),
@@ -627,6 +638,7 @@ mod tests {
                     Encounter::Gallery | Encounter::Hush => assert_ne!(r.light, LightState::Dark),
                     Encounter::Undertow => assert!(r.index >= cfg.undertow.min_room && r.hiding),
                     Encounter::Surge => assert!(r.hiding),
+                    Encounter::Listener => assert_eq!(r.area, Area::Grounds),
                 }
             }
         }
@@ -719,6 +731,20 @@ mod tests {
         // No fake doors when they're turned off; lots when turned up.
         let none = generate_custom(5, &EntityConfig::default(), &GenOptions { fake_doors: 0.0, ..default_opts() });
         assert!(none.rooms.iter().all(|r| r.mimics.is_empty()));
+    }
+
+    #[test]
+    fn gardens_are_wide_and_some_are_long() {
+        let mut long = 0;
+        for seed in 0..10 {
+            for r in generate(seed).rooms.iter().filter(|r| r.area == Area::Grounds && r.kind != RoomKind::Final) {
+                assert!(r.width() >= 5.9, "garden too narrow: {}", r.width());
+                if r.depth() > 16.5 {
+                    long += 1;
+                }
+            }
+        }
+        assert!(long >= 5, "some gardens should be long: {long}");
     }
 
     #[test]

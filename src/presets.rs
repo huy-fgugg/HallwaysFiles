@@ -38,6 +38,7 @@ pub struct Preset {
     pub whisperer: bool,
     pub gallery: bool,
     pub hush: bool,
+    pub listener: bool,
 }
 
 impl Default for Preset {
@@ -60,6 +61,7 @@ impl Default for Preset {
             whisperer: true,
             gallery: true,
             hush: true,
+            listener: true,
         }
     }
 }
@@ -154,11 +156,11 @@ impl PresetField {
     }
 }
 
-pub const ENTITY_NAMES: [&str; 5] = ["The Surge", "The Undertow", "The Whisperer", "The Gallery", "The Hush"];
+pub const ENTITY_NAMES: [&str; 6] = ["The Surge", "The Undertow", "The Whisperer", "The Gallery", "The Hush", "The Listener"];
 
 impl Preset {
     pub fn entity_on(&self, i: usize) -> bool {
-        [self.surge, self.undertow, self.whisperer, self.gallery, self.hush].get(i).copied().unwrap_or(false)
+        [self.surge, self.undertow, self.whisperer, self.gallery, self.hush, self.listener].get(i).copied().unwrap_or(false)
     }
 
     pub fn toggle_entity(&mut self, i: usize) {
@@ -167,7 +169,8 @@ impl Preset {
             1 => self.undertow = !self.undertow,
             2 => self.whisperer = !self.whisperer,
             3 => self.gallery = !self.gallery,
-            _ => self.hush = !self.hush,
+            4 => self.hush = !self.hush,
+            _ => self.listener = !self.listener,
         }
     }
 
@@ -224,7 +227,7 @@ impl Preset {
     /// Applies the entity rate and on/off switches to the tuning.
     pub fn apply_entities(&self, cfg: &mut EntityConfig) {
         let k = self.entities as f32 / 100.0;
-        let tunings = [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush];
+        let tunings = [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush, &mut cfg.listener];
         for (i, t) in tunings.into_iter().enumerate() {
             t.chance = if self.entity_on(i) { (t.chance * k).min(0.95) } else { 0.0 };
             if k > 1.0 {
