@@ -208,8 +208,14 @@ fn run_capture(
             }
         }
         if label.starts_with("39c") && cap.frames > 8 {
+            let last = floor.0.final_door();
+            for mut d in &mut doors {
+                if d.number == last && !d.mimic {
+                    d.open = true;
+                }
+            }
             if let Some(rt) = rt.as_mut() {
-                rt.opened.insert(floor.0.final_door());
+                rt.opened.insert(last);
             }
         }
         if label.starts_with("36") && cap.frames > 20 {
@@ -239,7 +245,9 @@ fn run_capture(
             let d = target - tf.translation;
             pl.yaw = (-d.x).atan2(-d.z);
         }
-        if cap.timer > 6.0 && cap.frames > 24 && !cap.shot_taken {
+        // The results shot waits for the whole ending cutscene to play.
+        let waiting_for_ending = label.starts_with("39c") && *app_overlay.get() != crate::state::Overlay::Summary;
+        if cap.timer > 6.0 && cap.frames > 24 && !cap.shot_taken && !waiting_for_ending {
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(format!("{}/{}.png", cap.dir, label)));
             cap.shot_taken = true;
             cap.frames = 12;

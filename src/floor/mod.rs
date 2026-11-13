@@ -16,11 +16,13 @@ use crate::interaction::Door;
 use crate::physics::Collider;
 use crate::rng::RunSeed;
 use crate::run::{RunState, Subtitle};
-use crate::state::{AppState, Overlay};
+use crate::state::AppState;
 use crate::world::materials::SurfaceMaterials;
 use crate::world::Builder;
 use build::{OpenOnSpawn, PropMaterials};
-use plan::{FloorPlan, RoomKind, FINAL_DOOR, FIRST_ROOM};
+use plan::{FloorPlan, RoomKind, FIRST_ROOM};
+#[cfg(test)]
+use plan::FINAL_DOOR;
 #[cfg(test)]
 use plan::LAST_ROOM;
 
@@ -217,18 +219,26 @@ fn announce_areas(run: Res<RunState>, floor: Option<Res<Floor>>, mut last: Local
 }
 
 /// Opening Door 100 ends the floor: fade, then the run summary.
-fn finish_floor(time: Res<Time>, floor: Option<Res<Floor>>, mut rt: ResMut<FloorRuntime>, run: Res<RunState>, mut next: ResMut<NextState<Overlay>>) {
-    let final_door = floor.map_or(FINAL_DOOR, |f| f.0.final_door());
-    if rt.opened.contains(&final_door) && rt.finished_at.is_none() {
+fn finish_floor(
+    floor: Option<Res<Floor>>,
+    mut rt: ResMut<FloorRuntime>,
+    run: Res<RunState>,
+    mut anchor: ResMut<crate::ending::CutsceneAnchor>,
+    mut play: MessageWriter<crate::cutscene::PlayCutscene>,
+) {
+    let Some(floor) = floor else { return };
+    if rt.opened.contains(&floor.0.final_door()) && rt.finished_at.is_none() {
         rt.finished_at = Some(run.elapsed);
     }
+    // A beat after the final door swings open, the ending cutscene plays;
+    // the victory screen follows when it ends (see `ending`).
     if let Some(t) = rt.finished_at
-        && run.elapsed - t > 1.5
+        && run.elapsed - t > 0.8
+        && t.is_finite()
     {
         rt.finished_at = Some(f32::INFINITY);
-        next.set(Overlay::Summary);
+        crate::ending::start_ending(&mut anchor, &mut play, &floor, &rt);
     }
-    let _ = time;
 }
 
 #[cfg(test)]
