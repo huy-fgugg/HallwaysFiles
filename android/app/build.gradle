@@ -35,6 +35,8 @@ android {
 }
 
 dependencies {
+    // Keep every Kotlin stdlib artifact on one version (avoids duplicate classes).
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.core:core:1.13.1'
     // Must match the android-activity crate used by Bevy (see its README).
