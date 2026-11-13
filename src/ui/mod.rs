@@ -5,6 +5,7 @@ pub mod hud;
 pub mod menus;
 pub mod custom_menu;
 pub mod play_menu;
+pub mod scroll;
 pub mod settings_menu;
 
 use bevy::prelude::*;
@@ -20,6 +21,7 @@ impl Plugin for UiPlugin {
             hud::HudPlugin,
             play_menu::PlayMenuPlugin,
             custom_menu::CustomMenuPlugin,
+            scroll::ScrollPlugin,
         ));
     }
 }
