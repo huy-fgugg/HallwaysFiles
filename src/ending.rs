@@ -33,6 +33,10 @@ pub enum EndingCue {
     Attack,
     /// Characters flail.
     Panic,
+    /// A clawed arm lunges out of the dark and slashes the cable.
+    Swipe,
+    /// The cable parts: sparks, the top end whips away upward.
+    Cut,
     /// The cable snaps and the car falls.
     Snap,
 }
@@ -57,6 +61,25 @@ struct Claw {
 }
 #[derive(Component)]
 struct Eye;
+/// The lift cable (child of the car until it is cut).
+#[derive(Component)]
+struct Cable;
+/// The severed top half of the cable, whipping upward.
+#[derive(Component)]
+struct CableTop {
+    v: f32,
+}
+/// The slashing arm.
+#[derive(Component)]
+struct SlashArm {
+    t: f32,
+    start: Vec3,
+}
+#[derive(Component)]
+struct Spark {
+    v: Vec3,
+    life: f32,
+}
 
 #[derive(Component)]
 struct Actor {
@@ -86,7 +109,7 @@ pub struct EndingPlugin;
 impl Plugin for EndingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CutsceneAnchor>()
-            .add_systems(Update, (run_cues, animate_set, animate_actors, victory).chain().run_if(in_state(AppState::Playing)))
+            .add_systems(Update, (run_cues, animate_set, animate_actors, animate_cut, victory).chain().run_if(in_state(AppState::Playing)))
             .add_systems(Update, capture_frames.run_if(in_state(AppState::Playing)));
     }
 }
@@ -118,6 +141,8 @@ fn run_cues(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut cars: Query<&mut LiftCar>,
+    cars_tf: Query<&GlobalTransform, With<LiftCar>>,
+    cables: Query<Entity, With<Cable>>,
     mut gates: Query<&mut Gate>,
     mut actors: Query<&mut Actor>,
     sets: Query<Entity, With<EndingSet>>,
@@ -175,6 +200,8 @@ fn run_cues(
                     a.panic = true;
                 }
             }
+            EndingCue::Swipe => spawn_slash(&mut commands, &mut meshes, &mut mats, &cars_tf),
+            EndingCue::Cut => cut_cable(&mut commands, &mut meshes, &mut mats, &cars_tf, &cables),
             EndingCue::Snap => {
                 for mut c in &mut cars {
                     c.rise = None;
@@ -314,7 +341,7 @@ fn build_set(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Asse
             // Machinery on the roof: a winch housing and the cable up into the dark.
             boxed(c, &iron, Vec3::new(-0.35, 2.8, -0.3), Vec3::new(0.35, 3.05, 0.3));
             c.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 3.15, 0.0).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(0.3, 0.5, 0.3))));
-            c.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 16.4, 0.0).with_scale(Vec3::new(0.06, 27.0, 0.06))));
+            c.spawn((Cable, Mesh3d(cyl.clone()), MeshMaterial3d(iron.clone()), Transform::from_xyz(0.0, 16.4, 0.0).with_scale(Vec3::new(0.06, 27.0, 0.06))));
             // Folding gate (starts open, raised into the header).
             c.spawn((Gate { t: 0.0, seconds: 1.0, closing: false }, Transform::from_xyz(0.0, 2.3, 1.36), Visibility::default())).with_children(|g| {
                 for i in 0..13 {
@@ -388,6 +415,60 @@ fn spawn_actor(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut As
                 }
             });
         });
+}
+
+/// Where the cable is cut: above the car roof (world space).
+fn cut_point(cars: &Query<&GlobalTransform, With<LiftCar>>) -> Option<Vec3> {
+    cars.iter().next().map(|g| g.translation() + Vec3::Y * 3.7)
+}
+
+/// A long black arm with three hooked claws, lunging in from the side of the
+/// shaft to slash across the cable.
+fn spawn_slash(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, cars: &Query<&GlobalTransform, With<LiftCar>>) {
+    let Some(p) = cut_point(cars) else { return };
+    let skin = mats.add(StandardMaterial { base_color: Color::srgb(0.04, 0.03, 0.03), perceptual_roughness: 0.6, ..default() });
+    let claw = mats.add(StandardMaterial { base_color: Color::srgb(0.75, 0.7, 0.62), perceptual_roughness: 0.3, ..default() });
+    let cyl = meshes.add(Cylinder::new(0.5, 1.0));
+    let cone = meshes.add(Cone { radius: 0.5, height: 1.0 });
+    let sph = meshes.add(Sphere::new(0.5).mesh().uv(12, 8));
+    commands
+        .spawn((EndingSet, SlashArm { t: 0.0, start: p + Vec3::new(-2.6, 0.3, 0.0) }, Transform::from_translation(p + Vec3::new(-2.6, 0.3, 0.0)), Visibility::default(), DespawnOnExit(AppState::Playing)))
+        .with_children(|a| {
+            // Forearm along +X, knuckled wrist, three long hooked claws.
+            a.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(-0.6, 0.0, 0.0).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(0.22, 1.6, 0.22))));
+            a.spawn((Mesh3d(sph.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.25, 0.0, 0.0).with_scale(Vec3::new(0.36, 0.28, 0.4))));
+            for (i, z) in [-0.12f32, 0.0, 0.12].into_iter().enumerate() {
+                a.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.48, 0.02, z).with_rotation(Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2 + 0.3)).with_scale(Vec3::new(0.06, 0.32, 0.06))));
+                a.spawn((Mesh3d(cone.clone()), MeshMaterial3d(claw.clone()), Transform::from_xyz(0.78, -0.08 - i as f32 * 0.02, z).with_rotation(Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2 - 0.5)).with_scale(Vec3::new(0.05, 0.42, 0.05))));
+            }
+        });
+}
+
+/// The cable parts at the cut point: a short stub stays on the car, the top
+/// half whips upward, sparks fly and a red flash lights the shaft.
+fn cut_cable(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mats: &mut Assets<StandardMaterial>,
+    cars: &Query<&GlobalTransform, With<LiftCar>>,
+    cables: &Query<Entity, With<Cable>>,
+) {
+    let Some(p) = cut_point(cars) else { return };
+    let iron = mats.add(StandardMaterial { base_color: Color::srgb(0.08, 0.08, 0.09), perceptual_roughness: 0.5, metallic: 0.8, ..default() });
+    let spark = mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.8, 0.4), emissive: LinearRgba::rgb(20.0, 10.0, 3.0), ..default() });
+    let cyl = meshes.add(Cylinder::new(0.5, 1.0));
+    let dot = meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap());
+    for e in cables {
+        // The car keeps a frayed stub.
+        commands.entity(e).try_insert(Transform::from_xyz(0.0, 3.25, 0.0).with_scale(Vec3::new(0.06, 0.9, 0.06)));
+    }
+    commands.spawn((EndingSet, CableTop { v: 6.0 }, Mesh3d(cyl), MeshMaterial3d(iron), Transform::from_translation(p + Vec3::Y * 13.5).with_scale(Vec3::new(0.06, 27.0, 0.06)), DespawnOnExit(AppState::Playing)));
+    let mut rng = crate::rng::GameRng::new(0xC0FFEE);
+    for _ in 0..28 {
+        let v = Vec3::new(rng.range_f32(-1.0, 1.0), rng.range_f32(-0.2, 1.2), rng.range_f32(-1.0, 1.0)).normalize_or_zero() * rng.range_f32(2.0, 6.0);
+        commands.spawn((EndingSet, Spark { v, life: rng.range_f32(0.4, 0.9) }, Mesh3d(dot.clone()), MeshMaterial3d(spark.clone()), Transform::from_translation(p).with_scale(Vec3::splat(0.04)), DespawnOnExit(AppState::Playing)));
+    }
+    commands.spawn((EndingSet, Spark { v: Vec3::ZERO, life: 0.25 }, PointLight { color: Color::srgb(1.0, 0.6, 0.3), intensity: 400_000.0, range: 10.0, shadow_maps_enabled: false, ..default() }, Transform::from_translation(p), DespawnOnExit(AppState::Playing)));
 }
 
 /// The monster: three long black claws punching down through the roof and a
@@ -519,6 +600,47 @@ fn animate_actors(time: Res<Time>, mut actors: Query<(&mut Actor, &mut Transform
     }
 }
 
+#[allow(clippy::type_complexity)]
+fn animate_cut(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut arms: Query<(&mut SlashArm, &mut Transform), (Without<CableTop>, Without<Spark>)>,
+    mut tops: Query<(&mut CableTop, &mut Transform), (Without<SlashArm>, Without<Spark>)>,
+    mut sparks: Query<(Entity, &mut Spark, &mut Transform), (Without<SlashArm>, Without<CableTop>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut a, mut tf) in &mut arms {
+        a.t += dt;
+        let k = a.t;
+        // Wind up (slight pull back), a fast slash across the cable, then on
+        // through and back into the dark.
+        let (dx, dy, roll) = if k < 0.3 {
+            (-0.3 * (k / 0.3), 0.25 * (k / 0.3), -0.5)
+        } else if k < 0.55 {
+            let u = (k - 0.3) / 0.25;
+            (-0.3 + 3.4 * u, 0.25 - 0.55 * u, 0.6)
+        } else {
+            let u = ((k - 0.55) / 0.6).min(1.0);
+            (3.1 - 3.5 * u, -0.3 + 0.6 * u, 0.2)
+        };
+        tf.translation = a.start + Vec3::new(dx, dy, 0.0);
+        tf.rotation = Quat::from_rotation_z(roll) * Quat::from_rotation_y(-0.25);
+    }
+    for (mut c, mut tf) in &mut tops {
+        c.v += 10.0 * dt;
+        tf.translation.y += c.v * dt;
+        tf.rotation = Quat::from_rotation_z((time.elapsed_secs() * 13.0).sin() * 0.08);
+    }
+    for (e, mut s, mut tf) in &mut sparks {
+        s.life -= dt;
+        s.v.y -= 9.8 * dt;
+        tf.translation += s.v * dt;
+        if s.life <= 0.0 {
+            commands.entity(e).try_despawn();
+        }
+    }
+}
+
 /// When the ending finishes: the victory (results) screen.
 fn victory(mut ended: MessageReader<CutsceneEnded>, mut next: ResMut<NextState<Overlay>>) {
     for e in ended.read() {
@@ -531,13 +653,14 @@ fn victory(mut ended: MessageReader<CutsceneEnded>, mut next: ResMut<NextState<O
 /// QA: with `HALLWAYS_CAPTURE` set, photographs key moments of the ending.
 fn capture_frames(mut commands: Commands, active: Res<ActiveCutscene>, mut next_shot: Local<usize>) {
     use bevy::render::view::screenshot::{save_to_disk, Screenshot};
-    const MOMENTS: [(f32, &str); 7] = [
+    const MOMENTS: [(f32, &str); 8] = [
         (1.6, "40a_walk_through_door"),
         (4.6, "40b_into_the_lift"),
         (7.6, "40c_gate_closes"),
         (11.2, "40d_going_up"),
         (13.9, "40e_claws"),
-        (15.9, "40f_cable_snaps"),
+        (15.05, "40f_claw_cuts_cable"),
+        (16.4, "40h_lift_drops"),
         (19.2, "40g_black_title"),
     ];
     let Ok(dir) = std::env::var("HALLWAYS_CAPTURE") else { return };
