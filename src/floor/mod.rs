@@ -22,8 +22,6 @@ use crate::world::Builder;
 use build::{OpenOnSpawn, PropMaterials};
 use plan::{FloorPlan, RoomKind, FIRST_ROOM};
 #[cfg(test)]
-use plan::FINAL_DOOR;
-#[cfg(test)]
 use plan::LAST_ROOM;
 
 /// Tags every root entity of a generated room (for streaming).
