@@ -151,6 +151,11 @@ impl Settings {
 /// Folder for settings/saves: `%APPDATA%\Hallways` on Windows,
 /// `$XDG_CONFIG_HOME/hallways` or `~/.config/hallways` elsewhere, else the CWD.
 pub fn config_dir() -> PathBuf {
+    // Android: the app's private storage (always writable).
+    #[cfg(target_os = "android")]
+    if let Some(p) = bevy::android::ANDROID_APP.get().and_then(|a| a.internal_data_path()) {
+        return p.join("hallways");
+    }
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join("Hallways");
     }
@@ -161,6 +166,11 @@ pub fn config_dir() -> PathBuf {
         return PathBuf::from(home).join(".config").join("hallways");
     }
     PathBuf::from(".")
+}
+
+/// True once settings have been saved at least once (first launch = false).
+pub fn settings_file_exists() -> bool {
+    settings_path().is_file()
 }
 
 fn settings_path() -> PathBuf {
