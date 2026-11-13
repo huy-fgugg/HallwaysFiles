@@ -64,6 +64,7 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveSubtitle>()
+            .init_resource::<HideHud>()
             .add_systems(OnEnter(AppState::Playing), spawn_hud)
             .add_systems(
                 Update,
@@ -298,8 +299,12 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
 }
 
 /// Hide the HUD while menus are open on top of the run.
-fn hud_visibility(screen: Option<Res<State<Screen>>>, mut q: Query<&mut Visibility, With<HudRoot>>) {
-    let show = screen.is_some_and(|s| *s.get() == Screen::Hud);
+/// Hides the whole HUD (the trailer recorder uses this for clean shots).
+#[derive(Resource, Debug, Default)]
+pub struct HideHud(pub bool);
+
+fn hud_visibility(screen: Option<Res<State<Screen>>>, hide: Res<HideHud>, mut q: Query<&mut Visibility, With<HudRoot>>) {
+    let show = screen.is_some_and(|s| *s.get() == Screen::Hud) && !hide.0;
     for mut v in &mut q {
         let want = if show { Visibility::Inherited } else { Visibility::Hidden };
         if *v != want {
