@@ -4,6 +4,7 @@
 //! tested with `cargo test` without opening a window.
 
 pub mod admin;
+pub mod app;
 pub mod audio;
 pub mod avatar;
 pub mod capture;
@@ -30,6 +31,7 @@ pub mod settings;
 pub mod state;
 pub mod surge;
 pub mod theme;
+pub mod touch;
 pub mod ui;
 pub mod viewmodel;
 pub mod weather;
@@ -56,6 +58,6 @@ impl Plugin for HallwaysPlugin {
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
         app.init_resource::<presets::ActivePreset>();
-        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin));
+        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin, touch::TouchPlugin));
     }
 }

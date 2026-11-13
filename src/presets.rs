@@ -268,6 +268,9 @@ pub fn builtin() -> Vec<Preset> {
 
 /// The `.hallways` folder in your home folder.
 pub fn presets_dir() -> PathBuf {
+    if cfg!(target_os = "android") {
+        return crate::settings::config_dir().join(".hallways");
+    }
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     home.join(".hallways")
 }

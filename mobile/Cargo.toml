@@ -1,0 +1,20 @@
+[package]
+name = "hallways-mobile"
+version = "1.0.1"
+edition = "2024"
+publish = false
+description = "Android entry point for HALLWAYS"
+
+[lib]
+name = "hallways_mobile"
+crate-type = ["cdylib"]
+
+[dependencies]
+hallways = { path = ".." }
+bevy = { version = "0.20.1", features = ["wav", "jpeg", "mp3", "android-game-activity"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true
+opt-level = 3

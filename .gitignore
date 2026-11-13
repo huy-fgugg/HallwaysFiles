@@ -6,3 +6,9 @@
 settings.ron
 save.ron
 server/target/
+mobile/target/
+android/app/src/main/jniLibs/
+android/app/src/main/assets/
+android/.gradle/
+android/build/
+android/app/build/

@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.hallways.game'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.hallways.game"
+        minSdk 28
+        targetSdk 35
+        versionCode 2
+        versionName "1.0.1"
+        ndk { abiFilters 'arm64-v8a' }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signed with the build machine's debug key so the APK installs directly.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // Game assets are read straight from the APK; don't compress media.
+    androidResources {
+        noCompress += ['ogg', 'mp3', 'wav', 'gltf', 'bin', 'jpg', 'png', 'ttf', 'ron']
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core:1.13.1'
+    // Must match the android-activity crate used by Bevy (see its README).
+    implementation 'androidx.games:games-activity:4.4.0'
+}
