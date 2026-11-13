@@ -642,35 +642,40 @@ fn animate_cut(
 }
 
 /// When the ending finishes: the victory (results) screen.
-fn victory(mut ended: MessageReader<CutsceneEnded>, mut next: ResMut<NextState<Overlay>>) {
+fn victory(mut ended: MessageReader<CutsceneEnded>, mut next: ResMut<NextState<Overlay>>, theater: Res<crate::theater::Theater>) {
     for e in ended.read() {
-        if e.end == EndAction::Victory {
+        // Watching from the Cutscenes menu goes back to the menu instead.
+        if e.end == EndAction::Victory && !theater.active() {
             next.set(Overlay::Summary);
         }
     }
 }
 
-/// QA: with `HALLWAYS_CAPTURE` set, photographs key moments of the ending.
+/// QA: with `HALLWAYS_CAPTURE` (or `HALLWAYS_CUTSCENE_SHOTS`) set to a folder,
+/// photographs key moments of each cutscene as it plays.
 fn capture_frames(mut commands: Commands, active: Res<ActiveCutscene>, mut next_shot: Local<usize>) {
     use bevy::render::view::screenshot::{save_to_disk, Screenshot};
-    const MOMENTS: [(f32, &str); 8] = [
-        (1.6, "40a_walk_through_door"),
-        (4.6, "40b_into_the_lift"),
-        (7.6, "40c_gate_closes"),
-        (11.2, "40d_going_up"),
-        (13.9, "40e_claws"),
-        (15.05, "40f_claw_cuts_cable"),
-        (16.4, "40h_lift_drops"),
-        (19.2, "40g_black_title"),
-    ];
-    let Ok(dir) = std::env::var("HALLWAYS_CAPTURE") else { return };
-    if active.id != ENDING || !active.is_playing() {
-        if !active.is_playing() {
-            *next_shot = 0;
-        }
+    let moments: &[(f32, &str)] = match active.id.as_str() {
+        "01_intro" => &[(1.5, "intro_1_descent"), (5.5, "intro_2_dial"), (8.3, "intro_3_gate_opens"), (10.6, "intro_4_title"), (13.2, "intro_5_step_out")],
+        "02_the_hollow" => &[(2.0, "hollow_1"), (5.0, "hollow_2"), (8.0, "hollow_3"), (11.5, "hollow_4"), (14.5, "hollow_5")],
+        ENDING => &[
+            (1.6, "ending_1_walk_through_door"),
+            (4.6, "ending_2_into_the_lift"),
+            (7.6, "ending_3_gate_closes"),
+            (11.2, "ending_4_going_up"),
+            (13.9, "ending_5_claws"),
+            (15.05, "ending_6_claw_cuts_cable"),
+            (16.4, "ending_7_lift_drops"),
+            (19.2, "ending_8_black_title"),
+        ],
+        _ => &[],
+    };
+    let Some(dir) = std::env::var("HALLWAYS_CUTSCENE_SHOTS").ok().or_else(|| std::env::var("HALLWAYS_CAPTURE").ok()) else { return };
+    if !active.is_playing() {
+        *next_shot = 0;
         return;
     }
-    if let Some((t, name)) = MOMENTS.get(*next_shot) {
+    if let Some((t, name)) = moments.get(*next_shot) {
         if active.t >= *t {
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(format!("{dir}/{name}.png")));
             *next_shot += 1;

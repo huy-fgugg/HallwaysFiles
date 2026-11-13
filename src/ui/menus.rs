@@ -17,6 +17,7 @@ impl Plugin for MenusPlugin {
         app.init_resource::<MenuClock>()
             .add_systems(OnEnter(Screen::MainMenu), (spawn_main_menu, |mut c: ResMut<MenuClock>| c.0 = 0.0))
             .add_systems(OnEnter(Screen::Credits), spawn_credits)
+            .add_systems(OnEnter(Screen::Cutscenes), spawn_cutscenes)
             .add_systems(OnEnter(Screen::Death), spawn_death_screen)
             .add_systems(OnEnter(Screen::Summary), spawn_summary)
             .add_systems(OnEnter(Screen::Pause), spawn_pause_menu)
@@ -31,6 +32,7 @@ impl Plugin for MenusPlugin {
                     manage_cursor,
                     animate_main_menu.run_if(in_state(Screen::MainMenu)),
                     credits_actions.run_if(in_state(Screen::Credits)),
+                    cutscene_actions.run_if(in_state(Screen::Cutscenes)),
                     death_actions.run_if(in_state(Screen::Death)),
                     death_actions.run_if(in_state(Screen::Summary)),
                     animate_victory.run_if(in_state(Screen::Summary)),
@@ -94,17 +96,25 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                     FadeIn { delay: 1.2, base: theme.text_dim },
                     Node { margin: UiRect::bottom(px(34)), ..default() },
                 ));
-                for (i, (label, action)) in [
-                    ("Play", MenuAction::OpenPlay),
-                    ("Settings", MenuAction::OpenSettings),
-                    ("Credits", MenuAction::OpenCredits),
-                    ("Quit", MenuAction::Quit),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    let id = spawn_button(col, &theme, label, action, i as i32, i == 0);
-                    col.commands().entity(id).insert(SlideIn(1.4 + i as f32 * 0.12));
+                // Grouped: play first, then extras and options, quit apart at the bottom.
+                let groups: [(&str, &[(&str, MenuAction)]); 3] = [
+                    ("", &[("Play", MenuAction::OpenPlay)]),
+                    ("EXTRAS", &[("Cutscenes", MenuAction::OpenCutscenes), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
+                    ("", &[("Quit", MenuAction::Quit)]),
+                ];
+                let mut i = 0;
+                for (g, (heading, items)) in groups.into_iter().enumerate() {
+                    if g > 0 {
+                        col.spawn(Node { height: px(14), ..default() });
+                    }
+                    if !heading.is_empty() {
+                        col.spawn((Text::new(heading), theme.font(true, theme.size_small), TextColor(theme.interact), FadeIn { delay: 1.3, base: theme.interact }));
+                    }
+                    for (label, action) in items.iter().copied() {
+                        let id = spawn_button(col, &theme, label, action, i, i == 0);
+                        col.commands().entity(id).insert(SlideIn(1.4 + i as f32 * 0.12));
+                        i += 1;
+                    }
                 }
             });
             root.spawn(Node {
@@ -117,7 +127,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
             })
             .with_children(|footer| {
                 footer.spawn(theme.dim_text(format!("SEED {}", seed.display())));
-                footer.spawn(theme.dim_text(format!("PROTOTYPE v{}", env!("CARGO_PKG_VERSION"))));
+                footer.spawn(theme.dim_text(format!("v{}", env!("CARGO_PKG_VERSION"))));
             });
         });
 }
@@ -157,6 +167,47 @@ fn animate_main_menu(
     }
 }
 
+fn spawn_cutscenes(mut commands: Commands, theme: Res<UiTheme>) {
+    commands
+        .spawn((theme.screen_root(false), GlobalZIndex(20), DespawnOnExit(Screen::Cutscenes), Name::new("Cutscenes")))
+        .with_children(|root| {
+            root.spawn(theme.heading_text("CUTSCENES"));
+            root.spawn(theme.panel(620.0)).with_children(|p| {
+                for (i, (_, title, blurb)) in crate::theater::CUTSCENES.iter().enumerate() {
+                    spawn_button(p, &theme, title, MenuAction::WatchCutscene(i as u8), i as i32, i == 0);
+                    p.spawn((theme.dim_text(*blurb), Node { margin: UiRect::bottom(px(8)), ..default() }));
+                }
+                p.spawn(theme.dim_text("Hold Space (or A) to skip. You return here when it ends."));
+                spawn_button(p, &theme, "Back", MenuAction::CloseCutscenes, 10, false);
+            });
+        });
+}
+
+fn cutscene_actions(
+    mut reader: MessageReader<MenuActivated>,
+    mut theater: ResMut<crate::theater::Theater>,
+    mut skip: ResMut<crate::lobby::SkipLobby>,
+    mut active: ResMut<crate::presets::ActivePreset>,
+    mut next_app: ResMut<NextState<AppState>>,
+    mut next_overlay: ResMut<NextState<Overlay>>,
+) {
+    for MenuActivated(a) in reader.read() {
+        match *a {
+            MenuAction::CloseCutscenes => next_overlay.set(Overlay::None),
+            MenuAction::WatchCutscene(i) => {
+                if let Some((id, ..)) = crate::theater::CUTSCENES.get(i as usize) {
+                    theater.request(id);
+                    skip.0 = true;
+                    active.0 = None;
+                    next_overlay.set(Overlay::None);
+                    next_app.set(AppState::Playing);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn main_menu_actions(
     mut reader: MessageReader<MenuActivated>,
     mut next_app: ResMut<NextState<AppState>>,
@@ -167,6 +218,7 @@ fn main_menu_actions(
         match action {
             MenuAction::StartRun => next_app.set(AppState::Playing),
             MenuAction::OpenPlay => next_overlay.set(Overlay::Play),
+            MenuAction::OpenCutscenes => next_overlay.set(Overlay::Cutscenes),
             MenuAction::OpenSettings => next_overlay.set(Overlay::Settings),
             MenuAction::OpenCredits => next_overlay.set(Overlay::Credits),
             MenuAction::Quit => {
