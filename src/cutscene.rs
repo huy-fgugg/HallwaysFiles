@@ -163,6 +163,14 @@ impl ActiveCutscene {
     pub fn is_playing(&self) -> bool {
         self.def.is_some()
     }
+
+    /// Stops immediately with no end action and a clear screen (trailer cuts).
+    pub fn stop(&mut self) {
+        self.def = None;
+        self.title = None;
+        self.ending.clear();
+        self.fade = FadeState::default();
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]

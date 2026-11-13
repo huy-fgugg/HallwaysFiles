@@ -55,6 +55,10 @@ pub enum ChasePhase {
     Done,
 }
 
+/// Set by the trailer recorder to keep The Hollow asleep between shots.
+#[derive(Resource, Debug, Default)]
+pub struct SuppressHollow(pub bool);
+
 #[derive(Resource, Debug, Default)]
 pub struct ChaseState {
     pub active: bool,
@@ -98,6 +102,7 @@ impl Plugin for HollowPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<HollowCommand>()
             .init_resource::<ChaseState>()
+            .init_resource::<SuppressHollow>()
             .init_resource::<DeathCause>()
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| c.insert_resource(ChaseState::default()))
             .add_systems(
@@ -123,13 +128,14 @@ fn trigger_encounter(
     mut play: MessageWriter<PlayCutscene>,
     mut fired: Local<bool>,
     run: Res<RunState>,
+    suppress: Res<SuppressHollow>,
 ) {
     if run.elapsed < 0.2 {
         *fired = false;
     }
     let Ok(p) = player.single() else { return };
-    // The visual-QA capture tour teleports straight past the corridor.
-    if std::env::var_os("HALLWAYS_CAPTURE").is_some() {
+    // The visual-QA capture tour and trailer teleport straight past the corridor.
+    if std::env::var_os("HALLWAYS_CAPTURE").is_some() || suppress.0 {
         return;
     }
     if !*fired && chase.phase == ChasePhase::Dormant && !active.is_playing() && p.translation.z < -7.5 {
