@@ -301,12 +301,13 @@ fn handle_commands(
 }
 
 fn on_cutscene_end(
+    theater: Res<crate::theater::Theater>,
     mut reader: MessageReader<CutsceneEnded>,
     mut chase: ResMut<ChaseState>,
     mut subs: MessageWriter<Subtitle>,
 ) {
     for e in reader.read() {
-        if e.end == EndAction::StartChase {
+        if e.end == EndAction::StartChase && !theater.active() {
             chase.active = true;
             chase.phase = ChasePhase::Hunting;
             subs.write(Subtitle::danger("[It's coming. Hide!]"));

@@ -62,6 +62,7 @@ type Shot = (&'static str, Option<Vec3>, f32, f32);
 const SHOTS: &[Shot] = &[
     ("01_main_menu", None, 0.0, 0.0),
     ("01b_play_menu", None, 0.0, 0.0),
+    ("01c_cutscenes_menu", None, 0.0, 0.0),
     ("02_spawn_view", Some(Vec3::new(0.0, 0.0, 3.4)), 0.0, -0.05),
     ("02b_inside_lift", Some(Vec3::new(0.0, 0.0, 6.9)), 0.0, 0.05),
     ("02d_lobby", Some(Vec3::new(0.0, 0.0, 6.9)), 0.0, 0.05),
@@ -128,11 +129,16 @@ fn run_capture(
     }
     // The Play screen shot opens that overlay; every other shot closes it.
     let cur = SHOTS.get(cap.index).map(|s| s.0);
-    if cur == Some("01b_play_menu") {
-        if *app_overlay.get() != crate::state::Overlay::Play {
-            next_overlay.set(crate::state::Overlay::Play);
+    let want_overlay = match cur {
+        Some("01b_play_menu") => Some(crate::state::Overlay::Play),
+        Some("01c_cutscenes_menu") => Some(crate::state::Overlay::Cutscenes),
+        _ => None,
+    };
+    if let Some(o) = want_overlay {
+        if *app_overlay.get() != o {
+            next_overlay.set(o);
         }
-    } else if *app_overlay.get() == crate::state::Overlay::Play {
+    } else if matches!(*app_overlay.get(), crate::state::Overlay::Play | crate::state::Overlay::Cutscenes) {
         next_overlay.set(crate::state::Overlay::None);
     }
     let Some(&(label, pos, yaw, pitch)) = SHOTS.get(cap.index) else {
@@ -263,7 +269,7 @@ fn run_capture(
     // Show the elevator lobby panel for its shot only.
     lobby.waiting = label == "02d_lobby";
     // Settle time: longer for the first frames (shader compile + asset load).
-    let settle = if cap.index <= 1 { 8.0 } else { 3.0 };
+    let settle = if cap.index <= 2 { 8.0 } else { 3.0 };
     if let Some(p) = pos {
         // Only request the transition once: re-setting the same state re-runs OnEnter.
         if *app_state.get() != AppState::Playing {
@@ -279,7 +285,7 @@ fn run_capture(
     }
     // Wait for both wall time and frames (software renderers can run at ~1 fps).
     // Cutscene holds wait on game time instead, so they land on story beats.
-    let ready = if pos.is_none() && cap.index > 1 { cap.timer > 2.0 && cap.frames > 8 } else { cap.timer > settle && cap.frames > 12 };
+    let ready = if pos.is_none() && cap.index > 2 { cap.timer > 2.0 && cap.frames > 8 } else { cap.timer > settle && cap.frames > 12 };
     if ready && !cap.shot_taken {
         let path = format!("{}/{}.png", cap.dir, label);
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));

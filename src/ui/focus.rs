@@ -55,6 +55,9 @@ pub enum MenuAction {
     PresetFolder,
     PresetPlay,
     PresetHost,
+    OpenCutscenes,
+    CloseCutscenes,
+    WatchCutscene(u8),
 }
 
 #[derive(Component, Debug, Clone, Copy)]
