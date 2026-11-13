@@ -1,7 +1,7 @@
 // HALLWAYS cutscene: the ending (plays when the final door opens).
 // Anchor positions are relative to the far side of the final door: x across,
 // y up, z negative = deeper. The exit lift car is centred at (0, 0, -4.4).
-// Built-in music: rising dread to 15.4 s, silence after the crash at 16.3 s.
+// Built-in music: rising dread to 15.4 s, the crash (cut to black) at 16.8 s.
 // Your own music: assets/music/cutscene_ending/ (any one audio file, 17-60 s).
 (
     title: "The Way Out",
@@ -26,11 +26,16 @@
             from: Anchor(pos: (0.6, 0.8, -1.9), look: (0.0, 2.0, -4.4)),
             to:   Anchor(pos: (0.5, 1.0, -1.9), look: (0.0, 4.5, -4.4))),
         // Inside the car, looking up as the claws come through the roof.
-        (start: 12.4, end: 15.2, fov: 70.0, ease: InOut,
+        (start: 12.4, end: 14.6, fov: 70.0, ease: InOut,
             from: Anchor(pos: (0.8, 5.9, -3.3), look: (0.0, 5.6, -4.8)),
             to:   Anchor(pos: (0.6, 5.7, -3.2), look: (0.0, 6.6, -4.5))),
-        // Above the car in the shaft: the cable snaps and it drops away.
-        (start: 15.2, end: 22.0, fov: 66.0, ease: Out,
+        // On the roof beside the cable: a clawed arm lunges out of the dark
+        // and slashes it.
+        (start: 14.6, end: 15.9, fov: 62.0, ease: Linear,
+            from: Anchor(pos: (1.3, 8.0, -2.9), look: (-0.4, 7.7, -4.4)),
+            to:   Anchor(pos: (1.2, 7.9, -3.0), look: (-0.2, 7.8, -4.4))),
+        // Above the car in the shaft: it drops away.
+        (start: 15.9, end: 22.0, fov: 66.0, ease: Out,
             from: Anchor(pos: (0.6, 9.4, -3.1), look: (0.0, 5.5, -4.4)),
             to:   Anchor(pos: (0.5, 9.6, -3.2), look: (0.0, 1.0, -4.5))),
     ],
@@ -52,14 +57,19 @@
         (at: 12.8, do: Ending(Panic)),
         (at: 12.9, do: Subtitle(text: "[Something tears through the roof]", seconds: 2.2, danger: true)),
         (at: 14.4, do: Sfx(SurgeRoar)),
-        (at: 15.3, do: Sfx(GateRattle)),
-        (at: 15.4, do: Ending(Snap)),
-        (at: 15.4, do: Subtitle(text: "[The cable snaps]", seconds: 1.2, danger: true)),
-        (at: 15.5, do: Shake(1.0)),
-        (at: 16.3, do: Fade(alpha: 1.0, seconds: 0.0)),
-        (at: 16.3, do: Sfx(Rumble)),
-        (at: 16.35, do: Sfx(Stinger)),
-        (at: 16.3, do: Lights(color: (1.0, 1.0, 1.0), amount: 0.0, scale: 1.0, flicker: 0.0)),
+        (at: 14.7, do: Ending(Swipe)),
+        (at: 14.8, do: Sfx(Whoosh)),
+        (at: 15.0, do: Subtitle(text: "[A claw lashes out of the dark at the cable]", seconds: 1.4, danger: true)),
+        (at: 15.15, do: Ending(Cut)),
+        (at: 15.15, do: Sfx(GateRattle)),
+        (at: 15.2, do: Shake(0.8)),
+        (at: 15.9, do: Ending(Snap)),
+        (at: 15.9, do: Subtitle(text: "[The cable parts. The lift drops.]", seconds: 1.2, danger: true)),
+        (at: 16.0, do: Shake(1.0)),
+        (at: 16.8, do: Fade(alpha: 1.0, seconds: 0.0)),
+        (at: 16.8, do: Sfx(Rumble)),
+        (at: 16.85, do: Sfx(Stinger)),
+        (at: 16.8, do: Lights(color: (1.0, 1.0, 1.0), amount: 0.0, scale: 1.0, flicker: 0.0)),
         (at: 18.0, do: Title(text: "YOU ESCAPED", sub: "...didn't you?", seconds: 3.6)),
     ],
     end: Victory,

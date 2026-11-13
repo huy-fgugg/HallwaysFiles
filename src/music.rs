@@ -572,7 +572,7 @@ pub fn synth_hollow_cue() -> Vec<f32> {
 }
 
 /// Ending cue (22 s): the lift's hum and a hopeful pad 0–9 s, a slow climb
-/// 9–12.5 s, dread 12.5–15.4 s, a crashing hit at 16.3 s, then silence.
+/// 9–12.5 s, dread 12.5–15.4 s, a crashing hit at 16.8 s, then silence.
 pub fn synth_ending_cue() -> Vec<f32> {
     let len = (22.0 * SR) as usize;
     let mut buf = vec![0.0; len];
@@ -598,7 +598,7 @@ pub fn synth_ending_cue() -> Vec<f32> {
         [37.0f32, 38.0, 44.0, 49.0, 50.0].iter().map(|n| (TAU * midi(*n) * t).sin()).sum::<f32>() * swell * 0.11
     });
     // The crash.
-    add_note(&mut buf, 16.3, 3.0, |t| {
+    add_note(&mut buf, 16.8, 3.0, |t| {
         let mut r = GameRng::new((t * SR) as u64 ^ 77);
         let noise = (r.next_f32() * 2.0 - 1.0) * (-t * 3.5).exp();
         let boom = (TAU * (40.0 + 60.0 * (-t * 8.0).exp()) * t).sin() * (-t * 1.6).exp();
