@@ -42,6 +42,8 @@ pub enum MusicTrack {
     Lift,
     Ambience,
     Chase,
+    /// The victory (results) screen after the ending.
+    Victory,
     Cutscene(String),
 }
 
@@ -58,6 +60,7 @@ impl MusicTrack {
             MusicTrack::Lift => "music/elevator".into(),
             MusicTrack::Ambience => "music/ambience".into(),
             MusicTrack::Chase => "music/chase".into(),
+            MusicTrack::Victory => "music/victory".into(),
             MusicTrack::Cutscene(id) => format!("music/cutscene_{}", cutscene_short_name(id)),
         }
     }
@@ -77,6 +80,7 @@ impl MusicTrack {
             MusicTrack::Lift => "Elevator lobby".into(),
             MusicTrack::Ambience => "Exploring".into(),
             MusicTrack::Chase => "Chase".into(),
+            MusicTrack::Victory => "Victory screen".into(),
             MusicTrack::Cutscene(id) => format!("Cutscene: {}", cutscene_short_name(id)),
         }
     }
@@ -169,6 +173,8 @@ pub fn custom_music_report() -> Vec<(String, Option<String>)> {
     let mut tracks = vec![MusicTrack::Menu, MusicTrack::Lift, MusicTrack::Ambience, MusicTrack::Chase];
     tracks.push(MusicTrack::Cutscene(crate::cutscene::INTRO.into()));
     tracks.push(MusicTrack::Cutscene(crate::cutscene::THE_HOLLOW.into()));
+    tracks.push(MusicTrack::Cutscene(crate::cutscene::ENDING.into()));
+    tracks.push(MusicTrack::Victory);
     tracks.into_iter().map(|t| (t.label(), find_track_override(&t))).collect()
 }
 
@@ -189,11 +195,14 @@ fn default_wants(
     chase: Option<Res<crate::hollow::ChaseState>>,
     cut: Option<Res<crate::cutscene::ActiveCutscene>>,
     lobby: Option<Res<crate::lobby::LiftLobby>>,
+    overlay: Option<Res<State<crate::state::Overlay>>>,
 ) {
     let wanted = match app.get() {
         AppState::MainMenu => Some(MusicTrack::Menu),
         AppState::Playing => {
-            if lobby.is_some_and(|l| l.waiting) {
+            if overlay.is_some_and(|o| *o.get() == crate::state::Overlay::Summary) {
+                Some(MusicTrack::Victory)
+            } else if lobby.is_some_and(|l| l.waiting) {
                 Some(MusicTrack::Lift)
             } else if let Some(c) = cut.as_ref().filter(|c| c.def.is_some()) {
                 Some(MusicTrack::Cutscene(c.id.clone()))
@@ -224,6 +233,8 @@ fn source_for(track: &MusicTrack, asset_server: &AssetServer, cache: &mut ScoreC
                 MusicTrack::Lift => synth_lift_theme(),
                 MusicTrack::Ambience => synth_ambience(),
                 MusicTrack::Chase => synth_chase_theme(),
+                MusicTrack::Victory => synth_victory_theme(),
+                MusicTrack::Cutscene(id) if id.contains("ending") => synth_ending_cue(),
                 MusicTrack::Cutscene(id) if id.contains("hollow") => synth_hollow_cue(),
                 MusicTrack::Cutscene(_) => synth_intro_cue(),
             };
@@ -560,9 +571,100 @@ pub fn synth_hollow_cue() -> Vec<f32> {
     normalize(reverb(&buf, 0.35, 2.5), 0.9)
 }
 
+/// Ending cue (22 s): the lift's hum and a hopeful pad 0–9 s, a slow climb
+/// 9–12.5 s, dread 12.5–15.4 s, a crashing hit at 16.3 s, then silence.
+pub fn synth_ending_cue() -> Vec<f32> {
+    let len = (22.0 * SR) as usize;
+    let mut buf = vec![0.0; len];
+    // Warm, hopeful pad (C major, then A minor).
+    for (start, notes) in [(0.0f32, [48.0f32, 55.0, 60.0, 64.0]), (4.5, [45.0, 52.0, 57.0, 60.0])] {
+        add_note(&mut buf, start, 5.0, move |t| {
+            let env = (t / 1.2).min(1.0) * (1.0 - ((t - 4.2) / 0.8).clamp(0.0, 1.0));
+            notes.iter().map(|n| (TAU * midi(*n) * t).sin() + 0.3 * (TAU * midi(*n) * 2.0 * t).sin()).sum::<f32>() * env * 0.05
+        });
+    }
+    // Climb: a slow rising line under a ticking pulse.
+    add_note(&mut buf, 9.0, 3.6, |t| {
+        let f = midi(43.0 + t * 2.2);
+        (TAU * f * t).sin() * (t / 3.6) * 0.12
+    });
+    for b in 0..7 {
+        let t0 = 9.0 + b as f32 * 0.5;
+        add_note(&mut buf, t0, 0.2, |t| (TAU * 1400.0 * t).sin() * (-t * 40.0).exp() * 0.15);
+    }
+    // Dread: a dissonant cluster swelling until the cable snaps.
+    add_note(&mut buf, 12.5, 3.0, |t| {
+        let swell = (t / 2.9).powf(1.4);
+        [37.0f32, 38.0, 44.0, 49.0, 50.0].iter().map(|n| (TAU * midi(*n) * t).sin()).sum::<f32>() * swell * 0.11
+    });
+    // The crash.
+    add_note(&mut buf, 16.3, 3.0, |t| {
+        let mut r = GameRng::new((t * SR) as u64 ^ 77);
+        let noise = (r.next_f32() * 2.0 - 1.0) * (-t * 3.5).exp();
+        let boom = (TAU * (40.0 + 60.0 * (-t * 8.0).exp()) * t).sin() * (-t * 1.6).exp();
+        noise * 0.7 + boom * 0.8
+    });
+    normalize(reverb(&buf, 0.3, 2.0), 0.9)
+}
+
+/// Victory theme (16 s loop): a bright, original brass-and-bells fanfare in
+/// C major over a bouncing bass. All notes land on whole beats of 120 bpm.
+pub fn synth_victory_theme() -> Vec<f32> {
+    let len = (16.0 * SR) as usize;
+    let mut buf = vec![0.0; len];
+    let beat = 0.5f32;
+    // Chord per bar: I  IV  V  I  vi  IV  V  I
+    let bars: [[f32; 3]; 8] = [
+        [60.0, 64.0, 67.0],
+        [60.0, 65.0, 69.0],
+        [62.0, 67.0, 71.0],
+        [60.0, 64.0, 67.0],
+        [57.0, 60.0, 64.0],
+        [57.0, 60.0, 65.0],
+        [59.0, 62.0, 67.0],
+        [60.0, 64.0, 72.0],
+    ];
+    for (bar, chord) in bars.iter().enumerate() {
+        let t0 = bar as f32 * 4.0 * beat;
+        // Brassy stab on beat 1, held.
+        let ch = *chord;
+        add_note(&mut buf, t0, 1.6, move |t| {
+            let env = (t / 0.03).min(1.0) * (-t * 1.4).exp();
+            ch.iter().map(|n| {
+                let f = midi(*n);
+                (TAU * f * t).sin() + 0.5 * (TAU * f * 2.0 * t).sin() + 0.25 * (TAU * f * 3.0 * t).sin()
+            }).sum::<f32>() * env * 0.07
+        });
+        // Bell arpeggio up the chord on the off-beats.
+        for (k, n) in [ch[0] + 12.0, ch[1] + 12.0, ch[2] + 12.0, ch[1] + 12.0].into_iter().enumerate() {
+            let ts = t0 + (k as f32 + 0.5) * beat;
+            add_note(&mut buf, ts, 0.9, move |t| (TAU * midi(n) * t).sin() * (-t * 4.0).exp() * 0.09 + (TAU * midi(n) * 2.76 * t).sin() * (-t * 7.0).exp() * 0.03);
+        }
+        // Bouncing bass: root on 1 and 3, fifth on 2 and 4.
+        for k in 0..4 {
+            let n = if k % 2 == 0 { ch[0] - 24.0 } else { ch[0] - 17.0 };
+            add_note(&mut buf, t0 + k as f32 * beat, 0.4, move |t| (TAU * midi(n) * t).sin() * (-t * 6.0).exp() * 0.22);
+        }
+    }
+    // Kick on every beat, a little shimmer on the last bar.
+    for b in 0..32 {
+        add_note(&mut buf, b as f32 * beat, 0.25, |t| (TAU * (50.0 + 80.0 * (-t * 25.0).exp()) * t).sin() * (-t * 12.0).exp() * 0.35);
+    }
+    normalize(reverb(&buf, 0.2, 1.2), 0.85)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ending_and_victory_music() {
+        let e = synth_ending_cue();
+        assert_eq!(e.len(), (22.0 * SR) as usize);
+        let v = synth_victory_theme();
+        assert_eq!(v.len(), (16.0 * SR) as usize);
+        assert!(v.iter().all(|x| x.abs() <= 1.0));
+    }
 
     #[test]
     fn loops_have_documented_lengths() {

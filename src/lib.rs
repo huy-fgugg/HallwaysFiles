@@ -11,6 +11,7 @@ pub mod capture;
 pub mod cutscene;
 pub mod data;
 pub mod encounters;
+pub mod ending;
 pub mod floor;
 pub mod graphics;
 pub mod hollow;
@@ -58,6 +59,6 @@ impl Plugin for HallwaysPlugin {
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
         app.init_resource::<presets::ActivePreset>();
-        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin, touch::TouchPlugin));
+        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin, touch::TouchPlugin, ending::EndingPlugin));
     }
 }

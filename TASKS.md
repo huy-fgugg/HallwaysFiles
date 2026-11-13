@@ -86,6 +86,11 @@
 - [x] Credits screen: asset credits only; legal notices moved to assets/legal; README removed
 - [x] Room number removed from the HUD
 
+## Ending
+- [x] Ending cutscene: characters (you + online teammates) walk through the final door into a detailed exit lift, the gate closes, the lift rises, claws tear through the roof, everyone panics, the cable snaps, cut to black, title card
+- [x] Victory screen: animated gold VICTORY title, original victory theme; drop-in folders music/victory and music/cutscene_ending
+- [x] Android APK built by the Release workflow
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
 - [x] .deb installed and launched in a clean Linux container (menu renders, assets found)

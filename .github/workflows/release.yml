@@ -78,6 +78,57 @@ jobs:
           name: linux
           path: dist/*.deb
 
+  android:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-linux-android
+          cache: true
+          cache-workspaces: mobile
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Native library
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cd mobile
+          cargo ndk -t arm64-v8a --platform 28 --link-libcxx-shared -o ../android/app/src/main/jniLibs build --release
+      - name: Game assets
+        run: cp -r assets android/app/src/main/assets
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: APK
+        working-directory: android
+        run: gradle --no-daemon assembleRelease
+      - name: Rename
+        run: cp android/app/build/outputs/apk/release/app-release.apk "hallways-${{ needs.check.outputs.version }}-android.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: hallways-*-android.apk
+
+  attach-apk:
+    needs: [check, android, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: out
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check.outputs.version }}
+          files: out/*
+
   publish:
     needs: [check, windows, linux]
     runs-on: ubuntu-latest
@@ -97,7 +148,9 @@ jobs:
             - **Windows:** `hallways-${{ needs.check.outputs.version }}-windows.zip`. Unzip it and run `HALLWAYS\hallways.exe`. On an older or integrated GPU, use `HALLWAYS (Low Graphics).bat`; if it still crashes, `HALLWAYS (Compatibility Mode).bat`. Windows may warn about an unknown app (it isn't code-signed): choose **More info → Run anyway**.
             - **Linux (Debian/Ubuntu):** `hallways_${{ needs.check.outputs.version }}_amd64.deb`. Install with `sudo apt install ./hallways_${{ needs.check.outputs.version }}_amd64.deb`, then start **HALLWAYS** from your app menu or run `hallways`.
 
-            Needs a graphics card with Vulkan (Linux) or DirectX 12/Vulkan (Windows).
+            - **Android (phones/tablets, 64-bit, Android 9+):** `hallways-${{ needs.check.outputs.version }}-android.apk` (added a few minutes after the others). Download it on the phone, allow "install unknown apps" for your browser, and open it. Touch controls: left thumb walks, right thumb looks, buttons for USE / CROUCH / RUN / LIGHT / ITEM / MENU.
+
+            Needs a graphics card with Vulkan (Linux/Android) or DirectX 12/Vulkan (Windows).
 
             ## Online rooms
             Host or join with a 5-letter room code (up to 4 players). The room server is in `server/` and deploys to Render with `render.yaml`.

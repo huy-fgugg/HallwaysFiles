@@ -33,6 +33,7 @@ impl Plugin for MenusPlugin {
                     credits_actions.run_if(in_state(Screen::Credits)),
                     death_actions.run_if(in_state(Screen::Death)),
                     death_actions.run_if(in_state(Screen::Summary)),
+                    animate_victory.run_if(in_state(Screen::Summary)),
                 ),
             );
     }
@@ -373,6 +374,27 @@ fn death_actions(mut reader: MessageReader<MenuActivated>, mut next_app: ResMut<
     }
 }
 
+#[derive(Component)]
+struct VictoryTitle;
+#[derive(Component)]
+struct VictorySparkle(f32);
+
+/// Victory screen motion: the title pulses and glows, sparkles drift upward.
+fn animate_victory(time: Res<Time<Real>>, mut title: Query<(&mut TextColor, &mut TextFont), With<VictoryTitle>>, mut sparks: Query<(&VictorySparkle, &mut Node, &mut BackgroundColor)>) {
+    let t = time.elapsed_secs();
+    for (mut c, mut f) in &mut title {
+        let k = 0.5 + 0.5 * (t * 2.4).sin();
+        c.0 = Color::srgb(1.0, 0.75 + 0.15 * k, 0.25 + 0.2 * k);
+        f.font_size = bevy::text::FontSize::Px(92.0 + 8.0 * k);
+    }
+    for (s, mut n, mut bg) in &mut sparks {
+        let y = (s.0 * 53.0 - t * (6.0 + s.0 % 5.0)).rem_euclid(100.0);
+        n.top = percent(y);
+        n.left = percent((s.0 * 37.0 + (t * 0.7 + s.0).sin() * 2.0).rem_euclid(100.0));
+        bg.0 = Color::srgba(1.0, 0.82, 0.35, 0.25 + 0.35 * (0.5 + 0.5 * (t * 3.0 + s.0).sin()));
+    }
+}
+
 fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::run::RunState>, seed: Res<RunSeed>, profile: Res<crate::profile::Profile>, floor: Option<Res<crate::floor::Floor>>) {
     let final_door = floor.map_or(100, |f| f.0.final_door());
     commands
@@ -384,6 +406,17 @@ fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::ru
             Name::new("Run summary"),
         ))
         .with_children(|root| {
+            // Drifting gold sparkles behind the panel.
+            for i in 0..36 {
+                let x = (i as f32 * 37.0) % 100.0;
+                let y = (i as f32 * 53.0) % 100.0;
+                root.spawn((
+                    Node { position_type: PositionType::Absolute, left: percent(x), top: percent(y), width: px(4.0 + (i % 3) as f32 * 2.0), height: px(4.0 + (i % 3) as f32 * 2.0), border_radius: BorderRadius::MAX, ..default() },
+                    BackgroundColor(Color::srgba(1.0, 0.82, 0.35, 0.5)),
+                    VictorySparkle(i as f32),
+                ));
+            }
+            root.spawn((Text::new("VICTORY"), theme.font(true, 96.0), TextColor(Color::srgb(1.0, 0.8, 0.3)), VictoryTitle, Node { margin: UiRect::bottom(px(12)), ..default() }));
             root.spawn(theme.panel(640.0)).with_children(|p| {
                 p.spawn((Text::new("FLOOR 1 COMPLETE"), theme.font(true, theme.size_heading), TextColor(theme.interact)));
                 p.spawn((Text::new(format!("You walked out through Door {:03}.", final_door)), theme.font(false, theme.size_body), TextColor(theme.text_dim)));

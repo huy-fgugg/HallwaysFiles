@@ -22,11 +22,13 @@ use crate::world::{elevator::ElevatorCommand, Mood};
 
 pub const INTRO: &str = "01_intro";
 pub const THE_HOLLOW: &str = "02_the_hollow";
+pub const ENDING: &str = "03_ending";
 
 fn embedded(id: &str) -> Option<&'static str> {
     match id {
         INTRO => Some(include_str!("../assets/cutscenes/01_intro/cutscene.ron")),
         THE_HOLLOW => Some(include_str!("../assets/cutscenes/02_the_hollow/cutscene.ron")),
+        ENDING => Some(include_str!("../assets/cutscenes/03_ending/cutscene.ron")),
         _ => None,
     }
 }
@@ -56,6 +58,9 @@ pub enum CamPoint {
     At { pos: (f32, f32, f32), look: (f32, f32, f32) },
     /// The player's current eye position and view direction.
     PlayerEye,
+    /// Position + look-at relative to the cutscene anchor (the ending uses
+    /// the far side of the final door, which moves with every seed).
+    Anchor { pos: (f32, f32, f32), look: (f32, f32, f32) },
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
@@ -101,6 +106,8 @@ pub enum CueAction {
     Shake(f32),
     Hollow(HollowCommand),
     Elevator(crate::world::elevator::ElevatorCommand),
+    /// Commands for the ending set (exit lift, characters, monster).
+    Ending(crate::ending::EndingCue),
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
@@ -108,6 +115,8 @@ pub enum EndAction {
     #[default]
     GiveControl,
     StartChase,
+    /// Open the victory (results) screen.
+    Victory,
 }
 
 pub fn parse(text: &str) -> Result<CutsceneDef, String> {
@@ -146,6 +155,8 @@ pub struct ActiveCutscene {
     skip_hold: f32,
     fade: FadeState,
     title: Option<(String, String, f32, f32)>,
+    /// Ending-set commands waiting for `ending` to run them (cue, instant).
+    pub ending: Vec<(crate::ending::EndingCue, bool)>,
 }
 
 impl ActiveCutscene {
@@ -262,6 +273,7 @@ fn apply_event(
         CueAction::Elevator(cmd) => {
             lift.write(if instant { cmd.instant() } else { cmd.clone() });
         }
+        CueAction::Ending(cue) => active.ending.push((cue.clone(), instant)),
         _ => {}
     }
 }
@@ -366,8 +378,13 @@ fn ease(e: Ease, x: f32) -> f32 {
 
 /// Resolves a camera point to (position, look target) in world space.
 pub fn resolve(point: CamPoint, player_pos: Vec3, yaw: f32, pitch: f32, eye: f32) -> (Vec3, Vec3) {
+    resolve_anchored(point, player_pos, yaw, pitch, eye, Vec3::ZERO)
+}
+
+pub fn resolve_anchored(point: CamPoint, player_pos: Vec3, yaw: f32, pitch: f32, eye: f32, anchor: Vec3) -> (Vec3, Vec3) {
     match point {
         CamPoint::At { pos, look } => (Vec3::from(pos), Vec3::from(look)),
+        CamPoint::Anchor { pos, look } => (anchor + Vec3::from(pos), anchor + Vec3::from(look)),
         CamPoint::PlayerEye => {
             let p = player_pos + Vec3::Y * eye;
             let dir = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0) * Vec3::NEG_Z;
@@ -378,10 +395,14 @@ pub fn resolve(point: CamPoint, player_pos: Vec3, yaw: f32, pitch: f32, eye: f32
 
 /// Picks the active shot for time `t` and returns interpolated (pos, look, fov).
 pub fn sample_shots(shots: &[CameraShot], t: f32, player: (Vec3, f32, f32, f32)) -> Option<(Vec3, Vec3, f32)> {
+    sample_shots_anchored(shots, t, player, Vec3::ZERO)
+}
+
+pub fn sample_shots_anchored(shots: &[CameraShot], t: f32, player: (Vec3, f32, f32, f32), anchor: Vec3) -> Option<(Vec3, Vec3, f32)> {
     let shot = shots.iter().rev().find(|s| t >= s.start).or(shots.first())?;
     let k = ease(shot.ease, (t - shot.start) / (shot.end - shot.start).max(0.001));
-    let (p0, l0) = resolve(shot.from, player.0, player.1, player.2, player.3);
-    let (p1, l1) = resolve(shot.to, player.0, player.1, player.2, player.3);
+    let (p0, l0) = resolve_anchored(shot.from, player.0, player.1, player.2, player.3, anchor);
+    let (p1, l1) = resolve_anchored(shot.to, player.0, player.1, player.2, player.3, anchor);
     Some((p0.lerp(p1, k), l0.lerp(l1, k), shot.fov))
 }
 
@@ -392,6 +413,7 @@ fn drive_camera(
     shake: Res<CameraShake>,
     settings: Res<Settings>,
     time: Res<Time>,
+    anchor: Res<crate::ending::CutsceneAnchor>,
 ) {
     let Ok((p, body)) = player.single() else { return };
     let Ok((mut tf, mut proj)) = cam.single_mut() else { return };
@@ -403,7 +425,7 @@ fn drive_camera(
         }
         return;
     };
-    let Some((pos, look, fov)) = sample_shots(&def.shots, active.t, (body.translation, p.yaw, p.pitch, p.eye)) else { return };
+    let Some((pos, look, fov)) = sample_shots_anchored(&def.shots, active.t, (body.translation, p.yaw, p.pitch, p.eye), anchor.0) else { return };
     // Camera is a child of the player body: convert world → local.
     let world = Transform::from_translation(pos).looking_at(look, Vec3::Y);
     let inv = body.compute_affine().inverse();
