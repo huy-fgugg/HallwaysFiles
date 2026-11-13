@@ -278,10 +278,10 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
                 .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(t.interact), HideFill));
             });
 
-            // Subtitles.
+            // Subtitles (above the item slots, battery bar and hide meter).
             root.spawn(Node {
                 position_type: PositionType::Absolute,
-                bottom: px(110),
+                bottom: px(200),
                 width: percent(100),
                 justify_content: JustifyContent::Center,
                 ..default()

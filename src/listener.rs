@@ -348,7 +348,7 @@ mod tests {
             for r in generate(seed).rooms {
                 if r.encounter == Some(Encounter::Listener) {
                     seen += 1;
-                    assert_eq!(r.area, Area::Grounds);
+                    assert!(matches!(r.area, Area::Grounds | Area::Archive), "{:?}", r.area);
                 }
             }
         }

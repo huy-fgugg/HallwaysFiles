@@ -193,6 +193,7 @@ fn default_wants(
     app: Res<State<AppState>>,
     mut director: ResMut<MusicDirector>,
     chase: Option<Res<crate::hollow::ChaseState>>,
+    pursuit: Option<Res<crate::pursuit::Pursuit>>,
     cut: Option<Res<crate::cutscene::ActiveCutscene>>,
     lobby: Option<Res<crate::lobby::LiftLobby>>,
     overlay: Option<Res<State<crate::state::Overlay>>>,
@@ -206,7 +207,7 @@ fn default_wants(
                 Some(MusicTrack::Lift)
             } else if let Some(c) = cut.as_ref().filter(|c| c.def.is_some()) {
                 Some(MusicTrack::Cutscene(c.id.clone()))
-            } else if chase.is_some_and(|c| c.active) {
+            } else if chase.is_some_and(|c| c.active) || pursuit.is_some_and(|p| p.active()) {
                 Some(MusicTrack::Chase)
             } else {
                 Some(MusicTrack::Ambience)

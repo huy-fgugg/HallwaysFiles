@@ -1,6 +1,6 @@
 [package]
 name = "hallways-mobile"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 publish = false
 description = "Android entry point for HALLWAYS"
