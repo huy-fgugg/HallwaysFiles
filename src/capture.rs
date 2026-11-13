@@ -29,6 +29,7 @@ const ROOM_SHOTS: &[(&str, u32, f32)] = &[
     ("33_fake_doors", 0, 0.0),
     ("37_grounds", 53, 0.0),
     ("37b_grounds_entry", 51, 0.0),
+    ("38_listener", 0, 0.0),
     ("35_admin_panel", 4, 0.0),
     ("36_jumpscare", 4, 0.0),
 ];
@@ -44,6 +45,7 @@ fn pick_room(label: &str, plan: &crate::floor::plan::FloorPlan) -> Option<(u32, 
         "30_raised_exit" => plan.rooms.iter().find(|r| matches!(r.feature, Some(Feature::RaisedExit { .. }))).map(|r| (r.index, None)),
         "31_entry_landing" => plan.rooms.iter().find(|r| r.entry_height > 0.0).map(|r| (r.index, None)),
         "32_key_loft" => plan.rooms.iter().find(|r| matches!(r.feature, Some(Feature::KeyLoft { .. }))).map(|r| (r.index, None)),
+        "38_listener" => plan.rooms.iter().find(|r| r.area == crate::floor::plan::Area::Grounds && r.light != LightState::Dark && r.depth() > 12.0).map(|r| (r.index, Some(Encounter::Listener))),
         "33_fake_doors" => plan.rooms.iter().filter(|r| r.mimics.len() >= 2).max_by_key(|r| r.mimics.len()).map(|r| (r.index, None)),
         _ => None,
     }
@@ -163,7 +165,7 @@ fn run_capture(
                 inv.flashlight_on = true;
             }
         }
-        if room != 0 && !label.starts_with("26") && !label.starts_with("27") {
+        if room != 0 && !label.starts_with("26") && !label.starts_with("27") && !label.starts_with("38") {
             force.0 = None;
         }
         if label == "29_inventory" && cap.frames < 3 {
@@ -209,6 +211,9 @@ fn run_capture(
                     target = Vec3::new(wall, 0.0, r.min.y + 3.0);
                     pl.pitch = 0.12;
                 }
+            }
+            if label.starts_with("37") || label.starts_with("38") {
+                pl.pitch = 0.12;
             }
             if label.starts_with("31") {
                 pl.pitch = -0.55;

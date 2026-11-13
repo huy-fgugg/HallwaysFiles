@@ -16,6 +16,7 @@ pub mod hollow;
 pub mod icons;
 pub mod interaction;
 pub mod items;
+pub mod listener;
 pub mod lobby;
 pub mod music;
 pub mod net;
@@ -31,6 +32,7 @@ pub mod surge;
 pub mod theme;
 pub mod ui;
 pub mod viewmodel;
+pub mod weather;
 pub mod world;
 
 use bevy::prelude::*;
@@ -54,6 +56,6 @@ impl Plugin for HallwaysPlugin {
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
         app.init_resource::<presets::ActivePreset>();
-        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin));
+        app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin));
     }
 }

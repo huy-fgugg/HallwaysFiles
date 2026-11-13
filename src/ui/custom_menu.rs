@@ -233,7 +233,7 @@ fn refresh(
         Query<&mut Text>,
     )>,
     session: Res<crate::net::NetSession>,
-    mut status: Query<&mut Text, (With<CustomStatus>, Without<PresetTitle>, Without<FieldValue>)>,
+    status_ids: Query<Entity, With<CustomStatus>>,
 ) {
     if ed.refresh_fields {
         ed.refresh_fields = false;
@@ -278,9 +278,11 @@ fn refresh(
         }
     }
     if let crate::net::NetStatus::Error(e) = &session.status {
-        for mut t in &mut status {
-            if !t.0.contains(e.as_str()) && t.0.starts_with("Creating") {
-                t.0 = e.clone();
+        for id in &status_ids {
+            if let Ok(mut t) = q.get_mut(id) {
+                if !t.0.contains(e.as_str()) && t.0.starts_with("Creating") {
+                    t.0 = e.clone();
+                }
             }
         }
     }
