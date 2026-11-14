@@ -29,6 +29,10 @@ struct Wisp {
 #[derive(Component)]
 struct WispMote(f32);
 
+/// Overrides the wait before the light appears (used by the trailer).
+#[derive(Resource, Default, Debug)]
+pub struct GuideOverride(pub Option<f32>);
+
 #[derive(Resource, Default)]
 struct GuideState {
     room: u32,
@@ -41,6 +45,7 @@ pub struct GuidePlugin;
 impl Plugin for GuidePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GuideState>()
+            .init_resource::<GuideOverride>()
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| c.insert_resource(GuideState::default()))
             .add_systems(Update, (watch.run_if(gameplay_active), fly).chain().run_if(in_state(AppState::Playing)));
     }
@@ -63,6 +68,7 @@ fn watch(
     floor: Option<Res<Floor>>,
     rt: Option<Res<FloorRuntime>>,
     mut st: ResMut<GuideState>,
+    over: Res<GuideOverride>,
     cam: Query<&GlobalTransform, With<PlayerCamera>>,
     drawers: Query<(&Drawer, &Interactable)>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -88,7 +94,7 @@ fn watch(
     let Some(r) = floor.0.room(room) else { return };
     let Some(wait) = wait_for(r.kind, r.feature) else { return };
     // QA: HALLWAYS_GUIDE_SECS shortens the wait.
-    let wait = std::env::var("HALLWAYS_GUIDE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(wait);
+    let wait = over.0.or_else(|| std::env::var("HALLWAYS_GUIDE_SECS").ok().and_then(|v| v.parse().ok())).unwrap_or(wait);
     st.t += time.delta_secs();
     if st.wisp.is_some() || st.t < wait {
         return;
