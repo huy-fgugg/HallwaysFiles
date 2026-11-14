@@ -262,8 +262,10 @@ fn record(
                     play.write(PlayCutscene(INTRO.into()));
                 }
                 Shot::Cutscene { id, .. } if id == THE_HOLLOW => {
+                    // The corridor no longer wakes it (the old chase is gone): play it directly.
                     tf.translation = Vec3::new(0.0, 0.0, -8.0);
                     p.yaw = 0.0;
+                    play.write(PlayCutscene(THE_HOLLOW.into()));
                 }
                 Shot::Cutscene { .. } => {
                     if let Some(r) = floor.0.room(floor.0.last_room) {

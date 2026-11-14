@@ -541,6 +541,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn atrium_columns_leave_a_wide_path() {
+        for seed in 0..40 {
+            for r in super::super::plan::generate(seed).rooms.into_iter().filter(|r| r.area == Area::Atrium) {
+                let inset = atrium_column_inset(&r);
+                // Columns are 0.6 wide (plus a 0.8 base): the middle must stay open.
+                let gap = (r.max.x - inset - 0.4) - (r.min.x + inset + 0.4);
+                assert!(gap >= 1.4, "room {} width {} leaves {gap}", r.index, r.width());
+            }
+        }
+    }
+
+    #[test]
     fn atrium_columns_never_stand_on_stairs() {
         // Same placement rule as atrium_architecture, checked against every
         // stair, landing and loft on many floors.
@@ -552,7 +564,7 @@ mod tests {
                 }
                 let mut z = r.max.y - 1.5;
                 while z > r.min.y + 1.0 {
-                    for x in [r.min.x + 0.9, r.max.x - 0.9] {
+                    for x in [r.min.x + atrium_column_inset(&r), r.max.x - atrium_column_inset(&r)] {
                         let blocked = zones.iter().any(|(lo, hi)| x + 0.45 > lo.x && x - 0.45 < hi.x && z + 0.45 > lo.y && z - 0.45 < hi.y);
                         if let Some(Feature::RaisedExit { height }) = r.feature {
                             // The stairs run from the landing south; a column on them must be skipped.
@@ -1319,13 +1331,20 @@ pub fn stair_zones(r: &RoomPlan) -> Vec<(Vec2, Vec2)> {
     z
 }
 
+/// How far Atrium columns stand from the side walls: flush in narrow rooms so
+/// they never close the way through.
+pub fn atrium_column_inset(r: &RoomPlan) -> f32 {
+    if r.width() < 5.5 { 0.32 } else { 0.9 }
+}
+
 fn atrium_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan) {
     let marble = b.mats.marble.clone();
     let h = r.height;
     let keep_clear = stair_zones(r);
+    let inset = atrium_column_inset(r);
     let mut z = r.max.y - 1.5;
     while z > r.min.y + 1.0 {
-        for x in [r.min.x + 0.9, r.max.x - 0.9] {
+        for x in [r.min.x + inset, r.max.x - inset] {
             if keep_clear.iter().any(|(lo, hi)| x + 0.45 > lo.x && x - 0.45 < hi.x && z + 0.45 > lo.y && z - 0.45 < hi.y) {
                 continue;
             }
