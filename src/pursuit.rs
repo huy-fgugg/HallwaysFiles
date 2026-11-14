@@ -308,6 +308,7 @@ fn dev_bot(
     floor: Option<Res<Floor>>,
     mut rt: Option<ResMut<FloorRuntime>>,
     colliders: Query<&Collider>,
+    grounds: Query<&crate::physics::Ground>,
     mut doors: Query<(Entity, &mut Door, &GlobalTransform)>,
     mut player: Query<(&mut crate::player::Player, &mut Transform)>,
     mut log: Local<BotLog>,
@@ -383,12 +384,16 @@ fn dev_bot(
     }
     let len = crate::player::SPRINT_SPEED * time.delta_secs();
     let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
+    let floors: Vec<_> = grounds.iter().map(|g| g.0).collect();
+    // Small steps that also follow stairs up and down (a long frame would
+    // otherwise run into the next stair face before the height catches up).
     let walk = |dir: Vec3| {
         let step = dir * len;
-        let n = ((step.length() / 0.12).ceil() as usize).max(1);
+        let n = ((step.length() / 0.1).ceil() as usize).max(1);
         let mut pos = p;
         for _ in 0..n {
-            pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, p.y + crate::player::STEP_UP, p.y + 1.7, &boxes);
+            pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, pos.y + crate::player::STEP_UP, pos.y + 1.7, &boxes);
+            pos.y = crate::physics::ground_height(pos, pos.y, crate::player::STEP_UP, &floors);
         }
         pos
     };
@@ -408,8 +413,7 @@ fn dev_bot(
             }
         }
     }
-    tf.translation.x = best.x;
-    tf.translation.z = best.z;
+    tf.translation = best;
     pl.yaw = (-to.x).atan2(-to.z);
 }
 
