@@ -94,13 +94,55 @@ fn progress_index(path: &[Vec3], p: Vec3) -> usize {
     path.iter().rposition(|v| v.z >= p.z - 0.05).unwrap_or(0)
 }
 
+/// Arc length along `path` of the point nearest `p` on the stretch the player
+/// has reached (see [`progress_index`]).
+fn progress_along(path: &[Vec3], p: Vec3) -> f32 {
+    let i = progress_index(path, p);
+    let mut s = 0.0;
+    for w in path.windows(2).take(i) {
+        s += w[0].distance(w[1]);
+    }
+    if let (Some(a), Some(b)) = (path.get(i), path.get(i + 1)) {
+        let seg = *b - *a;
+        let len = seg.length();
+        if len > 1e-4 {
+            s += ((p - *a).dot(seg / len)).clamp(0.0, len);
+        }
+    }
+    s
+}
+
+/// Point `dist` metres along `path`.
+fn point_along(path: &[Vec3], dist: f32) -> Vec3 {
+    let mut left = dist.max(0.0);
+    for w in path.windows(2) {
+        let len = w[0].distance(w[1]);
+        if left <= len && len > 1e-4 {
+            return w[0].lerp(w[1], left / len);
+        }
+        left -= len;
+    }
+    path.last().copied().unwrap_or(Vec3::ZERO)
+}
+
+/// Red, dim, flickering: the lights during the chase.
+pub const CHASE_MOOD: Mood = Mood { tint: Color::srgb(1.0, 0.12, 0.08), amount: 0.85, scale: 0.8, flicker: 0.35 };
+
+/// How far ahead of the player the chase's guiding light flies.
+pub const GUIDE_LEAD: f32 = 4.5;
+
+/// The chase's guiding light: always a few metres ahead on the way out,
+/// through each barricade gap and the real door (never a fake one).
+#[derive(Component)]
+pub struct ChaseGuide;
+
 pub struct PursuitPlugin;
 
 impl Plugin for PursuitPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pursuit>()
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| c.insert_resource(Pursuit::default()))
-            .add_systems(Update, (trigger, run_pursuit, auto_doors, shut_door_behind).chain().run_if(gameplay_active));
+            .add_systems(Update, (trigger, run_pursuit, auto_doors, shut_door_behind, guide_light, ink_warnings).chain().run_if(gameplay_active));
         // QA: HALLWAYS_WARP=40 starts the run at Room 040 (the opening chase counts as survived).
         if std::env::var_os("HALLWAYS_WARP").is_some() {
             app.add_systems(Update, dev_warp.run_if(gameplay_active));
@@ -127,6 +169,7 @@ fn trigger(
     mut shake: ResMut<CameraShake>,
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
+    mut surge: (ResMut<crate::surge::SurgeState>, Query<Entity, With<crate::surge::SurgeBody>>),
 ) {
     if pursuit.phase != PursuitPhase::Idle || suppress.0 || std::env::var_os("HALLWAYS_CAPTURE").is_some() {
         return;
@@ -142,7 +185,13 @@ fn trigger(
     commands.entity(e).insert(PursuitHollow);
     pursuit.path = path;
     pursuit.phase = PursuitPhase::Cue(0.0);
-    *mood = Mood { tint: Color::srgb(1.0, 0.12, 0.08), amount: 0.85, scale: 0.8, flicker: 0.35 };
+    // Nothing else hunts during the chase: a Surge or Undertow still making
+    // passes from an earlier room is called off (it would also reset the lights).
+    surge.0.0 = crate::surge::SurgePhase::Idle;
+    for e in surge.1.iter() {
+        commands.entity(e).try_despawn();
+    }
+    *mood = CHASE_MOOD;
     shake.add(0.5);
     sfx.write(PlaySfx(Sfx::Rumble));
     sfx.write(PlaySfx(Sfx::Ooze));
@@ -177,6 +226,10 @@ fn run_pursuit(
         }
         return;
     };
+    if pursuit.active() {
+        // Hold the chase lighting even if something else touched it.
+        *mood = CHASE_MOOD;
+    }
     match pursuit.phase.clone() {
         PursuitPhase::Cue(t) => {
             let t = t + dt;
@@ -425,6 +478,118 @@ fn dev_bot_revive(overlay: Res<State<Overlay>>, mut next: ResMut<NextState<Overl
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn guide_light(
+    mut commands: Commands,
+    time: Res<Time>,
+    pursuit: Res<Pursuit>,
+    player: Query<&Transform, (With<Player>, Without<ChaseGuide>)>,
+    mut guides: Query<(Entity, &mut Transform), With<ChaseGuide>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    let chasing = matches!(pursuit.phase, PursuitPhase::Chasing { .. }) || (matches!(pursuit.phase, PursuitPhase::Cue(t) if t > 1.2));
+    let Ok(p) = player.single() else { return };
+    if !chasing || pursuit.path.len() < 2 {
+        for (e, _) in &guides {
+            commands.entity(e).try_despawn();
+        }
+        return;
+    }
+    let target = point_along(&pursuit.path, progress_along(&pursuit.path, p.translation) + GUIDE_LEAD) + Vec3::Y * 1.9;
+    let t = time.elapsed_secs();
+    if let Some((_, mut tf)) = guides.iter_mut().next() {
+        let to = target - tf.translation;
+        let k = (time.delta_secs() * 5.0).min(1.0);
+        tf.translation += to * k;
+        tf.translation.y = target.y + (t * 3.0).sin() * 0.08;
+        return;
+    }
+    let glow = mats.add(StandardMaterial { base_color: Color::srgb(0.85, 0.95, 1.0), emissive: LinearRgba::rgb(10.0, 14.0, 18.0), unlit: true, ..default() });
+    let body = meshes.add(Sphere::new(0.09).mesh().ico(2).unwrap_or_else(|_| Sphere::new(0.09).mesh().build()));
+    commands
+        .spawn((Name::new("Chase guiding light"), ChaseGuide, Transform::from_translation(p.translation + Vec3::Y * 1.9), Visibility::default(), DespawnOnExit(AppState::Playing)))
+        .with_children(|c| {
+            c.spawn((Mesh3d(body), MeshMaterial3d(glow)));
+            // Cold light that reads against the red chase lighting.
+            c.spawn(PointLight { color: Color::srgb(0.75, 0.9, 1.0), intensity: 60_000.0, range: 8.0, shadow_maps_enabled: false, ..default() });
+        });
+}
+
+/// Rooms before Door 040 where ink starts seeping down the walls.
+pub const WARNING_ROOMS: std::ops::RangeInclusive<u32> = (PURSUIT_FIRST - 3)..=(PURSUIT_FIRST - 1);
+
+#[derive(Component)]
+struct InkDrip {
+    room: u32,
+    /// 0..1 how far it has run down.
+    t: f32,
+    speed: f32,
+    top: f32,
+}
+
+/// The build-up to the chase: in the three rooms before Door 040, black ink
+/// runs down the walls, more of it in each room. Harmless; just a warning.
+#[allow(clippy::too_many_arguments)]
+fn ink_warnings(
+    mut commands: Commands,
+    time: Res<Time>,
+    run: Res<RunState>,
+    floor: Option<Res<Floor>>,
+    mut drips: Query<(Entity, &mut InkDrip, &mut Transform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut subs: MessageWriter<Subtitle>,
+    mut done: Local<Vec<u32>>,
+) {
+    if run.elapsed < 0.2 {
+        done.clear();
+    }
+    let dt = time.delta_secs();
+    for (e, mut d, mut tf) in &mut drips {
+        d.t = (d.t + d.speed * dt).min(1.0);
+        // Grows downward from the top of the wall.
+        let len = 0.2 + d.t * 1.8;
+        tf.scale.y = len;
+        tf.translation.y = d.top - len / 2.0;
+        if run.current_room > d.room + 1 || run.current_room + 1 < d.room {
+            commands.entity(e).try_despawn();
+        }
+    }
+    let Some(floor) = floor else { return };
+    let room = run.current_room;
+    if !WARNING_ROOMS.contains(&room) || done.contains(&room) || !floor.0.room(PURSUIT_FIRST).is_some_and(|r| r.pursuit) {
+        return;
+    }
+    let Some(r) = floor.0.room(room) else { return };
+    done.push(room);
+    let step = room + 1 - *WARNING_ROOMS.start(); // 1, 2, 3
+    let ink = mats.add(StandardMaterial { base_color: Color::srgb(0.005, 0.004, 0.006), perceptual_roughness: 0.15, reflectance: 0.3, ..default() });
+    let mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let mut rng = crate::rng::GameRng::new(r.seed ^ 0x1A4);
+    let top = r.height - 0.05;
+    for _ in 0..(4 * step) {
+        let east = rng.next_f32() < 0.5;
+        let x = if east { r.max.x - 0.015 } else { r.min.x + 0.015 };
+        let z = rng.range_f32(r.min.y + 0.5, r.max.y - 0.5);
+        let w = rng.range_f32(0.04, 0.12);
+        commands.spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(ink.clone()),
+            Transform::from_xyz(x, top, z).with_scale(Vec3::new(0.02, 0.2, w)),
+            InkDrip { room, t: 0.0, speed: rng.range_f32(0.08, 0.25), top },
+            DespawnOnExit(AppState::Playing),
+            Name::new("Ink drip"),
+        ));
+    }
+    let line = match step {
+        1 => "[Something dark is seeping down the walls.]",
+        2 => "[More ink. It's running faster now.]",
+        _ => "[The walls are weeping ink. Something is close.]",
+    };
+    subs.write(Subtitle::danger(line));
+}
+
 /// Once every living player is through Door 047, it slams shut behind
 /// them and stays locked: the chase is over for good.
 #[allow(clippy::too_many_arguments)]
@@ -553,6 +718,31 @@ mod tests {
         // It weaves through the barricade openings, not straight lines.
         let turns = path.windows(2).filter(|w| (w[1].x - w[0].x).abs() > 2.0).count();
         assert!(turns >= 6, "only {turns} turns");
+    }
+
+    #[test]
+    fn guide_leads_through_the_real_door() {
+        let plan = crate::floor::plan::generate(11);
+        let path = pursuit_path(&plan);
+        // A player standing anywhere on the route sees the light ahead of them.
+        for k in [3usize, 8, 14] {
+            let p = path[k.min(path.len() - 1)];
+            let s = progress_along(&path, p);
+            let g = point_along(&path, s + GUIDE_LEAD);
+            assert!(g.z <= p.z + 0.01, "light behind the player");
+        }
+        // In a choice room the route passes the real exit, never a fake door.
+        for i in crate::floor::plan::CHASE_CHOICE_ROOMS {
+            let r = plan.room(i).unwrap();
+            let at_wall: Vec<_> = path.iter().filter(|v| (v.z - r.min.y).abs() < 1.0).collect();
+            assert!(!at_wall.is_empty());
+            for v in at_wall {
+                assert!((v.x - r.exit_x).abs() < 0.2, "route at x {} but exit at {}", v.x, r.exit_x);
+                for m in &r.mimics {
+                    assert!((v.x - m.x).abs() > 1.0);
+                }
+            }
+        }
     }
 
     #[test]

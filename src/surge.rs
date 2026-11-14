@@ -46,8 +46,9 @@ impl Default for SurgeState {
     }
 }
 
+/// The Surge/Undertow's visible body (cleared when the Door 40 chase starts).
 #[derive(Component)]
-struct SurgeBody;
+pub struct SurgeBody;
 
 #[derive(Component)]
 struct Shard {

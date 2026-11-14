@@ -23,6 +23,8 @@ pub const FAKE_SPACING: f32 = 1.8;
 /// Rooms of the Door 40 chase: The Hollow pursues you from Room 041 to 046.
 pub const PURSUIT_FIRST: u32 = 41;
 pub const PURSUIT_LAST: u32 = 46;
+/// Chase rooms whose exit wall has a fake door beside the real one.
+pub const CHASE_CHOICE_ROOMS: [u32; 2] = [43, 45];
 /// Room entered through Door 050: the Reading Hall, a big archive room whose
 /// exit is locked until you find the key among its shelves.
 pub const READING_HALL: u32 = 50;
@@ -520,6 +522,10 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             last_seen.insert(e, i64::from(index));
             last_any = i64::from(index);
         }
+        // A Surge/Undertow keeps making passes into the next rooms: keep it out
+        // of the two rooms before the chase.
+        let near_chase = last >= PURSUIT_LAST + 2 && (PURSUIT_FIRST - 2..PURSUIT_FIRST).contains(&index);
+        let encounter = if near_chase && encounter.is_some_and(Encounter::needs_hiding) { None } else { encounter };
         let surge = encounter.is_some_and(Encounter::needs_hiding);
 
         let containers = match kind {
@@ -571,8 +577,10 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
 
         // Fake doors: a "choice wall" of look-alike doors around the real exit.
         // Only the real door shows the next number; every fake shows a wrong one.
-        let mimics = if index >= 5 && !pursuit && feature.is_none() && !matches!(kind, RoomKind::Hall | RoomKind::Final | RoomKind::Transition) {
-            let chance = (if index < 20 { 0.06 } else { 0.11 }) * opt.fake_doors.clamp(0.0, 8.0);
+        // Two chase rooms end in a choice of doors; the guiding light marks the real one.
+        let chase_choice = pursuit && CHASE_CHOICE_ROOMS.contains(&index) && opt.fake_doors > 0.0;
+        let mimics = if chase_choice || (index >= 5 && !pursuit && feature.is_none() && !matches!(kind, RoomKind::Hall | RoomKind::Final | RoomKind::Transition)) {
+            let chance = if chase_choice { 1.0 } else { (if index < 20 { 0.06 } else { 0.11 }) * opt.fake_doors.clamp(0.0, 8.0) };
             if rng.next_f32() < chance {
                 // Candidate slots along the north wall, clear of the real exit.
                 let mut slots = Vec::new();
@@ -588,7 +596,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
                     let j = rng.below(i as u32 + 1) as usize;
                     slots.swap(i, j);
                 }
-                let want = 1 + rng.below(3) as usize;
+                let want = if chase_choice { 1 } else { 1 + rng.below(3) as usize };
                 let mut picked: Vec<Mimic> = Vec::new();
                 for sx in slots {
                     if picked.len() >= want {
@@ -680,7 +688,7 @@ fn ensure_every_encounter(rooms: &mut [RoomPlan], cfg: &EntityConfig, seed: u64)
                 Encounter::Gallery => r.light != LightState::Dark && r.kind != RoomKind::Hall,
                 Encounter::Hush => r.light != LightState::Dark,
                 Encounter::Listener => matches!(r.area, Area::Grounds | Area::Archive) && r.light != LightState::Dark,
-                Encounter::Surge | Encounter::Undertow => r.entry_height == 0.0,
+                Encounter::Surge | Encounter::Undertow => r.entry_height == 0.0 && !(PURSUIT_FIRST - 2..PURSUIT_FIRST).contains(&r.index),
             };
             slot_ok
                 && !r.pursuit
@@ -973,7 +981,8 @@ mod tests {
             for i in PURSUIT_FIRST..=PURSUIT_LAST {
                 let r = plan.room(i).unwrap();
                 assert!(r.pursuit);
-                assert!(r.encounter.is_none() && r.mimics.is_empty() && r.feature.is_none());
+                assert!(r.encounter.is_none() && r.feature.is_none());
+                assert_eq!(r.mimics.len(), usize::from(CHASE_CHOICE_ROOMS.contains(&i)), "room {i}");
                 assert!(r.dividers().len() >= 2, "chase rooms are big with obstacles");
                 assert_ne!(r.kind, RoomKind::KeyPuzzle);
             }
@@ -982,6 +991,17 @@ mod tests {
         // Short custom floors have no chase.
         let short = generate_custom(1, &EntityConfig::default(), &GenOptions { last_room: 30, ..GenOptions::default() });
         assert!(short.rooms.iter().all(|r| !r.pursuit));
+    }
+
+    #[test]
+    fn no_rushing_entity_right_before_the_chase() {
+        for seed in 0..200 {
+            let plan = generate(seed);
+            for i in PURSUIT_FIRST - 2..PURSUIT_FIRST {
+                let r = plan.room(i).unwrap();
+                assert!(!r.encounter.is_some_and(Encounter::needs_hiding), "seed {seed} room {i}: {:?}", r.encounter);
+            }
+        }
     }
 
     #[test]
