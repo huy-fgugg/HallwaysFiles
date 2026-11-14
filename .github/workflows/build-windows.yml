@@ -1,9 +1,8 @@
 name: Build Windows EXE
 
+# Started by hand only: Windows minutes count double, and the Release
+# workflow already builds Windows when publishing.
 on:
-  push:
-    branches: [main, "claude/**"]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
