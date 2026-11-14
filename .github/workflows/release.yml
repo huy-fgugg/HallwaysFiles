@@ -150,6 +150,8 @@ jobs:
 
             - **Android (phones/tablets, 64-bit, Android 9+):** `hallways-${{ needs.check.outputs.version }}-android.apk` (added a few minutes after the others). Download it on the phone, allow "install unknown apps" for your browser, and open it. Touch controls: left thumb walks, right thumb looks, buttons for USE / CROUCH / RUN / LIGHT / ITEM / MENU.
 
+            - **iPhone / iPad (iOS 14+):** `hallways-${{ needs.check.outputs.version }}-ios.ipa` (added after the others). It isn't signed: install it from a computer with **Sideloadly** or **AltStore**, signing in with your Apple ID. With a free Apple ID the app has to be re-installed every 7 days.
+
             Needs a graphics card with Vulkan (Linux/Android) or DirectX 12/Vulkan (Windows).
 
             ## Online rooms

@@ -82,7 +82,7 @@ pub struct TouchPlugin;
 impl Plugin for TouchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TouchLook>()
-            .insert_resource(TouchState { enabled: cfg!(target_os = "android"), ..default() })
+            .insert_resource(TouchState { enabled: cfg!(any(target_os = "android", target_os = "ios")), ..default() })
             .add_systems(OnEnter(AppState::Playing), spawn_controls)
             .add_systems(PreUpdate, handle_touches.after(bevy::input::InputSystems))
             .add_systems(Update, (update_controls.run_if(in_state(AppState::Playing)), soft_keyboard));
@@ -363,11 +363,21 @@ fn update_controls(
 
 /// Shows the phone's on-screen keyboard while a text box (name, seed, room
 /// code) is selected.
-fn soft_keyboard(typing: Res<crate::ui::play_menu::Typing>, mut was: Local<bool>) {
+fn soft_keyboard(
+    typing: Res<crate::ui::play_menu::Typing>,
+    mut was: Local<bool>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+) {
     if typing.0 == *was {
         return;
     }
     *was = typing.0;
+    // iPhone/iPad: allowing text input brings up the on-screen keyboard.
+    if cfg!(target_os = "ios") {
+        for mut w in &mut windows {
+            w.ime_enabled = typing.0;
+        }
+    }
     #[cfg(target_os = "android")]
     if let Some(app) = bevy::android::ANDROID_APP.get() {
         if typing.0 {

@@ -35,7 +35,7 @@ fn install_crash_log() {
 pub fn run() {
     install_crash_log();
     // Phones and tablets start on Low; they can raise it in Settings.
-    let saved = if cfg!(target_os = "android") && !crate::settings::settings_file_exists() { Graphics::Low } else { load_settings().graphics };
+    let saved = if cfg!(any(target_os = "android", target_os = "ios")) && !crate::settings::settings_file_exists() { Graphics::Low } else { load_settings().graphics };
     let graphics = Graphics::startup_override().unwrap_or(saved);
 
     let mut sampler = ImageSamplerDescriptor::linear();
@@ -60,7 +60,7 @@ pub fn run() {
                     primary_window: Some(Window {
                         title: "HALLWAYS".into(),
                         // Phones: true fullscreen in landscape.
-                        mode: if cfg!(target_os = "android") { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary) } else { bevy::window::WindowMode::Windowed },
+                        mode: if cfg!(any(target_os = "android", target_os = "ios")) { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary) } else { bevy::window::WindowMode::Windowed },
                         resolution: WindowResolution::new(1600, 900),
                         present_mode: PresentMode::AutoVsync,
                         ..default()
