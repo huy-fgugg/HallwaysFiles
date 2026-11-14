@@ -22,8 +22,10 @@ pub const GUIDE_AFTER_HALL: f32 = 55.0;
 const SPEED: f32 = 1.7;
 
 #[derive(Component)]
-struct Wisp {
+pub struct Wisp {
     target: Vec3,
+    /// Height it glides at while far from the key (above shelves and furniture).
+    cruise: f32,
     mote: f32,
 }
 #[derive(Component)]
@@ -111,7 +113,7 @@ fn watch(
             Transform::from_translation(start),
             Visibility::default(),
             DespawnOnExit(AppState::Playing),
-            Wisp { target: target + Vec3::Y * 0.55, mote: 0.0 },
+            Wisp { target: target + Vec3::Y * 0.55, cruise: (r.height - 0.4).clamp(target.y + 0.55, 3.0), mote: 0.0 },
         ))
         .with_children(|c| {
             c.spawn((Mesh3d(body), MeshMaterial3d(glow.clone())));
@@ -130,7 +132,10 @@ fn fly(time: Res<Time>, mut wisps: Query<(&mut Wisp, &mut Transform, &Children)>
     let dt = time.delta_secs();
     let t = time.elapsed_secs();
     for (mut w, mut tf, kids) in &mut wisps {
-        let to = w.target - tf.translation;
+        // Glide high while far away, then sink down onto the drawer.
+        let flat = Vec2::new(w.target.x - tf.translation.x, w.target.z - tf.translation.z).length();
+        let goal = if flat > 1.2 { Vec3::new(w.target.x, w.cruise, w.target.z) } else { w.target };
+        let to = goal - tf.translation;
         let d = to.length();
         if d > 0.05 {
             tf.translation += to / d * (SPEED * dt).min(d);
