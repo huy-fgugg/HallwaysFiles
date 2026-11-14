@@ -12,3 +12,4 @@ android/app/src/main/assets/
 android/.gradle/
 android/build/
 android/app/build/
+*.mp4
