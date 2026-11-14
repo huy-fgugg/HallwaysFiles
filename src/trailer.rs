@@ -99,6 +99,8 @@ struct Recorder {
     /// Route for Route/Chase shots, and how far along it the camera is.
     path: Vec<Vec3>,
     along: f32,
+    /// Frames waited after the last shot.
+    tail: u32,
     log: Vec<String>,
 }
 
@@ -109,7 +111,7 @@ impl Plugin for TrailerPlugin {
         let Ok(dir) = std::env::var("HALLWAYS_TRAILER") else { return };
         let _ = std::fs::create_dir_all(&dir);
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / FPS)))
-            .insert_resource(Recorder { dir, shot: 0, phase: Phase::Setup, frame: 0, first: 0, room: 0, from: Vec3::ZERO, to: Vec3::ZERO, yaw: 0.0, path: vec![], along: 0.0, log: vec![] })
+            .insert_resource(Recorder { dir, shot: 0, phase: Phase::Setup, frame: 0, first: 0, room: 0, from: Vec3::ZERO, to: Vec3::ZERO, yaw: 0.0, path: vec![], along: 0.0, tail: 0, log: vec![] })
             .add_systems(Update, start.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, record.run_if(in_state(AppState::Playing)));
     }
@@ -197,9 +199,9 @@ fn record(
         ResMut<NextState<Overlay>>,
         MessageWriter<AppExit>,
     ),
-    mut chase_kit: (ResMut<Pursuit>, ResMut<crate::guide::GuideOverride>, Res<SurgeState>, Query<Entity, With<PursuitHollow>>, Query<&mut Door>),
+    mut chase_kit: (ResMut<Pursuit>, ResMut<crate::guide::GuideOverride>, Res<SurgeState>, Query<(Entity, &GlobalTransform), With<PursuitHollow>>, Query<&mut Door>, Query<&GlobalTransform, With<crate::guide::Wisp>>),
 ) {
-    let (pursuit, guide, surge_state, hollows, doors) = (&mut chase_kit.0, &mut chase_kit.1, &chase_kit.2, &chase_kit.3, &mut chase_kit.4);
+    let (pursuit, guide, surge_state, hollows, doors, wisps) = (&mut chase_kit.0, &mut chase_kit.1, &chase_kit.2, &chase_kit.3, &mut chase_kit.4, &chase_kit.5);
     let (force, chase, suppress, mood, run, hide) = (&mut world.0, &mut world.1, &mut world.2, &mut world.3, &mut world.4, &mut world.5);
     let (inv, peers, session, anchor, overlay, next_overlay, exit) = (&mut extra.0, &mut extra.1, &mut extra.2, &mut extra.3, &extra.4, &mut extra.5, &mut extra.6);
     let Some(floor) = floor else { return };
@@ -212,9 +214,15 @@ fn record(
     }
     let Ok((mut p, mut tf)) = player.single_mut() else { return };
     let Some(&(name, shot)) = SHOTS.get(rec.shot) else {
-        let path = format!("{}/segments.txt", rec.dir);
-        let _ = std::fs::write(path, rec.log.join("\n"));
-        exit.write(AppExit::Success);
+        // Give the last screenshots a few frames to reach the disk.
+        rec.tail += 1;
+        if rec.tail == 1 {
+            let path = format!("{}/segments.txt", rec.dir);
+            let _ = std::fs::write(path, rec.log.join("\n"));
+        }
+        if rec.tail > 8 {
+            exit.write(AppExit::Success);
+        }
         return;
     };
 
@@ -237,7 +245,7 @@ fn record(
             p.crouching = false;
             suppress.0 = !matches!(shot, Shot::Cutscene { id: THE_HOLLOW, .. });
             **pursuit = Pursuit::default();
-            for e in hollows.iter() {
+            for (e, _) in hollows.iter() {
                 commands.entity(e).try_despawn();
             }
             guide.0 = Some(1.0e6);
@@ -296,15 +304,24 @@ fn record(
                     let goal = Vec3::new(r.exit_x, 0.0, r.min.y + r.depth() * 0.42);
                     let (from, to) = match shot {
                         Shot::Route { .. } => {
-                            let route: Vec<Vec3> = r.route().iter().map(|v| Vec3::new(v.x, 0.0, v.y)).collect();
+                            let mut route: Vec<Vec3> = r.route().iter().map(|v| Vec3::new(v.x, 0.0, v.y)).collect();
+                            // Start at the foot of the entry stairs, not up on the landing.
+                            if r.entry_height > 0.0 {
+                                let foot = r.max.y - crate::floor::plan::LANDING_DEPTH - r.entry_height / crate::floor::plan::STEP_RISE * crate::floor::plan::STEP_RUN - 0.3;
+                                route.retain(|v| v.z < foot);
+                                route.insert(0, Vec3::new(r.entry_x, 0.0, foot));
+                            }
                             rec.path = route;
                             (rec.path[0], rec.path[0])
                         }
                         Shot::Surge { .. } => {
-                            // A corner away from the line the Surge flies along.
-                            let east = (r.max.x - r.entry_x.max(r.exit_x)) > (r.entry_x.min(r.exit_x) - r.min.x);
-                            let x = if east { r.max.x - 0.6 } else { r.min.x + 0.6 };
-                            let spot = Vec3::new(x, 0.0, r.max.y - 1.0);
+                            // Just out of reach of the line it flies along, mid-room.
+                            let z = r.min.y + r.depth() * 0.55;
+                            let k = (r.max.y - z) / r.depth();
+                            let line_x = r.entry_x + (r.exit_x - r.entry_x) * k;
+                            let east = r.max.x - line_x > line_x - r.min.x;
+                            let x = (if east { line_x + 2.5 } else { line_x - 2.5 }).clamp(r.min.x + 0.5, r.max.x - 0.5);
+                            let spot = Vec3::new(x, 0.0, z);
                             (spot, spot)
                         }
                         Shot::Chase { .. } => {
@@ -336,7 +353,8 @@ fn record(
                         // Look back toward the door you just came through.
                         Shot::Chase { .. } | Shot::Slam { .. } => std::f32::consts::PI,
                         Shot::Route { .. } if rec.path.len() >= 2 => yaw_of((rec.path[1] - rec.path[0]).normalize_or(Vec3::NEG_Z)),
-                        Shot::Surge { .. } => yaw_of((Vec3::new(r.center().x, 0.0, r.center().y) - from).normalize_or(Vec3::NEG_Z)),
+                        // Toward the door it bursts through.
+                        Shot::Surge { .. } => yaw_of((Vec3::new(r.entry_x, 0.0, r.max.y) - from).normalize_or(Vec3::NEG_Z)),
                         _ => (-d.x).atan2(-d.z),
                     };
                     p.yaw = rec.yaw;
@@ -458,23 +476,42 @@ fn record(
                 p.speed = step / dt.max(1e-3);
                 p.bob_phase += step * 4.2;
                 p.sprinting = matches!(shot, Shot::Chase { .. }) && speed > 0.0;
-                p.pitch = 0.03;
-                // Look ahead a little so turns lead the camera.
-                let (ahead, _) = along_path(&rec.path, rec.along + 1.6);
+                // Look well ahead so turns lead the camera instead of facing walls.
+                let (ahead, _) = along_path(&rec.path, rec.along + 3.4);
                 let look = (ahead - pos).normalize_or(dir);
-                let want = if matches!(shot, Shot::Chase { .. }) && t <= LOOK_BACK { rec.yaw } else { yaw_of(look) };
-                let rate = if matches!(shot, Shot::Chase { .. }) { 7.0 } else { 3.5 };
-                p.yaw = turn(p.yaw, want, dt * rate) + if matches!(shot, Shot::Chase { .. }) && t <= LOOK_BACK { (t * 7.0).sin() * 0.004 } else { 0.0 };
+                let is_chase = matches!(shot, Shot::Chase { .. });
+                let hollow = hollows.iter().next().map(|(_, g)| g.translation());
+                let wisp = wisps.iter().next().map(|g| g.translation());
+                let mut pitch = if is_chase { -0.06 } else { 0.0 };
+                let want = if is_chase && t <= LOOK_BACK {
+                    rec.yaw
+                } else if is_chase && t > secs - 1.9 && hollow.is_some() {
+                    // Glance back over the shoulder at it.
+                    let h = hollow.unwrap_or(pos);
+                    yaw_of((Vec3::new(h.x, 0.0, h.z) - Vec3::new(pos.x, 0.0, pos.z)).normalize_or(dir))
+                } else if let Some(w) = wisp.filter(|_| matches!(shot, Shot::Route { pick: Pick::ReadingHall, .. })) {
+                    // Follow the guiding light.
+                    let flat = Vec3::new(w.x - pos.x, 0.0, w.z - pos.z);
+                    pitch = ((w.y - (pos.y + p.eye)).atan2(flat.length().max(0.5))).clamp(-0.3, 0.45);
+                    yaw_of(flat.normalize_or(look))
+                } else {
+                    yaw_of(look)
+                };
+                let rate = if is_chase { 6.0 } else { 3.0 };
+                p.yaw = turn(p.yaw, want, dt * rate) + if is_chase && t <= LOOK_BACK { (t * 7.0).sin() * 0.004 } else { 0.0 };
+                p.pitch += (pitch - p.pitch) * (dt * 4.0).min(1.0);
             } else if matches!(shot, Shot::Slam { .. }) {
                 tf.translation = rec.from;
                 p.yaw = rec.yaw;
                 p.pitch = 0.05;
                 // Slam at 0.8 s; the red fades a beat later.
-                if t > 0.8 {
+                if t <= 0.8 {
+                    **mood = crate::world::Mood { tint: Color::srgb(1.0, 0.12, 0.08), amount: 0.85, scale: 0.8, flicker: 0.35 };
+                } else if t < 0.9 {
                     pursuit.door_shut = false;
-                }
-                if t > 1.9 && pursuit.door_shut {
-                    **mood = crate::world::Mood::default();
+                } else if t > 1.7 {
+                    let k = ((t - 1.7) / 0.8).min(1.0);
+                    **mood = crate::world::Mood { tint: Color::srgb(1.0, 0.12, 0.08), amount: 0.85 * (1.0 - k), scale: 0.8 + 0.2 * k, flicker: 0.0 };
                 }
             } else if matches!(shot, Shot::Surge { .. }) {
                 tf.translation = rec.from;
