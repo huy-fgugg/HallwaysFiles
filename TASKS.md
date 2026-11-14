@@ -121,6 +121,16 @@
 - [x] Fix: Atrium columns and garden rock piles could block stairs, landings or the path
 - [x] Full-floor QA autopilot (HALLWAYS_BOT=1): five complete runs from the lift to Door 100, the last with no stuck spots and no crashes
 
+## 1.0.6
+- [x] After a crash, the next launch shows the error on screen (phones hide crash.log) so it can be reported
+- [x] Android falls back to OpenGL ES when the Vulkan driver is missing or broken
+- [x] Android plays the same drop-in music as PC/Linux (read from inside the APK)
+- [x] Chase: a guiding light flies ahead along the escape route; rooms 43 and 45 end in a real and a fake door; ink runs down the walls in the three rooms before Door 040
+- [x] Chase lighting is held for the whole chase; a Surge/Undertow from an earlier room is called off when it starts
+- [x] Remade models: player avatar (jacket, backpack, face, boots), The Hollow (hood, detailed mask, ribs, clawed hands), The Listener, The Whisperer
+- [x] Fix: narrow Atrium halls were nearly blocked by columns
+- [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
 - [x] .deb installed and launched in a clean Linux container (menu renders, assets found)
