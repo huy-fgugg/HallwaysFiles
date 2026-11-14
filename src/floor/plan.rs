@@ -268,6 +268,10 @@ impl RoomPlan {
             pts.push(Vec2::new(gx, d.z + 0.9));
             pts.push(Vec2::new(gx, d.z - 0.9));
         }
+        // A raised exit is reached up its stairs: line up at their foot first.
+        if let Some(Feature::RaisedExit { height }) = self.feature {
+            pts.push(Vec2::new(self.exit_x, self.min.y + LANDING_DEPTH + height / STEP_RISE * STEP_RUN + 0.6));
+        }
         pts.push(Vec2::new(self.exit_x, self.min.y + 0.6));
         pts
     }
@@ -1015,7 +1019,8 @@ mod tests {
                     }
                 }
                 let route = r.route();
-                assert_eq!(route.len(), 2 + 2 * ds.len());
+                let raised = usize::from(matches!(r.feature, Some(Feature::RaisedExit { .. })));
+                assert_eq!(route.len(), 2 + 2 * ds.len() + raised);
             }
         }
         assert!(zig > 10, "zigzag rooms should turn up: {zig}");

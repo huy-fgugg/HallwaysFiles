@@ -4,25 +4,14 @@
 //! long arms and a cracked porcelain mask whose two thin eye-slits burn amber.
 //! It rises out of a spreading pool of ink when the lights turn red.
 //!
-//! Cue → counter (learnable rule): **lights turn red + low rumble** → it is
-//! coming down the hall. **Counter: break line of sight and hide in a
-//! wardrobe.** It searches outside for a few seconds, then sinks away.
+//! It appears in "The Hollow" cutscene and hunts you in the Door 40 chase
+//! (see `pursuit`); the old corridor hide-and-seek chase was removed.
 
 use bevy::prelude::*;
 use serde::Deserialize;
 
-use crate::audio::{PlaySfx, Sfx};
-use crate::cutscene::{CutsceneEnded, EndAction, PlayCutscene, THE_HOLLOW};
-use crate::interaction::{HideState, HidingSpot};
-use crate::player::Player;
-use crate::run::{CameraShake, RunState, Subtitle};
-use crate::state::{gameplay_active, AppState, Overlay};
-use crate::world::Mood;
+use crate::state::AppState;
 
-pub const HOLLOW_SPEED: f32 = 3.3;
-pub const CATCH_RADIUS: f32 = 0.9;
-pub const SEARCH_SECS: f32 = 3.0;
-const SINK_SECS: f32 = 2.5;
 
 /// Commands that cutscene timelines (or gameplay) can send to The Hollow.
 #[derive(Message, Debug, Clone, Deserialize)]
@@ -47,11 +36,13 @@ impl HollowCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ChasePhase {
-    #[default]
     Dormant,
     Hunting,
     Searching(f32),
     Sinking(f32),
+    /// The opening corridor chase was removed (the Door 40 chase in
+    /// `pursuit` replaces it), so every run starts here: Door 002 is open.
+    #[default]
     Done,
 }
 
@@ -108,40 +99,8 @@ impl Plugin for HollowPlugin {
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| c.insert_resource(ChaseState::default()))
             .add_systems(
                 Update,
-                (
-                    trigger_encounter.run_if(gameplay_active),
-                    handle_commands,
-                    on_cutscene_end,
-                    chase.run_if(gameplay_active),
-                    animate_hollow,
-                )
-                    .chain()
-                    .run_if(in_state(AppState::Playing)),
+                (handle_commands, animate_hollow).chain().run_if(in_state(AppState::Playing)),
             );
-    }
-}
-
-/// Walking deep into the corridor (Room 001) wakes The Hollow once per run.
-fn trigger_encounter(
-    player: Query<&Transform, With<Player>>,
-    chase: Res<ChaseState>,
-    active: Res<crate::cutscene::ActiveCutscene>,
-    mut play: MessageWriter<PlayCutscene>,
-    mut fired: Local<bool>,
-    run: Res<RunState>,
-    suppress: Res<SuppressHollow>,
-) {
-    if run.elapsed < 0.2 {
-        *fired = false;
-    }
-    let Ok(p) = player.single() else { return };
-    // The visual-QA capture tour and trailer teleport straight past the corridor.
-    if std::env::var_os("HALLWAYS_CAPTURE").is_some() || suppress.0 {
-        return;
-    }
-    if !*fired && chase.phase == ChasePhase::Dormant && !active.is_playing() && p.translation.z < -7.5 {
-        *fired = true;
-        play.write(PlayCutscene(THE_HOLLOW.into()));
     }
 }
 
@@ -307,131 +266,6 @@ fn handle_commands(
     }
 }
 
-fn on_cutscene_end(
-    theater: Res<crate::theater::Theater>,
-    mut reader: MessageReader<CutsceneEnded>,
-    mut chase: ResMut<ChaseState>,
-    mut subs: MessageWriter<Subtitle>,
-) {
-    for e in reader.read() {
-        if e.end == EndAction::StartChase && !theater.active() {
-            chase.active = true;
-            chase.phase = ChasePhase::Hunting;
-            subs.write(Subtitle::danger("[It's coming. Hide!]"));
-        }
-    }
-}
-
-/// Picks where The Hollow should head next: through the doorway between the
-/// corridor (z < -5.1) and Room 000 when the target is on the other side.
-pub fn next_waypoint(hollow: Vec3, target: Vec3) -> Vec3 {
-    let door_room = Vec3::new(0.0, 0.0, -4.4);
-    let door_corr = Vec3::new(0.0, 0.0, -5.9);
-    let in_corr = |p: Vec3| p.z < -5.1;
-    match (in_corr(hollow), in_corr(target)) {
-        (true, false) => {
-            if hollow.distance(door_corr) > 0.4 && hollow.z < -5.9 { door_corr } else { door_room }
-        }
-        (false, true) => {
-            if hollow.distance(door_room) > 0.4 && hollow.z > -4.4 { door_room } else { door_corr }
-        }
-        _ => target,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn chase(
-    time: Res<Time>,
-    mut chase: ResMut<ChaseState>,
-    hide: Res<HideState>,
-    spots: Query<&HidingSpot>,
-    player: Query<&Transform, (With<Player>, Without<Hollow>)>,
-    mut hollows: Query<(Entity, &mut Hollow, &mut Transform), Without<crate::pursuit::PursuitHollow>>,
-    mut commands: Commands,
-    mut mood: ResMut<Mood>,
-    mut shake: ResMut<CameraShake>,
-    mut run: ResMut<RunState>,
-    mut sfx: MessageWriter<PlaySfx>,
-    mut subs: MessageWriter<Subtitle>,
-    mut death: ResMut<DeathCause>,
-    mut next_overlay: ResMut<NextState<Overlay>>,
-) {
-    if !chase.active {
-        return;
-    }
-    let dt = time.delta_secs();
-    let Ok(p) = player.single() else { return };
-    // The start-of-floor Hollow (a leftover from a viewed cutscene can't stall it).
-    let Some((hollow_e, mut h, mut tf)) = hollows.iter_mut().next() else { return };
-    let hidden = hide.is_hiding();
-    let spot_front = hide.spot.and_then(|s| spots.get(s).ok()).map(|s| s.exit);
-
-    match chase.phase {
-        ChasePhase::Hunting => {
-            let goal = if hidden { spot_front.unwrap_or(p.translation) } else { p.translation };
-            let wp = next_waypoint(tf.translation, goal);
-            let mut d = wp - tf.translation;
-            d.y = 0.0;
-            let dist_goal = Vec3::new(goal.x - tf.translation.x, 0.0, goal.z - tf.translation.z).length();
-            if d.length() > 0.05 {
-                let step = d.normalize() * HOLLOW_SPEED * dt;
-                tf.translation += if step.length() > d.length() { d } else { step };
-                h.facing = d.x.atan2(d.z);
-            }
-            if !hidden && dist_goal < CATCH_RADIUS {
-                chase.caught = true;
-                chase.active = false;
-                shake.add(1.0);
-                sfx.write(PlaySfx(Sfx::Stinger));
-                *death = DeathCause {
-                    title: "THE HOLLOW FOUND YOU".into(),
-                    cause: format!("Caught in Room {:03} after the lights turned red.", run.current_room),
-                    lesson: "Red lights and a low rumble mean The Hollow is coming. Break line of sight and hide in a wardrobe; it can't see inside.".into(),
-                };
-                next_overlay.set(Overlay::Dead);
-            } else if hidden && dist_goal < 0.6 {
-                chase.phase = ChasePhase::Searching(0.0);
-                subs.write(Subtitle::danger("[Something scrapes against the wardrobe door...]"));
-                sfx.write(PlaySfx(Sfx::Ooze));
-                shake.add(0.25);
-            }
-        }
-        ChasePhase::Searching(t) => {
-            if !hidden {
-                chase.phase = ChasePhase::Hunting;
-                return;
-            }
-            let t = t + dt;
-            if let Some(s) = hide.spot.and_then(|s| spots.get(s).ok()) {
-                let d = s.inside - tf.translation;
-                h.facing = d.x.atan2(d.z);
-            }
-            chase.phase = if t >= SEARCH_SECS {
-                sfx.write(PlaySfx(Sfx::Ooze));
-                ChasePhase::Sinking(0.0)
-            } else {
-                ChasePhase::Searching(t)
-            };
-        }
-        ChasePhase::Sinking(t) => {
-            let t = t + dt;
-            h.emerge = (1.0 - t / SINK_SECS).max(0.0);
-            h.emerge_rate = 0.0;
-            h.eyes_target = 0.0;
-            if t >= SINK_SECS {
-                chase.phase = ChasePhase::Done;
-                chase.active = false;
-                commands.entity(hollow_e).try_despawn();
-                *mood = Mood::default();
-                run.lumens += 10;
-                sfx.write(PlaySfx(Sfx::Pickup));
-                subs.write(Subtitle { text: "It sank away. You survived The Hollow (+10 Lumens). Door 002 is unlocked.".into(), seconds: 6.0, danger: false });
-            }
-        }
-        _ => {}
-    }
-}
-
 fn animate_hollow(
     time: Res<Time>,
     mut hollows: Query<(&mut Hollow, &mut Transform)>,
@@ -482,25 +316,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waypoint_routes_through_door() {
-        // Hollow deep in the corridor, player in Room 000 → head for the corridor side of the door.
-        assert_eq!(next_waypoint(Vec3::new(0.5, 0.0, -12.0), Vec3::new(3.0, 0.0, 1.0)), Vec3::new(0.0, 0.0, -5.9));
-        // At the door → step into the room.
-        assert_eq!(next_waypoint(Vec3::new(0.0, 0.0, -5.9), Vec3::new(3.0, 0.0, 1.0)), Vec3::new(0.0, 0.0, -4.4));
-        // Same room → straight at the target.
-        let target = Vec3::new(3.0, 0.0, 1.0);
-        assert_eq!(next_waypoint(Vec3::new(0.0, 0.0, -3.0), target), target);
-    }
-
-    #[test]
     fn skipping_makes_emerge_instant() {
         let c = HollowCommand::Emerge { at: (0.0, 0.0, 0.0), seconds: 7.0 }.instant();
         assert!(matches!(c, HollowCommand::Emerge { seconds, .. } if seconds == 0.0));
     }
 
-    #[test]
-    fn hollow_is_slower_than_sprint() {
-        assert!(HOLLOW_SPEED < crate::player::SPRINT_SPEED);
-        assert!(HOLLOW_SPEED > crate::player::WALK_SPEED);
-    }
 }

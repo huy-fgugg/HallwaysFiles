@@ -87,7 +87,7 @@ impl Plugin for FloorPlugin {
             .add_systems(OnEnter(AppState::Playing), setup_floor)
             .add_systems(
                 Update,
-                (custom_quick_start, stream_rooms, fix_open_doors, unlock_gate_after_hollow, announce_areas, finish_floor).run_if(in_state(AppState::Playing)),
+                (custom_quick_start, stream_rooms, fix_open_doors, announce_areas, finish_floor).run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -208,33 +208,6 @@ fn fix_open_doors(mut commands: Commands, doors: Query<(Entity, &Door), Added<Op
             commands.entity(d.blocker).try_remove::<Collider>();
         }
         commands.entity(e).try_remove::<OpenOnSpawn>();
-    }
-}
-
-/// Surviving The Hollow unlocks Door 002 into the generated floor.
-fn unlock_gate_after_hollow(
-    chase: Res<ChaseState>,
-    preset: Res<crate::presets::ActivePreset>,
-    mut doors: Query<&mut Door>,
-    mut subs: MessageWriter<Subtitle>,
-    mut done: Local<bool>,
-    run: Res<RunState>,
-) {
-    if run.elapsed < 0.2 {
-        *done = false;
-    }
-    if *done || chase.phase != ChasePhase::Done {
-        return;
-    }
-    for mut d in &mut doors {
-        if d.number == 2 && d.locked {
-            d.locked = false;
-            *done = true;
-            // Custom floors start past this door: no need to announce it.
-            if preset.0.is_none() {
-                subs.write(Subtitle { text: "[Somewhere ahead, a lock clicks open. Door 002.]".into(), seconds: 4.0, danger: false });
-            }
-        }
     }
 }
 
