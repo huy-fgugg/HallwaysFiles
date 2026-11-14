@@ -536,6 +536,39 @@ pub fn close_south_side(b: &mut Builder, r: &RoomPlan, prev: Option<&RoomPlan>, 
 #[derive(Component)]
 pub struct OpenOnSpawn;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atrium_columns_never_stand_on_stairs() {
+        // Same placement rule as atrium_architecture, checked against every
+        // stair, landing and loft on many floors.
+        for seed in 0..40 {
+            for r in super::super::plan::generate(seed).rooms {
+                let zones = stair_zones(&r);
+                if zones.is_empty() {
+                    continue;
+                }
+                let mut z = r.max.y - 1.5;
+                while z > r.min.y + 1.0 {
+                    for x in [r.min.x + 0.9, r.max.x - 0.9] {
+                        let blocked = zones.iter().any(|(lo, hi)| x + 0.45 > lo.x && x - 0.45 < hi.x && z + 0.45 > lo.y && z - 0.45 < hi.y);
+                        if let Some(Feature::RaisedExit { height }) = r.feature {
+                            // The stairs run from the landing south; a column on them must be skipped.
+                            let foot = r.min.y + LANDING_DEPTH + height / super::super::plan::STEP_RISE * STEP_RUN;
+                            if (x - r.exit_x).abs() < 0.6 + 0.3 && z < foot + 0.3 {
+                                assert!(blocked, "room {} column at {x},{z} on the stairs", r.index);
+                            }
+                        }
+                    }
+                    z -= 3.2;
+                }
+            }
+        }
+    }
+}
+
 /// Marks the logical entity of a fake door with its room index and slot.
 #[derive(Component)]
 pub struct MimicOf(pub u32, pub u8);
@@ -1006,6 +1039,11 @@ fn grounds_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, rn
                 (Vec3::new(rng.range_f32(-0.6, 0.6), s * 0.25, rng.range_f32(-0.7, 0.7)), Vec3::new(s, s * 0.6, s * rng.range_f32(0.8, 1.2)), Quat::from_rotation_y(rng.range_f32(0.0, 3.0)) * Quat::from_rotation_x(rng.range_f32(-0.3, 0.3)))
             })
             .collect();
+        // Never on the path, the stairs or a landing (a door near a wall).
+        let clear = stair_zones(r);
+        if on_path(x, z, 1.6) || clear.iter().any(|(lo, hi)| x + 0.8 > lo.x && x - 0.8 < hi.x && z + 0.9 > lo.y && z - 0.9 < hi.y) {
+            continue;
+        }
         let root = b.commands.spawn((Transform::from_xyz(x, 0.0, z), Visibility::default(), Collider(Aabb { min: Vec3::new(x - 0.7, 0.0, z - 0.8), max: Vec3::new(x + 0.7, 0.5, z + 0.8) }))).id();
         b.tag(root);
         let (mesh, mat) = (props.rock_mesh.clone(), props.stone.clone());
@@ -1263,12 +1301,34 @@ fn tunnel_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan) {
 }
 
 /// Marble columns along both sides.
+/// Floor areas taken by stairs, landings and lofts (x/z rectangles, with a
+/// little clearance), so decorative columns never block them.
+pub fn stair_zones(r: &RoomPlan) -> Vec<(Vec2, Vec2)> {
+    let run = |h: f32| h / super::plan::STEP_RISE * STEP_RUN;
+    let mut z = vec![];
+    if let Some(Feature::RaisedExit { height }) = r.feature {
+        z.push((Vec2::new(r.exit_x - 1.3, r.min.y), Vec2::new(r.exit_x + 1.3, r.min.y + LANDING_DEPTH + run(height) + 0.8)));
+    }
+    if r.entry_height > 0.0 {
+        z.push((Vec2::new(r.entry_x - 1.3, r.max.y - LANDING_DEPTH - run(r.entry_height) - 0.8), Vec2::new(r.entry_x + 1.3, r.max.y)));
+    }
+    if let Some(Feature::KeyLoft { east }) = r.feature {
+        let (x0, x1) = if east { (r.max.x - 2.2, r.max.x) } else { (r.min.x, r.min.x + 2.2) };
+        z.push((Vec2::new(x0, r.min.y + 1.2), Vec2::new(x1, r.min.y + 3.8 + run(LOFT_HEIGHT) + 0.6)));
+    }
+    z
+}
+
 fn atrium_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan) {
     let marble = b.mats.marble.clone();
     let h = r.height;
+    let keep_clear = stair_zones(r);
     let mut z = r.max.y - 1.5;
     while z > r.min.y + 1.0 {
         for x in [r.min.x + 0.9, r.max.x - 0.9] {
+            if keep_clear.iter().any(|(lo, hi)| x + 0.45 > lo.x && x - 0.45 < hi.x && z + 0.45 > lo.y && z - 0.45 < hi.y) {
+                continue;
+            }
             let e = b
                 .commands
                 .spawn((Mesh3d(props.unit_cyl.clone()), MeshMaterial3d(marble.clone()), Transform::from_xyz(x, h / 2.0, z).with_scale(Vec3::new(0.55, h, 0.55)), Collider(Aabb { min: Vec3::new(x - 0.3, 0.0, z - 0.3), max: Vec3::new(x + 0.3, h, z + 0.3) })))
