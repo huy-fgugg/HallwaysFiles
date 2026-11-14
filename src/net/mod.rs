@@ -20,7 +20,7 @@ use crate::items::ItemKind;
 use crate::viewmodel::Gesture;
 use proto::{ClientMsg, PlayerInfo, ServerMsg, PROTOCOL_VERSION};
 
-/// Used when neither `HALLWAYS_SERVER` nor `assets/server.txt` says otherwise.
+/// Used when neither `HALLWAYS_SERVER` nor an `assets/server.txt` override says otherwise.
 pub const DEFAULT_SERVER: &str = "wss://hallways-server.onrender.com/ws";
 
 /// Server address: env var, then the first non-comment line of `assets/server.txt`.

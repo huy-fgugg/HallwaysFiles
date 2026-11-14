@@ -67,7 +67,7 @@
 - [x] Drop-in music folders: one folder per song, any file name, status in Credits
 
 ## Multiplayer
-- [x] Room server (`server/`, axum WebSockets) with 5-letter codes, host promotion, version check; deploys to Render via `render.yaml`
+- [x] Room server (`server/`, axum WebSockets) with 5-letter codes, host promotion, version check
 - [x] Host / join by code, up to 4 players, shared seed, lift lobby counts and host start
 - [x] Teammate avatars: walk cycle, crouch, head look, held items, flashlight beam, gestures, name tags
 - [x] Doors opened by anyone open for everyone
@@ -118,5 +118,3 @@
 - Visual checks were done with software rendering (Mesa lavapipe) on Linux; real-GPU performance on Windows is unmeasured.
 - The CI smoke test cannot render (no GPU on GitHub runners); it only confirms the exe and assets package correctly.
 - Spot lights don't render on the Linux software renderer used for QA, so the flashlight also casts a point-light pool that works everywhere; the spot beam is unverified on real GPUs.
-- The Render deployment itself hasn't been run from here (no Render account access); the server was tested locally, including two game windows in one room.
-- Online play over the internet (real latency, TLS to Render) is untested; local tests used a plain ws:// connection.
