@@ -1037,3 +1037,13 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod dbg_tmp {
+    #[test]
+    #[ignore]
+    fn dbg_room() {
+        let seed = u64::from_str_radix(&std::env::var("S").unwrap(), 16).unwrap();
+        let p = super::generate_custom(seed, &crate::data::EntityConfig::default(), &super::GenOptions::default());
+        for i in std::env::var("R").unwrap().split(',').map(|x| x.parse::<u32>().unwrap()) { let r = p.room(i).unwrap(); println!("{i} {:?} {:?} {:?} min {:?} max {:?} entry {} exit {} hin {} feat {:?} enc {:?} hiding {} cont {} route {:?}", r.area, r.kind, r.light, r.min, r.max, r.entry_x, r.exit_x, r.entry_height, r.feature, r.encounter, r.hiding, r.containers, r.route()); }
+    }
+}

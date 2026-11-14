@@ -274,7 +274,7 @@ fn dev_warp(
     let (Some(floor), Ok(mut tf)) = (floor, player.single_mut()) else { return };
     // A room number, or an entity name ("Listener") for the first room it haunts.
     let want = std::env::var("HALLWAYS_WARP").unwrap_or_default();
-    let Some(room) = want.parse::<u32>().ok().or_else(|| floor.0.rooms.iter().find(|r| r.encounter.is_some_and(|e| format!("{e:?}").eq_ignore_ascii_case(&want)) || r.feature.is_some_and(|f| format!("{f:?}").eq_ignore_ascii_case(&want))).map(|r| r.index)) else { return };
+    let Some(room) = want.parse::<u32>().ok().or_else(|| floor.0.rooms.iter().find(|r| r.encounter.is_some_and(|e| format!("{e:?}").eq_ignore_ascii_case(&want)) || r.feature.is_some_and(|f| format!("{f:?}").to_lowercase().starts_with(&want.to_lowercase()))).map(|r| r.index)) else { return };
     if *done || run.elapsed < 1.0 {
         return;
     }
@@ -292,6 +292,8 @@ struct BotLog {
     room: u32,
     since: f32,
     finished: bool,
+    /// Preferred sidestep direction (+1 / -1).
+    side: f32,
 }
 
 /// QA autopilot (HALLWAYS_BOT=1): sprints through every room along its
@@ -320,6 +322,9 @@ fn dev_bot(
     let p = tf.translation;
     let room = run.current_room;
     if room != log.room {
+        if log.room == 0 && room != 0 {
+            info!("QA seed {:016X}", floor.0.seed);
+        }
         info!("QA bot reached room {room:03} at {now:.1}s");
         log.room = room;
         log.since = now;
@@ -376,15 +381,35 @@ fn dev_bot(
     if to.length() < 0.05 {
         return;
     }
-    let step = to.normalize() * crate::player::SPRINT_SPEED * time.delta_secs();
+    let len = crate::player::SPRINT_SPEED * time.delta_secs();
     let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
-    let n = ((step.length() / 0.12).ceil() as usize).max(1);
-    let mut pos = p;
-    for _ in 0..n {
-        pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, p.y + 0.38, p.y + 1.7, &boxes);
+    let walk = |dir: Vec3| {
+        let step = dir * len;
+        let n = ((step.length() / 0.12).ceil() as usize).max(1);
+        let mut pos = p;
+        for _ in 0..n {
+            pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, p.y + crate::player::STEP_UP, p.y + 1.7, &boxes);
+        }
+        pos
+    };
+    // Straight at the next point; if furniture is in the way, sidestep like a
+    // player would (keep the side that worked last time).
+    let dir = to.normalize();
+    let mut best = walk(dir);
+    let progress = |q: Vec3| (q - p).dot(dir);
+    if progress(best) < len * 0.3 {
+        for a in [0.8f32, -0.8, 1.4, -1.4] {
+            let a = a * if log.side == 0.0 { 1.0 } else { log.side };
+            let cand = walk(Quat::from_rotation_y(a) * dir);
+            if (cand - p).length() > len * 0.5 && progress(cand) > -0.05 {
+                best = cand;
+                log.side = a.signum();
+                break;
+            }
+        }
     }
-    tf.translation.x = pos.x;
-    tf.translation.z = pos.z;
+    tf.translation.x = best.x;
+    tf.translation.z = best.z;
     pl.yaw = (-to.x).atan2(-to.z);
 }
 
