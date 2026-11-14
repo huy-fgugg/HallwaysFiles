@@ -107,7 +107,7 @@
 - [x] The Reading Hall (through Door 050): a large dim archive with rows of double-sided shelves; Door 051 is locked and the key is in one of seven drawers
 - [x] Guiding light: after 35 s in a locked room (55 s in the Reading Hall) without the key, a pale wisp appears and floats to the drawer that hides it
 - [x] Movement is resolved in short sub-steps so slow frames can't carry you through thin walls
-- [x] iPhone/iPad version: unsigned .ipa built on a macOS runner (`.github/workflows/ios.yml`, `packaging/ios/`), touch controls, on-screen keyboard for names and codes
+- [ ] iPhone/iPad version (cancelled for now; launcher files kept in `packaging/ios/`)
 - [x] Render setup notes and `assets/server.txt` removed (the server address is built in)
 - [x] QA switches: HALLWAYS_WARP=<room|entity|Zigzag|ReadingHall>, HALLWAYS_BOT=1 (autopilot along room routes), HALLWAYS_GUIDE_SECS
 
