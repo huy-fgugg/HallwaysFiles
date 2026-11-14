@@ -116,6 +116,10 @@
 - [x] Fix: wide or tall rooms showed the empty sky through gaps beside the previous room's wall
 - [x] New trailer shots (chase halls, door slam, Reading Hall and guiding light, zigzag room, the Surge) and editing
 - [x] QA switch HALLWAYS_WINDOW=667x311@3 opens a phone-shaped window
+- [x] The old corridor hide-and-seek chase is removed; The Hollow's chase is the Door 40 run (Door 002 starts open)
+- [x] Fix: getting stuck halfway up stairs (step-up height now clears two stair rises)
+- [x] Fix: Atrium columns and garden rock piles could block stairs, landings or the path
+- [x] Full-floor QA autopilot (HALLWAYS_BOT=1): five complete runs from the lift to Door 100, the last with no stuck spots and no crashes
 
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
