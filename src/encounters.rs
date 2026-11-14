@@ -386,14 +386,31 @@ fn spawn_whisperer(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mu
             Name::new("The Whisperer"),
         ))
         .with_children(|c| {
-            c.spawn((Mesh3d(head), MeshMaterial3d(pale), Transform::from_scale(Vec3::new(0.85, 1.45, 0.9))));
+            c.spawn((Mesh3d(head), MeshMaterial3d(pale.clone()), Transform::from_scale(Vec3::new(0.85, 1.45, 0.9))));
             for x in [-0.07f32, 0.07] {
                 c.spawn((Mesh3d(eye.clone()), MeshMaterial3d(socket.clone()), Transform::from_xyz(x, 0.06, -0.16).with_scale(Vec3::new(1.0, 1.6, 0.6))));
             }
-            // A thin dark mouth slit.
-            c.spawn((Mesh3d(eye.clone()), MeshMaterial3d(socket.clone()), Transform::from_xyz(0.0, -0.14, -0.165).with_scale(Vec3::new(1.6, 0.25, 0.5))));
-            for i in 0..12 {
-                let a = i as f32 / 12.0 * std::f32::consts::TAU;
+            // A long, slack mouth hanging open.
+            c.spawn((Mesh3d(eye.clone()), MeshMaterial3d(socket.clone()), Transform::from_xyz(0.0, -0.16, -0.16).with_scale(Vec3::new(1.4, 1.5, 0.5))));
+            // Hollow cheeks.
+            for x in [-0.1f32, 0.1] {
+                c.spawn((Mesh3d(eye.clone()), MeshMaterial3d(socket.clone()), Transform::from_xyz(x, -0.08, -0.13).with_scale(Vec3::new(0.7, 1.2, 0.3))));
+            }
+            // Two thin arms reaching for you, with long splayed fingers.
+            let bone = meshes.add(Capsule3d::new(0.012, 0.32));
+            let finger = meshes.add(Capsule3d::new(0.005, 0.11));
+            for side in [-1.0f32, 1.0] {
+                c.spawn((Transform::from_xyz(side * 0.13, -0.3, -0.05).with_rotation(Quat::from_rotation_x(-1.1) * Quat::from_rotation_z(side * 0.25)), Visibility::default())).with_children(|arm| {
+                    arm.spawn((Mesh3d(bone.clone()), MeshMaterial3d(pale.clone()), Transform::from_xyz(0.0, -0.18, 0.0)));
+                    arm.spawn((Mesh3d(bone.clone()), MeshMaterial3d(pale.clone()), Transform::from_xyz(0.0, -0.5, 0.03).with_rotation(Quat::from_rotation_x(-0.2))));
+                    for f in 0..4 {
+                        let sp = (f as f32 - 1.5) * 0.25;
+                        arm.spawn((Mesh3d(finger.clone()), MeshMaterial3d(pale.clone()), Transform::from_xyz(sp * 0.04, -0.75, 0.06).with_rotation(Quat::from_rotation_z(sp) * Quat::from_rotation_x(-0.3))));
+                    }
+                });
+            }
+            for i in 0..20 {
+                let a = i as f32 / 20.0 * std::f32::consts::TAU;
                 let len = rng.range_f32(0.6, 1.3);
                 c.spawn((
                     Mesh3d(strip.clone()),

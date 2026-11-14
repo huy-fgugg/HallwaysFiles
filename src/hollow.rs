@@ -147,6 +147,20 @@ pub fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &m
             // Torso: a long, hunched column of ink.
             b.spawn((Mesh3d(meshes.add(capsule(0.2, 0.9))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.55, -0.05).with_rotation(Quat::from_rotation_x(0.35))));
             b.spawn((Mesh3d(meshes.add(Sphere::new(0.26).mesh().uv(24, 16))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 1.0, 0.12).with_scale(Vec3::new(1.4, 0.8, 1.0))));
+            // Ribs pressing through the ink of the chest.
+            for k in 0..5 {
+                let y = 0.62 + k as f32 * 0.075;
+                let w = 0.2 - (k as f32 - 2.0).abs() * 0.02;
+                b.spawn((
+                    Mesh3d(meshes.add(Torus::new(w - 0.012, w).mesh().minor_resolution(6).major_resolution(20))),
+                    MeshMaterial3d(skin.clone()),
+                    Transform::from_xyz(0.0, y, 0.02 + k as f32 * 0.02).with_rotation(Quat::from_rotation_x(0.35 + std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(1.0, 1.0, 0.75)),
+                ));
+            }
+            // Spine ridges down the hunched back.
+            for k in 0..7 {
+                b.spawn((Mesh3d(meshes.add(Sphere::new(0.035).mesh().ico(1).unwrap_or_else(|_| Sphere::new(0.035).mesh().build()))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.35 + k as f32 * 0.11, -0.22 + k as f32 * 0.045)));
+            }
             // Neck and head pushed forward.
             b.spawn((Mesh3d(meshes.add(capsule(0.06, 0.25))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 1.17, 0.26).with_rotation(Quat::from_rotation_x(0.9))));
             b.spawn((Transform::from_xyz(0.0, 1.28, 0.38), Visibility::default())).with_children(|h| {
@@ -162,9 +176,38 @@ pub fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &m
                         HollowEyes,
                     ));
                 }
-                // Cracks across the mask.
-                for (x, y, rz, len) in [(0.02f32, 0.1f32, 0.5f32, 0.09f32), (-0.03, -0.07, -0.3, 0.11), (0.05, -0.1, 0.9, 0.06)] {
+                // Cracks across the mask, branching from the left eye.
+                for (x, y, rz, len) in [
+                    (0.02f32, 0.1f32, 0.5f32, 0.09f32),
+                    (-0.03, -0.07, -0.3, 0.11),
+                    (0.05, -0.1, 0.9, 0.06),
+                    (-0.07, 0.07, -0.8, 0.07),
+                    (-0.085, 0.01, 0.2, 0.05),
+                    (0.03, 0.15, -0.2, 0.05),
+                ] {
                     h.spawn((Mesh3d(meshes.add(Cuboid::new(0.004, len, 0.006))), MeshMaterial3d(crack.clone()), Transform::from_xyz(x, y, 0.078).with_rotation(Quat::from_rotation_z(rz))));
+                }
+                // Brow ridge and a thin nose ridge carved into the porcelain.
+                h.spawn((Mesh3d(meshes.add(Capsule3d::new(0.012, 0.11))), MeshMaterial3d(porcelain.clone()), Transform::from_xyz(0.0, 0.075, 0.074).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))));
+                h.spawn((Mesh3d(meshes.add(Capsule3d::new(0.008, 0.06))), MeshMaterial3d(porcelain.clone()), Transform::from_xyz(0.0, -0.01, 0.083)));
+                // A jagged, too-wide mouth slit.
+                for k in 0..7 {
+                    let x = (k as f32 - 3.0) * 0.018;
+                    let dy = if k % 2 == 0 { 0.006 } else { -0.006 };
+                    h.spawn((Mesh3d(meshes.add(Cuboid::new(0.02, 0.008, 0.006))), MeshMaterial3d(crack.clone()), Transform::from_xyz(x, -0.105 + dy - (x * x) * 1.5, 0.073).with_rotation(Quat::from_rotation_z(dy * 20.0))));
+                }
+                // A chipped corner showing ink beneath.
+                h.spawn((Mesh3d(meshes.add(Sphere::new(0.03).mesh().ico(1).unwrap_or_else(|_| Sphere::new(0.03).mesh().build()))), MeshMaterial3d(ink.clone()), Transform::from_xyz(0.075, -0.13, 0.05).with_scale(Vec3::new(1.0, 0.7, 0.5))));
+                // Tattered hood framing the mask.
+                h.spawn((Mesh3d(meshes.add(Sphere::new(0.2).mesh().uv(24, 16))), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 0.05, -0.07).with_scale(Vec3::new(1.05, 1.25, 1.0))));
+                for k in 0..9 {
+                    let a = (k as f32 - 4.0) * 0.32;
+                    let len = 0.16 + ((k * 5) % 4) as f32 * 0.04;
+                    h.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.05, len, 0.01))),
+                        MeshMaterial3d(cloth.clone()),
+                        Transform::from_xyz(a.sin() * 0.19, -0.16 - len / 2.0 + 0.05, -0.05 + a.cos() * 0.08).with_rotation(Quat::from_rotation_y(a) * Quat::from_rotation_x(0.15)),
+                    ));
                 }
             });
             // Arms: shoulder pivots with long upper/fore arms and splayed fingers that nearly drag.
@@ -172,13 +215,29 @@ pub fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &m
                 b.spawn((Transform::from_xyz(side * 0.34, 1.02, 0.1), Visibility::default(), HollowArm(side))).with_children(|a| {
                     a.spawn((Mesh3d(meshes.add(capsule(0.045, 0.62))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.36, 0.0)));
                     a.spawn((Mesh3d(meshes.add(capsule(0.035, 0.7))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -1.08, 0.08).with_rotation(Quat::from_rotation_x(-0.15))));
-                    for f in 0..4 {
-                        let spread = (f as f32 - 1.5) * 0.035;
-                        a.spawn((
-                            Mesh3d(meshes.add(capsule(0.009, 0.24))),
-                            MeshMaterial3d(skin.clone()),
-                            Transform::from_xyz(spread, -1.6, 0.14).with_rotation(Quat::from_rotation_z(spread * 3.0) * Quat::from_rotation_x(-0.25)),
-                        ));
+                    // Palm, then five long jointed fingers ending in hooked claws.
+                    a.spawn((Mesh3d(meshes.add(Sphere::new(0.05).mesh().uv(12, 8))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -1.47, 0.12).with_scale(Vec3::new(1.1, 1.4, 0.55))));
+                    for f in 0..5 {
+                        let spread = (f as f32 - 2.0) * 0.03;
+                        let thumb = f == 0;
+                        let base = Vec3::new(spread + if thumb { side * -0.02 } else { 0.0 }, if thumb { -1.48 } else { -1.53 }, 0.13);
+                        let rz = spread * 3.0 + if thumb { side * -0.6 } else { 0.0 };
+                        a.spawn((Transform::from_translation(base).with_rotation(Quat::from_rotation_z(rz) * Quat::from_rotation_x(-0.2)), Visibility::default())).with_children(|f1| {
+                            f1.spawn((Mesh3d(meshes.add(capsule(0.009, 0.13))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.075, 0.0)));
+                            f1.spawn((Transform::from_xyz(0.0, -0.15, 0.0).with_rotation(Quat::from_rotation_x(-0.35)), Visibility::default())).with_children(|f2| {
+                                f2.spawn((Mesh3d(meshes.add(capsule(0.008, 0.11))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.065, 0.0)));
+                                // Claw: a thin dark cone hooking forward.
+                                f2.spawn((
+                                    Mesh3d(meshes.add(Cone { radius: 0.008, height: 0.07 })),
+                                    MeshMaterial3d(ink.clone()),
+                                    Transform::from_xyz(0.0, -0.15, 0.012).with_rotation(Quat::from_rotation_x(std::f32::consts::PI - 0.5)),
+                                ));
+                            });
+                        });
+                    }
+                    // Ink dripping from the forearm.
+                    for (k, dy) in [(0, -0.8f32), (1, -1.25)] {
+                        a.spawn((Mesh3d(meshes.add(capsule(0.012, 0.05 + k as f32 * 0.03))), MeshMaterial3d(ink.clone()), Transform::from_xyz(0.03 * side, dy, 0.05)));
                     }
                 });
             }

@@ -210,13 +210,25 @@ fn spawn_avatars(
 }
 
 fn spawn_avatar(commands: &mut Commands, kit: &BodyKit, id: u8, st: &PeerState, mats: &mut Assets<StandardMaterial>) {
-    let pants = mats.add(StandardMaterial { base_color: Color::srgb(0.1, 0.1, 0.12), perceptual_roughness: 0.9, ..default() });
-    let shoe = mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.04, 0.04), perceptual_roughness: 0.6, ..default() });
-    let hair = mats.add(StandardMaterial { base_color: Color::srgb(0.12, 0.08, 0.06), perceptual_roughness: 0.9, ..default() });
-    let eye = mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.05, 0.05), ..default() });
+    let m = |mats: &mut Assets<StandardMaterial>, c: Color, rough: f32| mats.add(StandardMaterial { base_color: c, perceptual_roughness: rough, ..default() });
+    let pants = m(mats, Color::srgb(0.12, 0.13, 0.16), 0.92);
+    let patch = m(mats, Color::srgb(0.17, 0.18, 0.21), 0.95);
+    let shoe = m(mats, Color::srgb(0.16, 0.1, 0.06), 0.55);
+    let sole = m(mats, Color::srgb(0.03, 0.03, 0.03), 0.8);
+    let hair = m(mats, [Color::srgb(0.12, 0.08, 0.05), Color::srgb(0.05, 0.04, 0.04), Color::srgb(0.42, 0.28, 0.14), Color::srgb(0.6, 0.48, 0.3)][id as usize % 4], 0.85);
+    let white = m(mats, Color::srgb(0.93, 0.92, 0.9), 0.4);
+    let pupil = m(mats, Color::srgb(0.03, 0.03, 0.04), 0.2);
+    let lip = m(mats, Color::srgb(0.55, 0.3, 0.28), 0.6);
+    let shirt = m(mats, Color::srgb(0.85, 0.84, 0.8), 0.9);
+    let leather = m(mats, Color::srgb(0.2, 0.12, 0.07), 0.6);
+    let metal = mats.add(StandardMaterial { base_color: Color::srgb(0.7, 0.68, 0.6), metallic: 0.9, perceptual_roughness: 0.35, ..default() });
+    let pack = m(mats, Color::srgb(0.2, 0.24, 0.17), 0.9);
     let pos = Vec3::from_array(st.p);
     let piece = |c: &mut ChildSpawnerCommands, mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, at: Vec3, size: Vec3| {
         c.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(at).with_scale(size), NotShadowCaster));
+    };
+    let tilted = |c: &mut ChildSpawnerCommands, mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, at: Vec3, rot: Quat, size: Vec3| {
+        c.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(at).with_rotation(rot).with_scale(size), NotShadowCaster));
     };
     commands
         .spawn((
@@ -231,31 +243,83 @@ fn spawn_avatar(commands: &mut Commands, kit: &BodyKit, id: u8, st: &PeerState, 
             for right in [true, false] {
                 let x = if right { 0.1 } else { -0.1 };
                 root.spawn((Limb::Thigh(right), Transform::from_xyz(x, 0.9, 0.0), Visibility::default())).with_children(|thigh| {
-                    piece(thigh, &kit.capsule, &pants, Vec3::new(0.0, -0.22, 0.0), Vec3::new(0.15, 0.2, 0.15));
+                    piece(thigh, &kit.capsule, &pants, Vec3::new(0.0, -0.22, 0.0), Vec3::new(0.16, 0.21, 0.16));
+                    // Cargo pocket on the outside of the thigh.
+                    piece(thigh, &kit.cube, &patch, Vec3::new(if right { 0.075 } else { -0.075 }, -0.24, 0.0), Vec3::new(0.025, 0.12, 0.1));
                     thigh.spawn((Limb::Shin(right), Transform::from_xyz(0.0, -0.44, 0.0), Visibility::default())).with_children(|shin| {
-                        piece(shin, &kit.capsule, &pants, Vec3::new(0.0, -0.2, 0.0), Vec3::new(0.12, 0.19, 0.12));
-                        piece(shin, &kit.cube, &shoe, Vec3::new(0.0, -0.43, -0.05), Vec3::new(0.11, 0.08, 0.26));
+                        piece(shin, &kit.capsule, &pants, Vec3::new(0.0, -0.19, 0.0), Vec3::new(0.13, 0.19, 0.13));
+                        // Knee patch.
+                        piece(shin, &kit.cube, &patch, Vec3::new(0.0, -0.02, -0.06), Vec3::new(0.1, 0.09, 0.03));
+                        // Boot: upper, toe cap, sole and laces.
+                        piece(shin, &kit.capsule, &shoe, Vec3::new(0.0, -0.36, 0.0), Vec3::new(0.125, 0.09, 0.13));
+                        piece(shin, &kit.cube, &shoe, Vec3::new(0.0, -0.42, -0.07), Vec3::new(0.115, 0.08, 0.2));
+                        piece(shin, &kit.sphere, &shoe, Vec3::new(0.0, -0.425, -0.16), Vec3::new(0.115, 0.075, 0.08));
+                        piece(shin, &kit.cube, &sole, Vec3::new(0.0, -0.468, -0.06), Vec3::new(0.125, 0.025, 0.29));
+                        for k in 0..3 {
+                            piece(shin, &kit.cube, &sole, Vec3::new(0.0, -0.385 + k as f32 * 0.025, -0.075 - k as f32 * 0.005), Vec3::new(0.07, 0.006, 0.01));
+                        }
                     });
                 });
             }
             root.spawn((Limb::Hips, Transform::from_xyz(0.0, 0.9, 0.0), Visibility::default())).with_children(|hips| {
-                piece(hips, &kit.cube, &pants, Vec3::new(0.0, 0.02, 0.0), Vec3::new(0.34, 0.14, 0.2));
-                piece(hips, &kit.capsule, &kit.sleeve, Vec3::new(0.0, 0.33, 0.0), Vec3::new(0.42, 0.26, 0.24));
-                piece(hips, &kit.cube, &kit.cuff, Vec3::new(0.0, 0.58, 0.0), Vec3::new(0.14, 0.06, 0.12));
+                // Pelvis, belt and buckle.
+                piece(hips, &kit.cube, &pants, Vec3::new(0.0, 0.02, 0.0), Vec3::new(0.34, 0.15, 0.21));
+                piece(hips, &kit.cube, &leather, Vec3::new(0.0, 0.1, 0.0), Vec3::new(0.355, 0.045, 0.225));
+                piece(hips, &kit.cube, &metal, Vec3::new(0.0, 0.1, -0.114), Vec3::new(0.05, 0.035, 0.008));
+                // Jacket: tapered torso (chest wider than waist), open collar over a shirt.
+                piece(hips, &kit.cube, &kit.sleeve, Vec3::new(0.0, 0.22, 0.0), Vec3::new(0.34, 0.2, 0.21));
+                piece(hips, &kit.capsule, &kit.sleeve, Vec3::new(0.0, 0.38, 0.0), Vec3::new(0.44, 0.2, 0.25));
+                piece(hips, &kit.sphere, &kit.sleeve, Vec3::new(-0.15, 0.47, 0.0), Vec3::new(0.15, 0.13, 0.22));
+                piece(hips, &kit.sphere, &kit.sleeve, Vec3::new(0.15, 0.47, 0.0), Vec3::new(0.15, 0.13, 0.22));
+                piece(hips, &kit.cube, &shirt, Vec3::new(0.0, 0.5, -0.118), Vec3::new(0.09, 0.1, 0.01));
+                for side in [-1.0f32, 1.0] {
+                    // Collar flaps and chest pocket.
+                    tilted(hips, &kit.cube, &kit.cuff, Vec3::new(side * 0.06, 0.52, -0.12), Quat::from_rotation_z(side * 0.5), Vec3::new(0.05, 0.1, 0.012));
+                    piece(hips, &kit.cube, &kit.cuff, Vec3::new(side * 0.1, 0.18, -0.108), Vec3::new(0.09, 0.08, 0.01));
+                }
+                // Zip down the front.
+                piece(hips, &kit.cube, &metal, Vec3::new(0.0, 0.3, -0.127), Vec3::new(0.008, 0.36, 0.006));
+                // Backpack with straps over the shoulders.
+                piece(hips, &kit.cube, &pack, Vec3::new(0.0, 0.33, 0.16), Vec3::new(0.27, 0.32, 0.12));
+                piece(hips, &kit.cube, &pack, Vec3::new(0.0, 0.25, 0.225), Vec3::new(0.2, 0.12, 0.04));
+                piece(hips, &kit.cube, &metal, Vec3::new(0.0, 0.45, 0.225), Vec3::new(0.12, 0.012, 0.006));
+                for side in [-1.0f32, 1.0] {
+                    piece(hips, &kit.cube, &leather, Vec3::new(side * 0.1, 0.36, -0.12), Vec3::new(0.035, 0.32, 0.01));
+                    piece(hips, &kit.cube, &leather, Vec3::new(side * 0.1, 0.54, 0.02), Vec3::new(0.035, 0.012, 0.27));
+                }
+                // Neck.
+                piece(hips, &kit.capsule, &kit.skin, Vec3::new(0.0, 0.6, 0.0), Vec3::new(0.09, 0.06, 0.09));
                 hips.spawn((Limb::Head, Transform::from_xyz(0.0, 0.66, 0.0), Visibility::default())).with_children(|head| {
-                    piece(head, &kit.sphere, &kit.skin, Vec3::new(0.0, 0.11, 0.0), Vec3::new(0.21, 0.25, 0.23));
-                    piece(head, &kit.sphere, &hair, Vec3::new(0.0, 0.17, 0.02), Vec3::new(0.225, 0.17, 0.235));
-                    for x in [-0.045f32, 0.045] {
-                        piece(head, &kit.sphere, &eye, Vec3::new(x, 0.12, -0.105), Vec3::splat(0.03));
+                    piece(head, &kit.sphere, &kit.skin, Vec3::new(0.0, 0.11, 0.0), Vec3::new(0.2, 0.25, 0.22));
+                    // Jaw and chin.
+                    piece(head, &kit.sphere, &kit.skin, Vec3::new(0.0, 0.035, -0.03), Vec3::new(0.16, 0.12, 0.16));
+                    // Ears.
+                    for x in [-0.1f32, 0.1] {
+                        piece(head, &kit.sphere, &kit.skin, Vec3::new(x, 0.11, 0.0), Vec3::new(0.03, 0.06, 0.045));
                     }
-                    piece(head, &kit.cube, &kit.skin, Vec3::new(0.0, 0.08, -0.115), Vec3::new(0.03, 0.05, 0.03));
+                    // Hair: cap, back and a fringe over the forehead.
+                    piece(head, &kit.sphere, &hair, Vec3::new(0.0, 0.18, 0.02), Vec3::new(0.215, 0.16, 0.23));
+                    piece(head, &kit.sphere, &hair, Vec3::new(0.0, 0.12, 0.055), Vec3::new(0.205, 0.2, 0.15));
+                    tilted(head, &kit.cube, &hair, Vec3::new(0.025, 0.2, -0.1), Quat::from_rotation_z(-0.3), Vec3::new(0.11, 0.035, 0.04));
+                    // Eyes (whites + pupils), brows, nose and mouth.
+                    for x in [-0.042f32, 0.042] {
+                        piece(head, &kit.sphere, &white, Vec3::new(x, 0.125, -0.098), Vec3::new(0.034, 0.024, 0.02));
+                        piece(head, &kit.sphere, &pupil, Vec3::new(x, 0.125, -0.107), Vec3::splat(0.014));
+                        tilted(head, &kit.cube, &hair, Vec3::new(x, 0.152, -0.1), Quat::from_rotation_z(x.signum() * 0.12), Vec3::new(0.04, 0.008, 0.012));
+                    }
+                    piece(head, &kit.cube, &kit.skin, Vec3::new(0.0, 0.095, -0.112), Vec3::new(0.022, 0.045, 0.03));
+                    piece(head, &kit.cube, &lip, Vec3::new(0.0, 0.052, -0.098), Vec3::new(0.045, 0.01, 0.01));
                 });
                 for right in [true, false] {
                     let x = if right { 0.25 } else { -0.25 };
                     hips.spawn((Limb::Arm(right), Transform::from_xyz(x, 0.52, 0.0), Visibility::default())).with_children(|arm| {
-                        piece(arm, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.15, 0.0), Vec3::new(0.11, 0.14, 0.11));
+                        piece(arm, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.15, 0.0), Vec3::new(0.115, 0.15, 0.115));
+                        // Elbow patch.
+                        piece(arm, &kit.sphere, &kit.cuff, Vec3::new(0.0, -0.29, 0.03), Vec3::new(0.08, 0.07, 0.06));
                         arm.spawn((Limb::Forearm(right), Transform::from_xyz(0.0, -0.3, 0.0), Visibility::default())).with_children(|fore| {
-                            piece(fore, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.13, 0.0), Vec3::new(0.095, 0.12, 0.095));
+                            piece(fore, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.13, 0.0), Vec3::new(0.1, 0.12, 0.1));
+                            // Rolled cuff at the wrist.
+                            piece(fore, &kit.cyl, &kit.cuff, Vec3::new(0.0, -0.245, 0.0), Vec3::new(0.105, 0.04, 0.105));
                             // Hand at the wrist, fingers pointing down the arm.
                             fore.spawn((Transform::from_xyz(0.0, -0.29, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), Visibility::default())).with_children(|hand| {
                                 build_hand(hand, kit, right, 1.3);

@@ -143,6 +143,11 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
                 root.spawn((Part::Leg(right), Transform::from_xyz(x, 1.35, 0.0), Visibility::default())).with_children(|leg| {
                     piece(leg, &cyl, &bark, Vec3::new(0.0, -0.6, 0.0), Quat::IDENTITY, Vec3::new(0.12, 1.2, 0.12));
                     piece(leg, &sph, &bark, Vec3::new(0.0, -0.62, 0.02), Quat::IDENTITY, Vec3::splat(0.17));
+                    // Thin roots winding down the leg.
+                    for k in 0..4 {
+                        let a = k as f32 * 1.6;
+                        piece(leg, &cyl, &bark, Vec3::new(a.sin() * 0.055, -0.35 - k as f32 * 0.18, a.cos() * 0.055), Quat::from_rotation_y(a) * Quat::from_rotation_z(0.5), Vec3::new(0.025, 0.4, 0.025));
+                    }
                     // Splayed root toes.
                     for a in [-0.6f32, 0.0, 0.6] {
                         piece(leg, &cone, &bark, Vec3::new(a.sin() * 0.12, -1.28, -0.12 * a.cos()), Quat::from_rotation_x(-1.3) * Quat::from_rotation_z(a), Vec3::new(0.07, 0.3, 0.07));
@@ -157,11 +162,31 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
                 }
                 piece(torso, &sph, &moss, Vec3::new(0.1, 0.9, -0.15), Quat::IDENTITY, Vec3::new(0.25, 0.16, 0.18));
                 piece(torso, &sph, &moss, Vec3::new(-0.12, 0.4, 0.1), Quat::IDENTITY, Vec3::new(0.18, 0.12, 0.14));
+                // A cage of roots over the chest, like ribs.
+                for k in 0..4 {
+                    let y = 0.45 + k as f32 * 0.12;
+                    for sd in [-1.0f32, 1.0] {
+                        piece(torso, &cyl, &bark, Vec3::new(sd * 0.1, y, -0.2), Quat::from_rotation_z(sd * 1.2) * Quat::from_rotation_x(0.18), Vec3::new(0.022, 0.22, 0.022));
+                    }
+                }
+                // Shelf fungus on the shoulders and moss hanging off them.
+                for sd in [-1.0f32, 1.0] {
+                    piece(torso, &sph, &fungus, Vec3::new(sd * 0.27, 0.95, 0.0), Quat::from_rotation_z(sd * 0.4), Vec3::new(0.16, 0.04, 0.13));
+                    for k in 0..3 {
+                        piece(torso, &cyl, &moss, Vec3::new(sd * (0.2 + k as f32 * 0.04), 0.72 - k as f32 * 0.04, -0.05 + k as f32 * 0.05), Quat::from_rotation_z(sd * 0.1), Vec3::new(0.02, 0.35 + k as f32 * 0.08, 0.02));
+                    }
+                }
                 // Head: a smooth pale knot with no eyes, a glowing split for a
                 // mouth, shelf-fungus "ears" and a crown of twigs.
                 torso.spawn((Part::Head, Transform::from_xyz(0.0, 1.18, -0.16), Visibility::default())).with_children(|h| {
                     piece(h, &sph, &pale, Vec3::new(0.0, 0.18, 0.0), Quat::IDENTITY, Vec3::new(0.3, 0.46, 0.32));
                     piece(h, &cyl, &glow, Vec3::new(0.0, 0.08, -0.155), Quat::IDENTITY, Vec3::new(0.025, 0.22, 0.01));
+                    // A faint ember glow leaking from the split.
+                    h.spawn((PointLight { color: Color::srgb(1.0, 0.55, 0.2), intensity: 6_000.0, range: 2.5, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(0.0, 0.08, -0.25)));
+                    // Bark knots on the pale skull.
+                    for (x, y) in [(-0.09f32, 0.32f32), (0.07, 0.36), (0.11, 0.05)] {
+                        piece(h, &sph, &bark, Vec3::new(x, y, -0.1), Quat::IDENTITY, Vec3::splat(0.05));
+                    }
                     for s in [-1.0f32, 1.0] {
                         piece(h, &sph, &fungus, Vec3::new(s * 0.2, 0.2, 0.02), Quat::from_rotation_z(s * 0.3), Vec3::new(0.26, 0.06, 0.2));
                         piece(h, &sph, &fungus, Vec3::new(s * 0.18, 0.08, 0.04), Quat::from_rotation_z(s * 0.2), Vec3::new(0.18, 0.05, 0.14));
@@ -177,9 +202,13 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
                         piece(arm, &cyl, &bark, Vec3::new(0.0, -0.4, 0.0), Quat::IDENTITY, Vec3::new(0.08, 0.8, 0.08));
                         piece(arm, &sph, &bark, Vec3::new(0.0, -0.8, 0.0), Quat::IDENTITY, Vec3::splat(0.11));
                         piece(arm, &cyl, &bark, Vec3::new(0.0, -1.15, -0.04), Quat::from_rotation_x(0.15), Vec3::new(0.065, 0.7, 0.065));
-                        for a in [-0.35f32, 0.0, 0.35] {
-                            piece(arm, &cone, &pale, Vec3::new(a * 0.12, -1.62, -0.06), Quat::from_rotation_x(std::f32::consts::PI) * Quat::from_rotation_z(a), Vec3::new(0.035, 0.32, 0.035));
+                        // Five knotted branch fingers.
+                        for a in [-0.5f32, -0.25, 0.0, 0.25, 0.5] {
+                            piece(arm, &sph, &bark, Vec3::new(a * 0.09, -1.5, -0.05), Quat::IDENTITY, Vec3::splat(0.045));
+                            piece(arm, &cone, &pale, Vec3::new(a * 0.14, -1.66, -0.06), Quat::from_rotation_x(std::f32::consts::PI) * Quat::from_rotation_z(a), Vec3::new(0.03, 0.34, 0.03));
                         }
+                        // Moss trailing from the wrist.
+                        piece(arm, &cyl, &moss, Vec3::new(0.03, -1.35, 0.03), Quat::IDENTITY, Vec3::new(0.018, 0.3, 0.018));
                     });
                 }
             });
