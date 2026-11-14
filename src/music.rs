@@ -140,10 +140,39 @@ fn is_audio(p: &std::path::Path) -> bool {
 
 /// First audio file (alphabetically) inside `root/dir`, as an asset path.
 fn first_audio_in(root: &std::path::Path, dir: &str) -> Option<String> {
-    let mut files: Vec<_> = std::fs::read_dir(root.join(dir)).ok()?.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_file() && is_audio(p)).collect();
-    files.sort();
-    let name = files.first()?.file_name()?.to_str()?.to_string();
-    Some(format!("{dir}/{name}"))
+    let mut names: Vec<String> = match std::fs::read_dir(root.join(dir)) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_file() && is_audio(p)).filter_map(|p| p.file_name()?.to_str().map(str::to_string)).collect(),
+        // Android: the music ships inside the APK, which `std::fs` can't see.
+        Err(_) => apk_files(dir).into_iter().filter(|n| is_audio(std::path::Path::new(n))).collect(),
+    };
+    names.sort();
+    Some(format!("{dir}/{}", names.first()?))
+}
+
+/// Files directly inside an APK asset folder (empty on other platforms).
+#[cfg(target_os = "android")]
+fn apk_files(dir: &str) -> Vec<String> {
+    let Some(app) = bevy::android::ANDROID_APP.get() else { return vec![] };
+    let Ok(cdir) = std::ffi::CString::new(dir) else { return vec![] };
+    let Some(listing) = app.asset_manager().open_dir(&cdir) else { return vec![] };
+    listing.filter_map(|name| name.into_string().ok()).collect()
+}
+
+#[cfg(not(target_os = "android"))]
+fn apk_files(_dir: &str) -> Vec<String> {
+    vec![]
+}
+
+/// True if the APK contains this asset path (always false off Android).
+#[cfg(target_os = "android")]
+fn apk_has(path: &str) -> bool {
+    let Some(app) = bevy::android::ANDROID_APP.get() else { return false };
+    std::ffi::CString::new(path).ok().is_some_and(|c| app.asset_manager().open(&c).is_some())
+}
+
+#[cfg(not(target_os = "android"))]
+fn apk_has(_path: &str) -> bool {
+    false
 }
 
 /// Finds a user-supplied file: any audio file in the track's music folder,
@@ -161,7 +190,7 @@ pub fn find_override(slot: &str) -> Option<String> {
     let root = asset_root();
     for ext in AUDIO_EXTS {
         let rel = format!("{slot}.{ext}");
-        if root.join(&rel).is_file() {
+        if root.join(&rel).is_file() || apk_has(&rel) {
             return Some(rel);
         }
     }
