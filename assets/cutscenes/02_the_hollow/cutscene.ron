@@ -39,8 +39,8 @@
         (at: 11.3, do: Hollow(Ignite)),
         (at: 11.3, do: Shake(0.6)),
         (at: 11.3, do: Lights(color: (1.0, 0.08, 0.05), amount: 1.0, scale: 0.9, flicker: 0.1)),
-        (at: 12.2, do: Subtitle(text: "HIDE.", seconds: 1.5, danger: true)),
-        (at: 14.0, do: Subtitle(text: "[Get back to the wardrobe in Room 000]", seconds: 2.5, danger: true)),
+        (at: 12.2, do: Subtitle(text: "RUN.", seconds: 1.5, danger: true)),
+        (at: 14.0, do: Subtitle(text: "[It will find you again past Door 040]", seconds: 2.5, danger: true)),
     ],
     end: StartChase,
 )
