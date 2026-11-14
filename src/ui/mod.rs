@@ -3,6 +3,7 @@
 pub mod focus;
 pub mod hud;
 pub mod menus;
+pub mod crash_report;
 pub mod custom_menu;
 pub mod play_menu;
 pub mod scroll;
@@ -22,6 +23,7 @@ impl Plugin for UiPlugin {
             play_menu::PlayMenuPlugin,
             custom_menu::CustomMenuPlugin,
             scroll::ScrollPlugin,
+            crash_report::CrashReportPlugin,
         ));
     }
 }

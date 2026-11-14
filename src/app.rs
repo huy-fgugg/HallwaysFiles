@@ -51,6 +51,13 @@ pub fn run() {
         priority: if graphics == Graphics::Low { WgpuSettingsPriority::WebGPU } else { WgpuSettingsPriority::Functionality },
         ..default()
     };
+    // Phones: fall back to OpenGL ES where the Vulkan driver is missing or broken.
+    // (Elsewhere keep the default; `None` would switch rendering off.)
+    let wgpu = if cfg!(target_os = "android") {
+        WgpuSettings { backends: Some(bevy::render::settings::Backends::VULKAN | bevy::render::settings::Backends::GL), ..wgpu }
+    } else {
+        wgpu
+    };
 
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.02, 0.025, 0.035)))
