@@ -18,7 +18,9 @@ pub const STAND_EYE: f32 = 1.62;
 pub const CROUCH_EYE: f32 = 1.0;
 pub const RADIUS: f32 = 0.3;
 /// Tallest ledge the player walks up without jumping (stair risers are 0.2).
-pub const STEP_UP: f32 = 0.38;
+/// Highest ledge walked straight up. Must exceed two stair rises: the player
+/// (radius 0.3) touches the step after next while standing on a 0.3 m tread.
+pub const STEP_UP: f32 = 0.45;
 /// Longest move resolved against walls in one go (m).
 const MAX_SUBSTEP: f32 = 0.12;
 const GRAVITY: f32 = 18.0;
@@ -241,5 +243,21 @@ mod tests {
     fn diagonal_is_not_faster() {
         let v = planar_velocity(Vec2::new(1.0, 1.0), 0.3, 3.0);
         assert!((v.length() - 3.0).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod stair_tests {
+    use super::*;
+    use crate::floor::plan::{STEP_RISE, STEP_RUN};
+
+    #[test]
+    fn stairs_never_trap_the_player() {
+        // Standing on any step, the face within reach (one tread ahead of the
+        // player's edge) must be low enough to step over.
+        assert!(STEP_UP > 2.0 * STEP_RISE, "two rises within one radius");
+        assert!(RADIUS <= STEP_RUN + 1e-6);
+        // Still blocked by crates and barricades.
+        assert!(STEP_UP < 0.7);
     }
 }
