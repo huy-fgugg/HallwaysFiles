@@ -1,4 +1,4 @@
-// iPhone/iPad launcher: hands control to the game (exported by #[bevy_main]).
+// iPhone/iPad launcher: hands control to the game (main_rs in mobile/src/lib.rs).
 extern void main_rs(void);
 
 int main(int argc, char *argv[]) {
