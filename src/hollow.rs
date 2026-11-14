@@ -199,14 +199,14 @@ pub fn spawn_hollow(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &m
                 // A chipped corner showing ink beneath.
                 h.spawn((Mesh3d(meshes.add(Sphere::new(0.03).mesh().ico(1).unwrap_or_else(|_| Sphere::new(0.03).mesh().build()))), MeshMaterial3d(ink.clone()), Transform::from_xyz(0.075, -0.13, 0.05).with_scale(Vec3::new(1.0, 0.7, 0.5))));
                 // Tattered hood framing the mask.
-                h.spawn((Mesh3d(meshes.add(Sphere::new(0.2).mesh().uv(24, 16))), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 0.05, -0.07).with_scale(Vec3::new(1.05, 1.25, 1.0))));
+                h.spawn((Mesh3d(meshes.add(Sphere::new(0.2).mesh().uv(24, 16))), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 0.05, -0.125).with_scale(Vec3::new(1.12, 1.3, 0.72))));
                 for k in 0..9 {
                     let a = (k as f32 - 4.0) * 0.32;
                     let len = 0.16 + ((k * 5) % 4) as f32 * 0.04;
                     h.spawn((
                         Mesh3d(meshes.add(Cuboid::new(0.05, len, 0.01))),
                         MeshMaterial3d(cloth.clone()),
-                        Transform::from_xyz(a.sin() * 0.19, -0.16 - len / 2.0 + 0.05, -0.05 + a.cos() * 0.08).with_rotation(Quat::from_rotation_y(a) * Quat::from_rotation_x(0.15)),
+                        Transform::from_xyz(a.sin() * 0.2, -0.16 - len / 2.0 + 0.05, -0.1 + a.cos() * 0.06).with_rotation(Quat::from_rotation_y(a) * Quat::from_rotation_x(0.15)),
                     ));
                 }
             });

@@ -404,7 +404,9 @@ fn dev_bot(
     route.retain(|v| v.y < p.z - 0.25);
     // Open the next real door when close (unlocking it if needed).
     for (e, mut d, gt) in &mut doors {
-        if d.open || d.mimic || d.number != room + 1 {
+        // The door ahead, or the one being stepped through (the room count
+        // switches mid-doorway).
+        if d.open || d.mimic || (d.number != room + 1 && d.number != room) {
             continue;
         }
         let g = gt.translation();
