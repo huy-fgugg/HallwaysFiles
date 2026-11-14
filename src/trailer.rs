@@ -311,6 +311,11 @@ fn record(
                                 route.retain(|v| v.z < foot);
                                 route.insert(0, Vec3::new(r.entry_x, 0.0, foot));
                             }
+                            // Stay clear of furniture along the side walls (collision would
+                            // shove the camera through the wall).
+                            for v in &mut route {
+                                v.x = v.x.clamp(r.min.x + 1.25, r.max.x - 1.25);
+                            }
                             rec.path = route;
                             (rec.path[0], rec.path[0])
                         }
@@ -320,7 +325,7 @@ fn record(
                             let k = (r.max.y - z) / r.depth();
                             let line_x = r.entry_x + (r.exit_x - r.entry_x) * k;
                             let east = r.max.x - line_x > line_x - r.min.x;
-                            let x = (if east { line_x + 2.5 } else { line_x - 2.5 }).clamp(r.min.x + 0.5, r.max.x - 0.5);
+                            let x = (if east { line_x + 2.5 } else { line_x - 2.5 }).clamp(r.min.x + 1.3, r.max.x - 1.3);
                             let spot = Vec3::new(x, 0.0, z);
                             (spot, spot)
                         }

@@ -83,6 +83,8 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                     ..default()
                 },
                 BackgroundColor(theme.bg.with_alpha(0.72)),
+                // Shrinks the UI until the whole menu fits (short phone screens).
+                crate::theme::ScreenRoot,
             ))
             .with_children(|col| {
                 col.spawn((theme.title_text("HALLWAYS"), TitleFlicker, FadeIn { delay: 0.3, base: theme.text }));

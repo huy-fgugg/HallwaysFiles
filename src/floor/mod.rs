@@ -162,6 +162,7 @@ fn stream_rooms(
         let Some(room) = floor.0.room(i) else { return };
         let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None, base_y: 0.0 };
         build::spawn_room(&mut b, room, &rt, &props, &asset_server, &mut images, &mut std_mats);
+        build::close_south_side(&mut b, room, floor.0.room(i.wrapping_sub(1)), &props);
         build::final_door_surround(&mut b, room);
         rt.loaded.insert(i);
     }
