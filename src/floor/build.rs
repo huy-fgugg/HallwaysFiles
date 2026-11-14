@@ -501,6 +501,37 @@ pub fn spawn_room(
     b.member = None;
 }
 
+/// A room's south side is the previous room's north wall. Where this room is
+/// wider or taller than that wall, fill the gap so you never see out into the
+/// void when you look back.
+pub fn close_south_side(b: &mut Builder, r: &RoomPlan, prev: Option<&RoomPlan>, props: &PropMaterials) {
+    let Some(p) = prev else { return };
+    b.member = Some(r.index);
+    let style = style_for(r.area, b, props);
+    let (z0, z1) = (r.max.y, r.max.y + WALL_T);
+    let h = r.height;
+    if !r.area.outdoors() || !p.area.outdoors() {
+        for (x0, x1) in [(r.min.x - WALL_T, p.min.x - WALL_T), (p.max.x + WALL_T, r.max.x + WALL_T)] {
+            if x1 - x0 > 0.01 {
+                b.block(Vec3::new(x0, 0.0, z0), Vec3::new(x1, h, z1), &style.wall, style.wall_tile, true);
+            }
+        }
+        // Above the previous room's wall, if this room is taller.
+        let (ox0, ox1) = (r.min.x.max(p.min.x) - WALL_T, r.max.x.min(p.max.x) + WALL_T);
+        if h > p.height + 0.01 && ox1 > ox0 {
+            b.block(Vec3::new(ox0, p.height, z0), Vec3::new(ox1, h, z1), &style.wall, style.wall_tile, false);
+        }
+    } else {
+        // Both outdoors: a garden wall is enough (open sky above).
+        for (x0, x1) in [(r.min.x - WALL_T, p.min.x - WALL_T), (p.max.x + WALL_T, r.max.x + WALL_T)] {
+            if x1 - x0 > 0.01 {
+                b.block(Vec3::new(x0, 0.0, z0), Vec3::new(x1, 3.2, z1), &style.wall, style.wall_tile, true);
+            }
+        }
+    }
+    b.member = None;
+}
+
 /// Marker: this door was already open when its room was (re)built.
 #[derive(Component)]
 pub struct OpenOnSpawn;

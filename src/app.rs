@@ -61,7 +61,7 @@ pub fn run() {
                         title: "HALLWAYS".into(),
                         // Phones: true fullscreen in landscape.
                         mode: if cfg!(any(target_os = "android", target_os = "ios")) { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary) } else { bevy::window::WindowMode::Windowed },
-                        resolution: WindowResolution::new(1600, 900),
+                        resolution: qa_window().unwrap_or_else(|| WindowResolution::new(1600, 900)),
                         present_mode: PresentMode::AutoVsync,
                         ..default()
                     }),
@@ -75,4 +75,17 @@ pub fn run() {
         // mid-load) is logged instead of crashing the player's game.
         .set_error_handler(bevy::ecs::error::warn)
         .run();
+}
+
+/// QA: `HALLWAYS_WINDOW=667x311@3` opens a window of that logical size and
+/// pixel density (e.g. to check menus at phone proportions on a desktop).
+fn qa_window() -> Option<WindowResolution> {
+    let v = std::env::var("HALLWAYS_WINDOW").ok()?;
+    let (size, scale) = v.split_once('@').map_or((v.as_str(), None), |(a, b)| (a, b.parse::<f32>().ok()));
+    let (w, h) = size.split_once('x')?;
+    let (w, h): (f32, f32) = (w.parse().ok()?, h.parse().ok()?);
+    let k = scale.unwrap_or(1.0);
+    let mut r = WindowResolution::new((w * k) as u32, (h * k) as u32);
+    r.set_scale_factor_override(Some(k));
+    Some(r)
 }

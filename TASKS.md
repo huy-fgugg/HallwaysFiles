@@ -111,6 +111,12 @@
 - [x] Render setup notes and `assets/server.txt` removed (the server address is built in)
 - [x] QA switches: HALLWAYS_WARP=<room|entity|Zigzag|ReadingHall>, HALLWAYS_BOT=1 (autopilot along room routes), HALLWAYS_GUIDE_SECS
 
+## 1.0.5
+- [x] Menus fit any screen: the UI scale shrinks until the open menu fits (phones in landscape), and grows back when there is room
+- [x] Fix: wide or tall rooms showed the empty sky through gaps beside the previous room's wall
+- [x] New trailer shots (chase halls, door slam, Reading Hall and guiding light, zigzag room, the Surge) and editing
+- [x] QA switch HALLWAYS_WINDOW=667x311@3 opens a phone-shaped window
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
 - [x] .deb installed and launched in a clean Linux container (menu renders, assets found)

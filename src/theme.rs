@@ -118,6 +118,7 @@ impl UiTheme {
                 ..default()
             },
             BackgroundColor(if opaque { self.bg } else { self.bg.with_alpha(0.82) }),
+            ScreenRoot,
         )
     }
 
@@ -215,21 +216,106 @@ impl Plugin for ThemePlugin {
     }
 }
 
+/// Marks a full-screen menu; the UI scale shrinks until it fits the window.
+#[derive(Component)]
+pub struct ScreenRoot;
+
 /// Keeps layouts authored at 1920x1080 readable on smaller windows (down to
-/// 1366x768) without letting text become tiny: scale tracks window height
-/// but never drops below 0.72.
-fn scale_ui(windows: Query<&Window, With<bevy::window::PrimaryWindow>>, mut scale: ResMut<UiScale>) {
+/// 1366x768) without letting text become tiny, then shrinks further while an
+/// open menu is wider or taller than the window (phones) and grows back once
+/// there is room again.
+fn scale_ui(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    roots: Query<(&ComputedNode, &InheritedVisibility, &Children), With<ScreenRoot>>,
+    nodes: Query<(&ComputedNode, &Node, &bevy::ui::UiGlobalTransform)>,
+    mut scale: ResMut<UiScale>,
+) {
     let Ok(window) = windows.single() else { return };
-    let h = window.height().max(1.0);
-    let target = (h / 1080.0).clamp(0.72, 1.6);
-    if (scale.0 - target).abs() > 0.01 {
+    let base = ui_scale_for(window.width(), window.height());
+    // How much of the content fits: < 1 means it spills off screen.
+    let mut ratio = f32::INFINITY;
+    for (root, vis, kids) in &roots {
+        if !vis.get() || root.size.x < 1.0 {
+            continue;
+        }
+        let (w, h) = content_extent(kids, &nodes);
+        let inset = root.content_inset();
+        let room = root.size - inset.min_inset - inset.max_inset;
+        if std::env::var_os("HALLWAYS_UI_DEBUG").is_some() {
+            info!("UI fit: room {room:?} content {w}x{h} scale {}", scale.0);
+        }
+        // Content that exactly fills the width is stretched to it (e.g. menu
+        // buttons): it says nothing about fitting. Anything else counts.
+        if w > 1.0 && (w - room.x).abs() > 1.0 {
+            ratio = ratio.min(room.x / w);
+        }
+        if h > 1.0 {
+            ratio = ratio.min(room.y / h);
+        }
+    }
+    let target = fit_scale(scale.0, base, ratio);
+    if (scale.0 - target).abs() > 0.005 {
         scale.0 = target;
     }
+}
+
+/// Width and height spanned by a menu's laid-out children (physical pixels),
+/// gaps and margins included. Absolutely placed children don't count.
+fn content_extent(kids: &Children, nodes: &Query<(&ComputedNode, &Node, &bevy::ui::UiGlobalTransform)>) -> (f32, f32) {
+    let (mut lo, mut hi) = (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY));
+    for k in kids.iter() {
+        let Ok((c, node, tf)) = nodes.get(k) else { continue };
+        if node.position_type == PositionType::Absolute || c.size.y < 0.5 {
+            continue;
+        }
+        lo = lo.min(tf.translation - c.size / 2.0);
+        hi = hi.max(tf.translation + c.size / 2.0);
+    }
+    if lo.x > hi.x {
+        return (0.0, 0.0);
+    }
+    let span = hi - lo;
+    // A little breathing room top and bottom. Width gets none: buttons that
+    // stretch to fill the menu exactly must not count as overflowing.
+    (span.x, span.y * 1.03)
+}
+
+/// Next UI scale: never above `base`; shrink when content doesn't fit
+/// (`ratio` < 1), grow back toward `base` when there is clear room.
+pub fn fit_scale(current: f32, base: f32, ratio: f32) -> f32 {
+    let target = if !ratio.is_finite() {
+        base
+    } else if ratio < 0.995 || ratio > 1.08 {
+        current * ratio * 0.98
+    } else {
+        current
+    };
+    target.clamp(0.3, base)
+}
+
+/// Base UI scale for a window of `w` x `h` logical pixels (before fitting).
+pub fn ui_scale_for(_w: f32, h: f32) -> f32 {
+    (h.max(1.0) / 1080.0).clamp(0.72, 1.6)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_scale_fits_then_grows_back() {
+        // Desktop sizes keep the old behaviour when everything fits.
+        assert!((ui_scale_for(1920.0, 1080.0) - 1.0).abs() < 1e-3);
+        assert!((ui_scale_for(1366.0, 768.0) - 0.72).abs() < 1e-3);
+        assert_eq!(fit_scale(0.72, 0.72, f32::INFINITY), 0.72);
+        assert_eq!(fit_scale(0.72, 0.72, 1.02), 0.72, "small slack: no change");
+        // Content 1.6x too wide: shrink so it fits.
+        let k = fit_scale(0.72, 0.72, 1.0 / 1.6);
+        assert!(k < 0.72 / 1.6 + 1e-3 && k > 0.4);
+        // Room again (menu closed or smaller): back up, never past the base.
+        assert_eq!(fit_scale(k, 0.72, 3.0), 0.72);
+        assert_eq!(fit_scale(k, 0.72, f32::INFINITY), 0.72);
+    }
 
     #[test]
     fn hex_matches_palette() {
