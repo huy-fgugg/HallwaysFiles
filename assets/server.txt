@@ -1,4 +1,0 @@
-# Online room server address used by HALLWAYS (first non-# line wins).
-# After deploying the server on Render, put your service's address here:
-#   wss://<your-service-name>.onrender.com/ws
-wss://hallways-server.onrender.com/ws
