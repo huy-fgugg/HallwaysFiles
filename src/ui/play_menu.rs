@@ -175,6 +175,7 @@ fn type_into_fields(
     mut focus: ResMut<InputFocus>,
     mut typing: ResMut<Typing>,
     mut keys: MessageReader<KeyboardInput>,
+    mut ime: MessageReader<bevy::window::Ime>,
     mut fields: Query<(Entity, &mut TextField, &mut BorderColor, &Children)>,
     mut texts: Query<&mut Text, With<FieldText>>,
     theme: Res<UiTheme>,
@@ -199,6 +200,14 @@ fn type_into_fields(
     let focused = focus.get();
     typing.0 = focused.is_some_and(|f| fields.contains(f));
     let events: Vec<KeyboardInput> = keys.read().cloned().collect();
+    // Text from on-screen keyboards and input methods (iPhone/iPad, IMEs).
+    let committed: Vec<String> = ime
+        .read()
+        .filter_map(|e| match e {
+            bevy::window::Ime::Commit { value, .. } => Some(value.clone()),
+            _ => None,
+        })
+        .collect();
     for (e, mut field, mut border, children) in &mut fields {
         let active = Some(e) == focused;
         *border = BorderColor::all(if active { theme.interact } else { theme.text_dim });
@@ -218,6 +227,12 @@ fn type_into_fields(
                     }
                     Key::Space if field.kind != FieldKind::Code && field.value.len() < field.kind.max_len() => field.value.push(' '),
                     _ => {}
+                }
+            }
+            for c in committed.iter().flat_map(|s| s.chars()) {
+                if (field.kind.accepts(c) || (c == ' ' && field.kind != FieldKind::Code)) && field.value.chars().count() < field.kind.max_len() {
+                    let ch = if field.kind == FieldKind::Code { c.to_ascii_uppercase() } else { c };
+                    field.value.push(ch);
                 }
             }
             match field.kind {

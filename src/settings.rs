@@ -156,6 +156,11 @@ pub fn config_dir() -> PathBuf {
     if let Some(p) = bevy::android::ANDROID_APP.get().and_then(|a| a.internal_data_path()) {
         return p.join("hallways");
     }
+    // iPhone/iPad: the app's own Library folder inside its sandbox.
+    #[cfg(target_os = "ios")]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join("Library").join("Application Support").join("hallways");
+    }
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join("Hallways");
     }

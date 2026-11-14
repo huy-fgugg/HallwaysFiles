@@ -3,11 +3,12 @@ name = "hallways-mobile"
 version = "1.0.4"
 edition = "2024"
 publish = false
-description = "Android entry point for HALLWAYS"
+description = "Android and iPhone/iPad entry point for HALLWAYS"
 
 [lib]
 name = "hallways_mobile"
-crate-type = ["cdylib"]
+# cdylib: Android (loaded by GameActivity). staticlib: iOS (linked into the app).
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 hallways = { path = ".." }
