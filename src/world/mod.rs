@@ -519,9 +519,9 @@ fn spawn_test_level(
         &[Side::South],
     );
 
-    // Doors: 001 opens into the corridor; 002 is locked until Phase 2.
+    // Doors: 001 opens into the corridor; 002 opens onto the generated floor.
     let _ = b.door(0.0, -5.0, 1, false, &mut images, &mut std_mats);
-    let _ = b.door(0.0, c_min.y, 2, true, &mut images, &mut std_mats);
+    let _ = b.door(0.0, c_min.y, 2, false, &mut images, &mut std_mats);
 
     // Rug.
     b.block(Vec3::new(-1.3, 0.0, -0.9), Vec3::new(1.3, 0.012, 2.6), &mats.carpet, 1.4, false);

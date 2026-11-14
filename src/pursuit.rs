@@ -108,7 +108,8 @@ impl Plugin for PursuitPlugin {
         // QA: HALLWAYS_BOT=1 sprints along each room's route (through every
         // opening), colliding with walls like a player would.
         if std::env::var_os("HALLWAYS_BOT").is_some() {
-            app.add_systems(Update, dev_bot.after(crate::player::CameraSet).run_if(gameplay_active));
+            app.add_systems(Update, dev_bot.after(crate::player::CameraSet).run_if(gameplay_active))
+                .add_systems(Update, dev_bot_revive.run_if(in_state(AppState::Playing)));
         }
     }
 }
@@ -285,22 +286,92 @@ fn dev_warp(
     tf.translation = Vec3::new(r.entry_x, r.entry_height + 0.05, r.max.y - 0.8);
 }
 
+/// QA autopilot state: which room it is in and since when.
+#[derive(Default)]
+struct BotLog {
+    room: u32,
+    since: f32,
+    finished: bool,
+}
+
+/// QA autopilot (HALLWAYS_BOT=1): sprints through every room along its
+/// route, opens (and unlocks) the doors on the way, can't die, and logs each
+/// room reached plus anywhere it gets stuck, so a whole floor can be checked
+/// for blocked paths and crashes without a person at the keyboard.
+#[allow(clippy::too_many_arguments)]
 fn dev_bot(
+    mut commands: Commands,
     time: Res<Time>,
-    run: Res<RunState>,
+    mut run: ResMut<RunState>,
     floor: Option<Res<Floor>>,
+    mut rt: Option<ResMut<FloorRuntime>>,
     colliders: Query<&Collider>,
+    mut doors: Query<(Entity, &mut Door, &GlobalTransform)>,
     mut player: Query<(&mut crate::player::Player, &mut Transform)>,
+    mut log: Local<BotLog>,
 ) {
     let (Some(floor), Ok((mut pl, mut tf))) = (floor, player.single_mut()) else { return };
+    run.vitality = 100.0;
     if run.elapsed < 1.5 {
+        *log = BotLog::default();
         return;
     }
-    let Some(r) = floor.0.room(run.current_room) else { return };
+    let now = run.elapsed;
     let p = tf.translation;
-    let mut route = r.route();
-    route.push(Vec2::new(r.exit_x, r.min.y - WALL_T - 0.8));
-    let Some(t) = route.iter().find(|v| v.y < p.z - 0.25) else { return };
+    let room = run.current_room;
+    if room != log.room {
+        info!("QA bot reached room {room:03} at {now:.1}s");
+        log.room = room;
+        log.since = now;
+    }
+    if now - log.since > 30.0 {
+        // Stuck: report it and skip ahead so the rest of the floor still gets tested.
+        warn!("QA STUCK in room {room:03} at {p:?}");
+        log.since = now;
+        if let Some(next) = floor.0.room(room + 1) {
+            tf.translation = Vec3::new(next.entry_x, next.entry_height, next.max.y - 0.8);
+        }
+        return;
+    }
+    // Where to walk: the handcrafted lift room and corridor go straight to Door 002.
+    let mut route: Vec<Vec2> = match floor.0.room(room) {
+        Some(r) => {
+            let mut v = r.route();
+            v.push(Vec2::new(r.exit_x, r.min.y - WALL_T - 0.8));
+            v
+        }
+        None => vec![Vec2::new(0.0, p.z.min(-3.0)), Vec2::new(0.0, crate::floor::plan::START_Z - 1.0)],
+    };
+    route.retain(|v| v.y < p.z - 0.25);
+    // Open the next real door when close (unlocking it if needed).
+    for (e, mut d, gt) in &mut doors {
+        if d.open || d.mimic || d.number != room + 1 {
+            continue;
+        }
+        let g = gt.translation();
+        if Vec2::new(g.x - p.x, g.z - p.z).length() > 2.4 {
+            continue;
+        }
+        d.open = true;
+        d.locked = false;
+        d.key_room = None;
+        if d.blocker != Entity::PLACEHOLDER {
+            commands.entity(d.blocker).try_remove::<Collider>();
+        }
+        commands.entity(e).try_remove::<Interactable>();
+        if let Some(rt) = rt.as_mut() {
+            rt.opened.insert(d.number);
+            rt.keys.insert(room);
+        }
+    }
+    if room == floor.0.last_room && rt.as_ref().is_some_and(|rt| rt.opened.contains(&floor.0.final_door())) {
+        if !log.finished {
+            log.finished = true;
+            info!("QA bot finished the floor at {now:.1}s");
+        }
+        return;
+    }
+    let Some(t) = route.first().copied() else { return };
     let to = Vec3::new(t.x - p.x, 0.0, t.y - p.z);
     if to.length() < 0.05 {
         return;
@@ -312,8 +383,17 @@ fn dev_bot(
     for _ in 0..n {
         pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, p.y + 0.38, p.y + 1.7, &boxes);
     }
-    tf.translation = pos;
+    tf.translation.x = pos.x;
+    tf.translation.z = pos.z;
     pl.yaw = (-to.x).atan2(-to.z);
+}
+
+/// The bot can't die: a death screen is closed straight away.
+fn dev_bot_revive(overlay: Res<State<Overlay>>, mut next: ResMut<NextState<Overlay>>, mut run: ResMut<RunState>) {
+    if *overlay.get() == Overlay::Dead {
+        run.vitality = 100.0;
+        next.set(Overlay::None);
+    }
 }
 
 /// Once every living player is through Door 047, it slams shut behind
