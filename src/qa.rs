@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use bevy::input::mouse::MouseButtonInput;
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::input::ButtonState;
-use bevy::picking::input::PointerInputSettings;
 use bevy::prelude::*;
 use bevy::ui::UiGlobalTransform;
 use bevy::window::{CursorMoved, PrimaryWindow};
@@ -37,8 +36,7 @@ impl Plugin for QaPlugin {
             app.add_systems(Update, report_controls);
         }
         if fake_touch() {
-            app.insert_resource(PointerInputSettings { is_touch_enabled: true, is_mouse_enabled: false })
-                .add_systems(PreUpdate, mouse_as_finger.before(bevy::input::InputSystems));
+            app.add_systems(PreUpdate, mouse_as_finger.before(bevy::input::InputSystems));
         }
     }
 }
