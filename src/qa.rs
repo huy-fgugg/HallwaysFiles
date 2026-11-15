@@ -109,6 +109,7 @@ fn mouse_as_finger(
     mut moves: MessageReader<CursorMoved>,
     window: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut out: MessageWriter<TouchInput>,
+    mut window_out: MessageWriter<bevy::window::WindowEvent>,
     mut down: Local<bool>,
     mut pos: Local<Vec2>,
 ) {
@@ -121,7 +122,14 @@ fn mouse_as_finger(
         *pos = m.position;
         moved = true;
     }
-    let touch = |phase| TouchInput { phase, position: *pos, window: win_e, force: None, id: 7 };
+    let pos_now = *pos;
+    // A real device delivers each touch both as an input message and as a
+    // window event (bevy_picking reads the latter), so emulate both.
+    let mut send = |phase| {
+        let t = TouchInput { phase, position: pos_now, window: win_e, force: None, id: 7 };
+        out.write(t);
+        window_out.write(bevy::window::WindowEvent::TouchInput(t));
+    };
     for b in buttons.read() {
         if b.button != MouseButton::Left {
             continue;
@@ -129,16 +137,16 @@ fn mouse_as_finger(
         match b.state {
             ButtonState::Pressed if !*down => {
                 *down = true;
-                out.write(touch(TouchPhase::Started));
+                send(TouchPhase::Started);
             }
             ButtonState::Released if *down => {
                 *down = false;
-                out.write(touch(TouchPhase::Ended));
+                send(TouchPhase::Ended);
             }
             _ => {}
         }
     }
     if moved && *down {
-        out.write(touch(TouchPhase::Moved));
+        send(TouchPhase::Moved);
     }
 }
