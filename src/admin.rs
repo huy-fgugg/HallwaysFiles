@@ -16,7 +16,7 @@ use crate::net::{NetSession, PeerEvent, PeerMsg, SendPeer};
 use crate::run::{CameraShake, RunState, Subtitle};
 use crate::state::{AppState, Overlay, Screen};
 use crate::theme::UiTheme;
-use crate::ui::focus::{spawn_button, MenuAction, MenuActivated};
+use crate::ui::focus::{spawn_button, InitialFocus, MenuAction, MenuActivated};
 use crate::ui::play_menu::{field_row, FieldKind, TextField};
 
 pub const ADMIN_CODE: &str = "58470";
@@ -65,7 +65,7 @@ impl Plugin for AdminPlugin {
                 Update,
                 (
                     open_panel.run_if(in_state(Screen::Hud)),
-                    (panel_actions, close_on_escape).run_if(in_state(Screen::Admin)),
+                    (submit_code, panel_actions, close_on_escape).chain().run_if(in_state(Screen::Admin)),
                     receive_admin,
                     apply_effects,
                     animate_scare,
@@ -100,32 +100,50 @@ fn targets(session: &NetSession, me: &str) -> Vec<(u8, String)> {
     v
 }
 
+/// Root of the admin panel (rebuilt in place when it unlocks).
+#[derive(Component)]
+struct AdminRoot;
+
 fn spawn_panel(mut commands: Commands, theme: Res<UiTheme>, unlocked: Res<AdminUnlocked>, session: Res<NetSession>, profile: Res<crate::profile::Profile>) {
+    build_panel(&mut commands, &theme, unlocked.0, &session, &profile.name);
+}
+
+fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session: &NetSession, me: &str) {
     let t = theme.clone();
     commands
-        .spawn((t.screen_root(false), GlobalZIndex(30), DespawnOnExit(Screen::Admin), Name::new("Admin panel")))
+        .spawn((t.screen_root(false), GlobalZIndex(30), DespawnOnExit(Screen::Admin), AdminRoot, Name::new("Admin panel")))
         .with_children(|root| {
             root.spawn(t.heading_text("ADMIN PANEL"));
-            root.spawn(t.panel(560.0)).with_children(|p| {
-                if !unlocked.0 {
-                    p.spawn(t.dim_text("Enter the admin code."));
-                    field_row(p, &t, FieldKind::AdminCode, "", 0);
+            // Never squash the panel (it scrolls if it really is too tall).
+            root.spawn(t.panel(560.0)).entry::<Node>().and_modify(|mut n| n.flex_shrink = 0.0).entity().with_children(|p| {
+                if !unlocked {
+                    p.spawn(t.dim_text("Enter the admin code, then press Enter or Unlock."));
+                    // The code box is selected straight away: just type.
+                    let field = field_row(p, &t, FieldKind::AdminCode, "", 0);
+                    p.commands().entity(field).insert(InitialFocus);
                     spawn_button(p, &t, "Unlock", MenuAction::AdminUnlock, 1, false);
                     p.spawn((Text::new(""), t.font(false, t.size_small), TextColor(t.danger), AdminMessage));
                     spawn_button(p, &t, "Close", MenuAction::CloseAdmin, 2, false);
                     return;
                 }
                 p.spawn((Text::new("SPAWN ITEM (FOR YOU)"), t.font(true, t.size_small), TextColor(t.interact)));
-                p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: px(8), row_gap: px(8), ..default() }).with_children(|row| {
-                    for (i, k) in ItemKind::ALL.into_iter().enumerate() {
-                        let id = spawn_button(row, &t, item_label(k), MenuAction::AdminSpawn(k), i as i32, i == 0);
-                        row.commands().entity(id).entry::<Node>().and_modify(|mut n| {
-                            n.width = px(160);
-                        });
-                    }
-                });
+                // Fixed rows of three (a wrapping row is measured as one line,
+                // which squashed the panel and hid the buttons below it).
+                let items: Vec<ItemKind> = ItemKind::ALL.into_iter().collect();
+                for (r, chunk) in items.chunks(3).enumerate() {
+                    p.spawn(Node { column_gap: px(8), ..default() }).with_children(|row| {
+                        for (j, k) in chunk.iter().copied().enumerate() {
+                            let i = r * 3 + j;
+                            let id = spawn_button(row, &t, item_label(k), MenuAction::AdminSpawn(k), i as i32, i == 0);
+                            row.commands().entity(id).entry::<Node>().and_modify(|mut n| {
+                                n.width = px(170);
+                                n.min_width = px(170);
+                            });
+                        }
+                    });
+                }
                 p.spawn((Text::new("PLAYERS"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
-                for (row_i, (id, name)) in targets(&session, &profile.name).into_iter().enumerate() {
+                for (row_i, (id, name)) in targets(session, me).into_iter().enumerate() {
                     p.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|row| {
                         row.spawn((Text::new(name), t.font(true, t.size_small), TextColor(t.text), Node { width: px(170), ..default() }));
                         let base = 10 + row_i as i32 * 3;
@@ -135,6 +153,7 @@ fn spawn_panel(mut commands: Commands, theme: Res<UiTheme>, unlocked: Res<AdminU
                             let b = spawn_button(row, &t, label, MenuAction::Admin(id, action), base + j as i32, false);
                             row.commands().entity(b).entry::<Node>().and_modify(|mut n| {
                                 n.width = px(120);
+                                n.min_width = px(120);
                             });
                         }
                     });
@@ -160,7 +179,21 @@ fn item_label(k: ItemKind) -> &'static str {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Enter in the code box unlocks (no need to move to the button).
+fn submit_code(keys: Res<ButtonInput<KeyCode>>, focus: Res<bevy::input_focus::InputFocus>, fields: Query<&TextField>, mut out: MessageWriter<MenuActivated>) {
+    if !keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+        return;
+    }
+    if focus.get().and_then(|e| fields.get(e).ok()).is_some_and(|f| f.kind == FieldKind::AdminCode) {
+        out.write(MenuActivated(MenuAction::AdminUnlock));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn panel_actions(
+    mut commands: Commands,
+    theme: Res<UiTheme>,
+    roots: Query<Entity, With<AdminRoot>>,
     mut reader: MessageReader<MenuActivated>,
     mut unlocked: ResMut<AdminUnlocked>,
     mut next: ResMut<NextState<Overlay>>,
@@ -185,8 +218,11 @@ fn panel_actions(
                 let code = fields.iter().find(|f| f.kind == FieldKind::AdminCode).map(|f| f.value.clone()).unwrap_or_default();
                 if code == ADMIN_CODE {
                     unlocked.0 = true;
-                    // Re-open the screen to show the unlocked controls.
-                    next.set(Overlay::Admin);
+                    // Rebuild the panel in place with the unlocked controls.
+                    for e in &roots {
+                        commands.entity(e).try_despawn();
+                    }
+                    build_panel(&mut commands, &theme, true, &session, &profile.name);
                 } else {
                     say("Wrong code.".into());
                 }
@@ -323,6 +359,7 @@ fn spawn_scare_overlay(mut commands: Commands, mut images: ResMut<Assets<Image>>
             GlobalZIndex(90),
             Visibility::Hidden,
             Pickable::IGNORE,
+            crate::theme::PassThrough,
             ScareOverlay,
             DespawnOnExit(AppState::Playing),
         ))

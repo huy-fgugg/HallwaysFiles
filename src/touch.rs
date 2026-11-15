@@ -119,6 +119,7 @@ fn spawn_controls(mut commands: Commands, theme: Res<UiTheme>) {
             Visibility::Hidden,
             GlobalZIndex(15),
             Pickable::IGNORE,
+            crate::theme::PassThrough,
             TouchRoot,
             DespawnOnExit(AppState::Playing),
         ))

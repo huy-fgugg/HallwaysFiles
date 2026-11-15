@@ -452,6 +452,7 @@ fn spawn_cutscene_ui(mut commands: Commands, theme: Res<UiTheme>) {
             Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() },
             GlobalZIndex(30),
             Pickable::IGNORE,
+            crate::theme::PassThrough,
             CutsceneUi,
             DespawnOnExit(AppState::Playing),
             Name::new("Cutscene UI"),

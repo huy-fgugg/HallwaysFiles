@@ -81,6 +81,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
         .spawn((
             Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() },
             Pickable::IGNORE,
+            crate::theme::PassThrough,
             HudRoot,
             DespawnOnExit(AppState::Playing),
             Name::new("HUD"),

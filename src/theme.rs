@@ -205,7 +205,7 @@ pub struct ThemePlugin;
 
 impl Plugin for ThemePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, scale_ui);
+        app.add_systems(Update, (scale_ui, pass_through));
     }
 
     // `finish` runs after every plugin is built, so the AssetServer exists and
@@ -213,6 +213,26 @@ impl Plugin for ThemePlugin {
     fn finish(&self, app: &mut App) {
         let theme = UiTheme::new(app.world().resource::<AssetServer>());
         app.insert_resource(theme);
+    }
+}
+
+/// A display-only overlay (HUD, cutscene bars and fades, effects): it and
+/// everything inside it lets clicks and taps through to the menus underneath.
+/// (`Pickable::IGNORE` on its own only covers the one entity, not its children.)
+#[derive(Component)]
+pub struct PassThrough;
+
+fn pass_through(mut commands: Commands, roots: Query<Entity, With<PassThrough>>, children: Query<&Children>, pickable: Query<(), With<Pickable>>) {
+    for root in &roots {
+        let mut stack = vec![root];
+        while let Some(e) = stack.pop() {
+            if !pickable.contains(e) {
+                commands.entity(e).try_insert(Pickable::IGNORE);
+            }
+            if let Ok(kids) = children.get(e) {
+                stack.extend(kids.iter());
+            }
+        }
     }
 }
 
@@ -228,6 +248,7 @@ fn scale_ui(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     roots: Query<(&ComputedNode, &InheritedVisibility, &Children), With<ScreenRoot>>,
     nodes: Query<(&ComputedNode, &Node, &bevy::ui::UiGlobalTransform)>,
+    all_kids: Query<&Children>,
     mut scale: ResMut<UiScale>,
 ) {
     let Ok(window) = windows.single() else { return };
@@ -238,7 +259,7 @@ fn scale_ui(
         if !vis.get() || root.size.x < 1.0 {
             continue;
         }
-        let (w, h) = content_extent(kids, &nodes);
+        let (w, h, hidden) = content_extent(kids, &nodes, &all_kids);
         let inset = root.content_inset();
         let room = root.size - inset.min_inset - inset.max_inset;
         if std::env::var_os("HALLWAYS_UI_DEBUG").is_some() {
@@ -251,6 +272,13 @@ fn scale_ui(
         }
         if h > 1.0 {
             ratio = ratio.min(room.y / h);
+            // A scrolling panel hiding part of its content (it's capped at a
+            // share of the screen): shrink until it all shows, but never below
+            // a readable size (longer menus keep scrolling).
+            // (This also stops it growing back past the point where it would
+            // overflow again, so it settles.)
+            let soft = hidden.max(SOFT_MIN_SCALE / scale.0.max(0.01));
+            ratio = ratio.min(soft);
         }
     }
     let target = fit_scale(scale.0, base, ratio);
@@ -261,23 +289,46 @@ fn scale_ui(
 
 /// Width and height spanned by a menu's laid-out children (physical pixels),
 /// gaps and margins included. Absolutely placed children don't count.
-fn content_extent(kids: &Children, nodes: &Query<(&ComputedNode, &Node, &bevy::ui::UiGlobalTransform)>) -> (f32, f32) {
-    let (mut lo, mut hi) = (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY));
+/// Smallest UI scale used just to avoid scrolling (fitting the width can go lower).
+/// Returned `hidden` is the fullest scrolling panel's height / content height
+/// (below 1: some is hidden; above 1: room to grow; infinite: no panels).
+pub const SOFT_MIN_SCALE: f32 = 0.45;
+
+fn content_extent(kids: &Children, nodes: &Query<(&ComputedNode, &Node, &bevy::ui::UiGlobalTransform)>, all_kids: &Query<&Children>) -> (f32, f32, f32) {
+    let (mut top, mut bottom, mut w) = (f32::INFINITY, f32::NEG_INFINITY, 0.0f32);
+    // How much of the fullest scrolling panel's content fits in it
+    // (1 = all of it; direct children or one level in).
+    let mut hidden = f32::INFINITY;
+    let scroll_fit = |e: Entity| -> f32 {
+        nodes
+            .get(e)
+            .ok()
+            .filter(|(c, n, _)| n.overflow.y == OverflowAxis::Scroll && c.content_size.y > 1.0)
+            .map_or(f32::INFINITY, |(c, _, _)| (c.size.y / c.content_size.y).max(0.05))
+    };
     for k in kids.iter() {
         let Ok((c, node, tf)) = nodes.get(k) else { continue };
         if node.position_type == PositionType::Absolute || c.size.y < 0.5 {
             continue;
         }
-        lo = lo.min(tf.translation - c.size / 2.0);
-        hi = hi.max(tf.translation + c.size / 2.0);
+        // Width: each item's own size, so slide-in animations (which move
+        // items sideways) don't read as overflow. Height: the stacked span.
+        w = w.max(c.size.x);
+        hidden = hidden.min(scroll_fit(k));
+        if let Ok(grand) = all_kids.get(k) {
+            for g in grand.iter() {
+                hidden = hidden.min(scroll_fit(g));
+            }
+        }
+        top = top.min(tf.translation.y - c.size.y / 2.0);
+        bottom = bottom.max(tf.translation.y + c.size.y / 2.0);
     }
-    if lo.x > hi.x {
-        return (0.0, 0.0);
+    if top > bottom {
+        return (0.0, 0.0, f32::INFINITY);
     }
-    let span = hi - lo;
     // A little breathing room top and bottom. Width gets none: buttons that
     // stretch to fill the menu exactly must not count as overflowing.
-    (span.x, span.y * 1.03)
+    (w, (bottom - top) * 1.03, hidden)
 }
 
 /// Next UI scale: never above `base`; shrink when content doesn't fit

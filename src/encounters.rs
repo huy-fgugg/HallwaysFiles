@@ -321,6 +321,7 @@ fn spawn_hush_ui(mut commands: Commands, theme: Res<UiTheme>) {
             BorderColor::all(Color::srgba(0.25, 0.05, 0.35, 0.0)),
             GlobalZIndex(15),
             Pickable::IGNORE,
+            crate::theme::PassThrough,
             HushOverlay,
             DespawnOnExit(AppState::Playing),
         ))

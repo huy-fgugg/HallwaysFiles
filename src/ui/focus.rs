@@ -141,8 +141,15 @@ fn on_click(
     mut adjust: MessageWriter<AdjustRequested>,
     mut focus: ResMut<InputFocus>,
     mut sfx: MessageWriter<PlaySfx>,
+    fields: Query<(), With<crate::ui::play_menu::TextField>>,
 ) {
     let e = click.entity;
+    if fields.contains(e) {
+        // Tapping/clicking a text box selects it (touch screens have no hover).
+        click.propagate(false);
+        *focus = InputFocus::from_entity(e);
+        return;
+    }
     if let Ok(arrow) = arrows.get(e) {
         click.propagate(false);
         if let Ok(row) = rows.get(arrow.row) {

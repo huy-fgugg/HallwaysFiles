@@ -107,7 +107,7 @@ impl Plugin for PlayMenuPlugin {
     }
 }
 
-pub fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: FieldKind, value: &str, order: i32) {
+pub fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: FieldKind, value: &str, order: i32) -> Entity {
     parent
         .spawn((
             Node {
@@ -126,7 +126,8 @@ pub fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: Field
         .with_children(|r| {
             r.spawn((Text::new(kind.label()), theme.font(true, theme.size_small), TextColor(theme.text_dim)));
             r.spawn((Text::new(value.to_string()), theme.font(true, theme.size_small), TextColor(theme.text), FieldText));
-        });
+        })
+        .id()
 }
 
 fn spawn_play(mut commands: Commands, theme: Res<UiTheme>, profile: Res<Profile>) {
