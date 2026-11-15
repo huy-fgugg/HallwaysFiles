@@ -107,6 +107,7 @@ fn button(parent: &mut ChildSpawnerCommands, theme: &UiTheme, action: Action, po
             BackgroundColor(theme.panel.with_alpha(0.55)),
             BorderColor::all(theme.interact.with_alpha(0.7)),
             TouchButton(action),
+            crate::qa::QaTarget,
         ))
         .with_child((Text::new(action.label()), theme.font(true, if size > 100.0 { 18.0 } else { 13.0 }), TextColor(theme.text), Pickable::IGNORE));
 }

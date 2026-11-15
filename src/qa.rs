@@ -25,6 +25,10 @@ pub fn fake_touch() -> bool {
     std::env::var_os("HALLWAYS_FAKE_TOUCH").is_some()
 }
 
+/// Extra controls reported to scripted playtests (e.g. on-screen touch buttons).
+#[derive(Component)]
+pub struct QaTarget;
+
 pub struct QaPlugin;
 
 impl Plugin for QaPlugin {
@@ -58,7 +62,7 @@ fn label_of(e: Entity, children: &Query<&Children>, texts: &Query<&Text>) -> Str
 #[allow(clippy::type_complexity)]
 fn report_controls(
     window: Query<&Window, With<PrimaryWindow>>,
-    controls: Query<(Entity, &ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<Focusable>>,
+    controls: Query<(Entity, &ComputedNode, &UiGlobalTransform, &InheritedVisibility), Or<(With<Focusable>, With<QaTarget>)>>,
     children: Query<&Children>,
     texts: Query<&Text>,
     mut last: Local<HashMap<String, (i32, i32)>>,
