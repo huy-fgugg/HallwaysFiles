@@ -131,6 +131,16 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.0.7
+- [x] Fix: menus could not be clicked during a run (an invisible cutscene fade layer was catching clicks)
+- [x] Fix: admin panel: the code box is focused, Enter unlocks, the panel rebuilds in place and item buttons sit in tidy rows
+- [x] Fix: Cutscenes menu plays all three cutscenes (The Hollow never started) and returns to the Cutscenes list, with the HUD hidden
+- [x] Fix: main menu clicks missed after closing a submenu (the intro animation replayed)
+- [x] Phone: quick taps always press menu buttons, even when the game runs at a low frame rate
+- [x] Phone: the MENU (pause) and HOLD TO SKIP buttons stay on screen on short phones
+- [x] Removed the DOORS soundtrack
+- [x] Click-through QA on PC (every menu, settings, custom floors, pause, admin, death, retry, quit) and phone emulation (touch-only, phone-sized window: menus, joystick, look, every on-screen button, pause and admin), plus a full-floor autopilot run
+
 ## Phase 6: Release QA (waiting for the owner's final touches)
 - [x] Windows zip and Linux .deb built by the Release workflow and published as a GitHub Release (v1.0.0)
 - [x] .deb installed and launched in a clean Linux container (menu renders, assets found)
