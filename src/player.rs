@@ -76,7 +76,9 @@ fn look(
     let sens = settings.mouse_sensitivity;
     let invert = if settings.invert_y { -1.0 } else { 1.0 };
     // Touch drags count a little more than mouse pixels (phone screens are small).
-    let mut delta = (mouse.delta + std::mem::take(&mut touch.0) * 1.8) * BASE_MOUSE * sens;
+    // (QA phone emulation: the mouse is a finger, so it doesn't also turn the camera.)
+    let mouse_delta = if crate::qa::fake_touch() { Vec2::ZERO } else { mouse.delta };
+    let mut delta = (mouse_delta + std::mem::take(&mut touch.0) * 1.8) * BASE_MOUSE * sens;
     for pad in &pads {
         let s = pad.right_stick();
         if s.length() > 0.15 {

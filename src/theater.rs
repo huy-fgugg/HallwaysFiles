@@ -1,6 +1,7 @@
 //! Cutscene viewer (main menu → Cutscenes): replays any cutscene. It starts a
 //! quiet run in the background (no lobby), puts you where the cutscene
-//! happens, plays it, and returns to the main menu when it ends or is skipped.
+//! happens, plays it, and returns to the Cutscenes list when it ends or is
+//! skipped. The HUD stays hidden throughout.
 
 use bevy::prelude::*;
 
@@ -36,14 +37,35 @@ impl Theater {
     }
 }
 
+/// Set when a viewer run ends, so the main menu reopens the Cutscenes list.
+#[derive(Resource, Debug, Default)]
+pub struct BackToCutscenes(pub bool);
+
 pub struct TheaterPlugin;
 
 impl Plugin for TheaterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Theater>()
+            .init_resource::<BackToCutscenes>()
             .add_systems(Update, auto_from_env.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (stage, finish).chain().run_if(in_state(AppState::Playing)))
-            .add_systems(OnEnter(AppState::MainMenu), |mut t: ResMut<Theater>| *t = Theater::default());
+            .add_systems(Update, (stage, finish, hide_hud).chain().run_if(in_state(AppState::Playing)))
+            .add_systems(OnEnter(AppState::MainMenu), reopen_list.after(crate::state::reset_overlay));
+    }
+}
+
+fn reopen_list(mut t: ResMut<Theater>, mut back: ResMut<BackToCutscenes>, mut next: ResMut<NextState<Overlay>>) {
+    *t = Theater::default();
+    if std::mem::take(&mut back.0) {
+        next.set(Overlay::Cutscenes);
+    }
+}
+
+/// No HUD (timer, hotbar, health) while the viewer shows a cutscene.
+fn hide_hud(theater: Res<Theater>, mut hide: ResMut<crate::ui::hud::HideHud>, mut was: Local<bool>) {
+    let on = theater.active();
+    if on != *was {
+        *was = on;
+        hide.0 = on;
     }
 }
 
@@ -88,10 +110,12 @@ fn stage(
             }
         }
         x if x == THE_HOLLOW => {
-            // Walking into the corridor wakes it (see `hollow`).
+            // In the corridor where it happens (the corridor itself no longer
+            // wakes it since the opening chase was removed, so play it here).
+            tf.translation = Vec3::new(0.0, 0.0, -8.0);
+            p.yaw = 0.0;
             if theater.wait > 0.6 {
-                tf.translation = Vec3::new(0.0, 0.0, -8.0);
-                p.yaw = 0.0;
+                play.write(PlayCutscene(THE_HOLLOW.into()));
                 theater.started = true;
             }
         }
@@ -117,6 +141,7 @@ fn finish(
     mut next_app: ResMut<NextState<AppState>>,
     mut next_overlay: ResMut<NextState<Overlay>>,
     mut exit: MessageWriter<AppExit>,
+    mut back: ResMut<BackToCutscenes>,
 ) {
     let mut done = false;
     for e in ended.read() {
@@ -131,6 +156,7 @@ fn finish(
         if std::env::var_os("HALLWAYS_THEATER").is_some() {
             exit.write(AppExit::Success);
         } else {
+            back.0 = true;
             next_app.set(AppState::MainMenu);
         }
     }

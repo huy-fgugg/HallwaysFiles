@@ -110,7 +110,7 @@ fn restart(mut next_app: ResMut<NextState<AppState>>, mut next_overlay: ResMut<N
     next_app.set(AppState::Playing);
 }
 
-fn reset_overlay(mut next: ResMut<NextState<Overlay>>) {
+pub fn reset_overlay(mut next: ResMut<NextState<Overlay>>) {
     next.set(Overlay::None);
 }
 

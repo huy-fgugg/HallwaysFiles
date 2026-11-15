@@ -15,7 +15,11 @@ pub struct MenusPlugin;
 impl Plugin for MenusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MenuClock>()
-            .add_systems(OnEnter(Screen::MainMenu), (spawn_main_menu, |mut c: ResMut<MenuClock>| c.0 = 0.0))
+            .add_systems(OnEnter(Screen::MainMenu), spawn_main_menu)
+            // The intro animation plays when the menu first appears (launch, or
+            // back from a run), not every time you close Settings/Credits/etc.:
+            // buttons sliding in again made quick clicks miss.
+            .add_systems(OnEnter(AppState::MainMenu), |mut c: ResMut<MenuClock>| c.0 = 0.0)
             .add_systems(OnEnter(Screen::Credits), spawn_credits)
             .add_systems(OnEnter(Screen::Cutscenes), spawn_cutscenes)
             .add_systems(OnEnter(Screen::Death), spawn_death_screen)
@@ -304,7 +308,7 @@ fn manage_cursor(
     mut q: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
 ) {
     let Ok((window, mut cursor)) = q.single_mut() else { return };
-    let in_control = screen.is_some_and(|s| *s.get() == Screen::Hud) && window.focused;
+    let in_control = screen.is_some_and(|s| *s.get() == Screen::Hud) && window.focused && !crate::qa::fake_touch();
     let (grab, visible) = if in_control { (CursorGrabMode::Locked, false) } else { (CursorGrabMode::None, true) };
     if cursor.grab_mode != grab {
         cursor.grab_mode = grab;
