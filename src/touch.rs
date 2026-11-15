@@ -95,7 +95,10 @@ fn button(parent: &mut ChildSpawnerCommands, theme: &UiTheme, action: Action, po
             Node {
                 position_type: PositionType::Absolute,
                 right: px(pos.0),
-                bottom: px(pos.1),
+                // Negative y anchors to the top edge instead (always on screen,
+                // however short the phone is).
+                bottom: if pos.1 >= 0.0 { px(pos.1) } else { Val::Auto },
+                top: if pos.1 < 0.0 { px(-pos.1) } else { Val::Auto },
                 width: px(size),
                 height: px(size),
                 justify_content: JustifyContent::Center,
@@ -131,9 +134,9 @@ fn spawn_controls(mut commands: Commands, theme: Res<UiTheme>) {
             button(root, &t, Action::Light, (40.0, 210.0), 76.0);
             button(root, &t, Action::NextItem, (130.0, 240.0), 76.0);
             button(root, &t, Action::UseItem, (220.0, 240.0), 76.0);
-            button(root, &t, Action::Pause, (24.0, 600.0), 70.0);
+            button(root, &t, Action::Pause, (215.0, -12.0), 64.0);
             button(root, &t, Action::Start, (560.0, 140.0), 110.0);
-            button(root, &t, Action::Skip, (40.0, 360.0), 110.0);
+            button(root, &t, Action::Skip, (40.0, 170.0), 110.0);
             // Floating joystick (shown where the thumb lands).
             root.spawn((
                 Node { position_type: PositionType::Absolute, width: px(STICK_RADIUS * 2.0), height: px(STICK_RADIUS * 2.0), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
