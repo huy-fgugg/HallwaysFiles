@@ -131,7 +131,7 @@ fn pick_room(plan: &crate::floor::plan::FloorPlan, shot: Shot) -> Option<RoomPla
         Shot::Walk { pick: Pick::Room(i), .. } => plan.room(i),
         Shot::Walk { pick: Pick::Gardens, .. } => plan.rooms.iter().find(|r| r.area == Area::Grounds && r.light != LightState::Dark && r.width() > 12.0),
         Shot::Squad { .. } => plan.room(7),
-        Shot::FakeDoors { .. } => plan.rooms.iter().filter(|r| r.mimics.len() >= 2).max_by_key(|r| r.mimics.len()),
+        Shot::FakeDoors { .. } => plan.rooms.iter().filter(|r| !r.mimics.is_empty()).max_by_key(|r| r.mimics.len()),
         Shot::Dark { .. } => plan.rooms.iter().find(|r| r.light == LightState::Dark && r.index >= 10 && r.encounter.is_none()),
         Shot::Gallery { .. } => plan.rooms.iter().filter(|r| r.index >= 30).find(lit),
         Shot::Listener { .. } => plan.rooms.iter().find(|r| r.area == Area::Grounds && r.light != LightState::Dark && r.depth() > 12.0 && r.index > 52),
