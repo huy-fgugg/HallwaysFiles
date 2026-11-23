@@ -146,12 +146,13 @@ fn run_cues(
     mut gates: Query<&mut Gate>,
     mut actors: Query<&mut Actor>,
     sets: Query<Entity, With<EndingSet>>,
+    stand_in: Query<Entity, With<crate::floor::build::FinalVestibule>>,
 ) {
     let mut queue = std::mem::take(&mut active.ending).into_iter();
     while let Some((cue, instant)) = queue.next() {
         match cue {
             EndingCue::Build => {
-                for e in &sets {
+                for e in sets.iter().chain(stand_in.iter()) {
                     commands.entity(e).try_despawn();
                 }
                 build_set(&mut commands, &mut meshes, &mut mats, anchor.0);

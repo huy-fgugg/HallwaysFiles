@@ -82,7 +82,25 @@ pub const FAKE_SPACING: f32 = 1.8;
 pub const PURSUIT_FIRST: u32 = 41;
 pub const PURSUIT_LAST: u32 = 46;
 /// Chase rooms whose exit wall has a fake door beside the real one.
-pub const CHASE_CHOICE_ROOMS: [u32; 2] = [43, 45];
+pub const CHASE_CHOICE_ROOMS: [u32; 4] = [43, 45, 78, 80];
+/// The Hollow's chases (first and last room). The second one comes late in
+/// the floor; Door `last + 1` slams shut behind the survivors of each.
+pub const CHASES: [(u32, u32); 2] = [(PURSUIT_FIRST, PURSUIT_LAST), (76, 81)];
+
+/// The chases that fit on a floor ending at `last` (custom floors can be short).
+pub fn chases(last: u32) -> impl Iterator<Item = (u32, u32)> {
+    CHASES.into_iter().filter(move |&(_, b)| last >= b + 2)
+}
+
+/// The chase that room `index` belongs to, if any.
+pub fn chase_of(index: u32, last: u32) -> Option<(u32, u32)> {
+    chases(last).find(|&(a, b)| (a..=b).contains(&index))
+}
+
+/// True for the two rooms right before a chase starts.
+pub fn just_before_chase(index: u32, last: u32) -> bool {
+    chases(last).any(|(a, _)| (a.saturating_sub(2)..a).contains(&index))
+}
 /// Room entered through Door 050: the Reading Hall, a big archive room whose
 /// exit is locked until you find the key among its shelves.
 pub const READING_HALL: u32 = 50;
@@ -144,12 +162,12 @@ impl Area {
     /// (width range, depth range) for ordinary rooms in this area.
     fn size_ranges(self) -> ((f32, f32), (f32, f32)) {
         match self {
-            Area::GuestWing => ((5.0, 8.0), (5.0, 8.0)),
-            Area::Archive => ((7.0, 10.0), (7.0, 10.0)),
-            Area::ServiceTunnels => ((4.5, 6.5), (7.0, 12.0)),
-            Area::Grounds => ((11.0, 16.0), (10.0, 16.0)),
-            Area::QuarryLift => ((5.0, 8.0), (6.0, 10.0)),
-            Area::Atrium => ((10.0, 13.0), (9.0, 13.0)),
+            Area::GuestWing => ((7.0, 11.0), (8.0, 13.0)),
+            Area::Archive => ((9.0, 13.0), (10.0, 15.0)),
+            Area::ServiceTunnels => ((5.5, 8.0), (11.0, 18.0)),
+            Area::Grounds => ((18.0, 26.0), (18.0, 28.0)),
+            Area::QuarryLift => ((6.5, 10.0), (9.0, 15.0)),
+            Area::Atrium => ((12.0, 16.0), (12.0, 18.0)),
         }
     }
 }
@@ -503,7 +521,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             candidates[i].0
         };
         // The chase rooms must never be locked.
-        let pursuit = (PURSUIT_FIRST..=PURSUIT_LAST).contains(&index) && last >= PURSUIT_LAST + 2;
+        let pursuit = chase_of(index, last).is_some();
         let kind = if pursuit && kind == RoomKind::KeyPuzzle {
             // Swap the lock for something that keeps the no-three-in-a-row rule.
             let prev = history.last().copied();
@@ -524,24 +542,24 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         // ---- Size ----
         let ((w0, w1), (d0, d1)) = area.size_ranges();
         let (width, depth) = match kind {
-            RoomKind::Hall => (3.0, rng.range_f32(10.0, 16.0)),
+            RoomKind::Hall => (3.4, rng.range_f32(15.0, 24.0)),
             RoomKind::Final => (13.0, 15.0),
             RoomKind::Transition => (w1, d0.max(6.0)),
             _ => (rng.range_f32(w0, w1), rng.range_f32(d0, d1)),
         };
         // Outdoor gardens: wide, and some stretch out much longer.
         let (width, depth) = if area == Area::Grounds && kind == RoomKind::Hall {
-            (6.0, depth)
+            (7.0, depth)
         } else if area == Area::Grounds && !matches!(kind, RoomKind::Final | RoomKind::Transition) && rng.next_f32() < 0.35 {
-            (width, (depth * 1.5).min(24.0))
+            (width, (depth * 1.5).min(40.0))
         } else {
             (width, depth)
         };
         // The chase runs through big rooms; the Reading Hall is the biggest.
         let (width, depth) = if reading_hall {
-            (13.0, 19.0)
+            (15.0, 23.0)
         } else if pursuit {
-            (rng.range_f32(9.0, 12.0), rng.range_f32(14.0, 19.0))
+            (rng.range_f32(11.0, 14.0), rng.range_f32(20.0, 27.0))
         } else {
             (width, depth)
         };
@@ -608,7 +626,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         }
         // A Surge/Undertow keeps making passes into the next rooms: keep it out
         // of the two rooms before the chase.
-        let near_chase = last >= PURSUIT_LAST + 2 && (PURSUIT_FIRST - 2..PURSUIT_FIRST).contains(&index);
+        let near_chase = just_before_chase(index, last);
         let encounter = if near_chase && encounter.is_some_and(Encounter::needs_hiding) { None } else { encounter };
         let surge = encounter.is_some_and(Encounter::needs_hiding);
 
@@ -737,14 +755,14 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         entry_x = exit_x;
         south = min.y - WALL_T;
     }
-    ensure_every_encounter(&mut rooms, cfg, seed);
+    ensure_every_encounter(&mut rooms, cfg, seed, last);
     FloorPlan { seed, rooms, last_room: last }
 }
 
 /// Every entity that can appear (chance > 0) appears at least once per floor:
 /// any that the dice skipped is placed in a suitable free room, keeping the
 /// usual rules (never in adjacent rooms, not in the chase or transition rooms).
-fn ensure_every_encounter(rooms: &mut [RoomPlan], cfg: &EntityConfig, seed: u64) {
+fn ensure_every_encounter(rooms: &mut [RoomPlan], cfg: &EntityConfig, seed: u64, last: u32) {
     let all = [
         (Encounter::Surge, &cfg.surge),
         (Encounter::Undertow, &cfg.undertow),
@@ -773,7 +791,7 @@ fn ensure_every_encounter(rooms: &mut [RoomPlan], cfg: &EntityConfig, seed: u64)
                 Encounter::Gallery => r.light != LightState::Dark && r.kind != RoomKind::Hall,
                 Encounter::Hush => r.light != LightState::Dark,
                 Encounter::Listener => matches!(r.area, Area::Grounds | Area::Archive) && r.light != LightState::Dark,
-                Encounter::Surge | Encounter::Undertow => r.entry_height == 0.0 && !(PURSUIT_FIRST - 2..PURSUIT_FIRST).contains(&r.index),
+                Encounter::Surge | Encounter::Undertow => r.entry_height == 0.0 && !just_before_chase(r.index, last),
             };
             slot_ok
                 && !r.pursuit
@@ -978,10 +996,10 @@ mod tests {
             total += surges.len();
             for r in plan.rooms.iter().filter(|r| r.surge()) {
                 assert!(r.hiding, "surge room {} must have a hiding spot", r.index);
-                assert!(r.index >= 6);
+                assert!(r.index >= EntityConfig::default().surge.min_room.min(EntityConfig::default().undertow.min_room));
             }
             for w in surges.windows(2) {
-                assert!(w[1] - w[0] >= 6, "seed {seed}: surges too close");
+                assert!(w[1] - w[0] >= EntityConfig::default().surge.cooldown, "seed {seed}: surges too close");
             }
         }
         assert!(total > 100, "surge should appear several times per floor on average");
@@ -1143,15 +1161,19 @@ mod tests {
     fn chase_rooms_are_clear() {
         for seed in 0..30 {
             let plan = generate(seed);
-            for i in PURSUIT_FIRST..=PURSUIT_LAST {
-                let r = plan.room(i).unwrap();
-                assert!(r.pursuit);
-                assert!(r.encounter.is_none() && r.feature.is_none());
-                assert_eq!(r.mimics.len(), usize::from(CHASE_CHOICE_ROOMS.contains(&i)), "room {i}");
-                assert!(r.dividers().len() >= 2, "chase rooms are big with obstacles");
-                assert_ne!(r.kind, RoomKind::KeyPuzzle);
+            assert_eq!(chases(plan.last_room).count(), 2, "two chases on a full floor");
+            for (a, b) in chases(plan.last_room) {
+                for i in a..=b {
+                    let r = plan.room(i).unwrap();
+                    assert!(r.pursuit);
+                    assert!(r.encounter.is_none() && r.feature.is_none());
+                    assert_eq!(r.mimics.len(), usize::from(CHASE_CHOICE_ROOMS.contains(&i)), "room {i}");
+                    assert!(r.dividers().len() >= 2, "chase rooms are big with obstacles");
+                    assert_ne!(r.kind, RoomKind::KeyPuzzle);
+                }
+                assert!(!plan.room(b + 1).unwrap().pursuit);
+                assert!(!plan.room(a - 1).unwrap().pursuit);
             }
-            assert!(!plan.room(PURSUIT_LAST + 1).unwrap().pursuit);
         }
         // Short custom floors have no chase.
         let short = generate_custom(1, &EntityConfig::default(), &GenOptions { last_room: 30, ..GenOptions::default() });
@@ -1162,9 +1184,11 @@ mod tests {
     fn no_rushing_entity_right_before_the_chase() {
         for seed in 0..200 {
             let plan = generate(seed);
-            for i in PURSUIT_FIRST - 2..PURSUIT_FIRST {
-                let r = plan.room(i).unwrap();
-                assert!(!r.encounter.is_some_and(Encounter::needs_hiding), "seed {seed} room {i}: {:?}", r.encounter);
+            for (a, _) in chases(plan.last_room) {
+                for i in a - 2..a {
+                    let r = plan.room(i).unwrap();
+                    assert!(!r.encounter.is_some_and(Encounter::needs_hiding), "seed {seed} room {i}: {:?}", r.encounter);
+                }
             }
         }
     }

@@ -428,10 +428,25 @@ fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<cr
         });
 }
 
-fn death_actions(mut reader: MessageReader<MenuActivated>, mut next_app: ResMut<NextState<AppState>>) {
+fn death_actions(
+    mut reader: MessageReader<MenuActivated>,
+    mut next_app: ResMut<NextState<AppState>>,
+    mut seed: ResMut<RunSeed>,
+    profile: Res<crate::profile::Profile>,
+    preset: Res<crate::presets::ActivePreset>,
+    session: Res<crate::net::NetSession>,
+) {
     for MenuActivated(a) in reader.read() {
         match a {
-            MenuAction::Retry => next_app.set(AppState::Restarting),
+            MenuAction::Retry => {
+                // A retry is a new floor (new rooms, monsters and chase), unless the
+                // player typed a seed to replay or the room's host picked it.
+                let typed = !profile.seed_text.trim().is_empty() || preset.0.as_ref().is_some_and(|p| !p.seed.trim().is_empty());
+                if !typed && !session.online() {
+                    *seed = RunSeed(crate::ui::play_menu::random_seed());
+                }
+                next_app.set(AppState::Restarting);
+            }
             MenuAction::AbandonRun => next_app.set(AppState::MainMenu),
             _ => {}
         }

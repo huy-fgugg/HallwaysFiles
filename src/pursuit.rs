@@ -12,7 +12,7 @@
 use bevy::prelude::*;
 
 use crate::audio::{PlaySfx, Sfx};
-use crate::floor::plan::{FloorPlan, PURSUIT_FIRST, PURSUIT_LAST, WALL_T};
+use crate::floor::plan::{chases, FloorPlan, PURSUIT_FIRST, PURSUIT_LAST, WALL_T};
 use crate::floor::{Floor, FloorRuntime};
 use crate::hollow::{DeathCause, Hollow, SuppressHollow};
 use crate::interaction::{Door, Interactable};
@@ -23,10 +23,10 @@ use crate::state::{gameplay_active, AppState, Overlay};
 use crate::world::Mood;
 
 /// Faster than walking, slower than sprinting.
-pub const PURSUIT_SPEED: f32 = 4.1;
+pub const PURSUIT_SPEED: f32 = 4.6;
 /// When it falls this far behind it hurries to keep the pressure on.
 const CATCH_UP_GAP: f32 = 13.0;
-const CATCH_UP_SPEED: f32 = 5.0;
+const CATCH_UP_SPEED: f32 = 5.1;
 pub const PURSUIT_CATCH: f32 = 1.15;
 const CUE_SECS: f32 = 2.6;
 const SINK_SECS: f32 = 2.2;
@@ -46,12 +46,22 @@ pub enum PursuitPhase {
     Done,
 }
 
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug)]
 pub struct Pursuit {
     pub phase: PursuitPhase,
     path: Vec<Vec3>,
-    /// Door 047 has slammed shut behind the survivors.
+    /// The exit door of the current chase has slammed shut behind the survivors.
     pub door_shut: bool,
+    /// Which chase (first and last room) is running or ran last.
+    pub chase: (u32, u32),
+    /// First rooms of the chases already run this floor.
+    pub ran: Vec<u32>,
+}
+
+impl Default for Pursuit {
+    fn default() -> Self {
+        Self { phase: PursuitPhase::default(), path: vec![], door_shut: false, chase: (PURSUIT_FIRST, PURSUIT_LAST), ran: vec![] }
+    }
 }
 
 impl Pursuit {
@@ -65,17 +75,22 @@ impl Pursuit {
 /// through every chase room's openings between the barricades, to just
 /// inside Room 047.
 pub fn pursuit_path(plan: &FloorPlan) -> Vec<Vec3> {
+    pursuit_path_for(plan, (PURSUIT_FIRST, PURSUIT_LAST))
+}
+
+/// The route of one chase (first and last room).
+pub fn pursuit_path_for(plan: &FloorPlan, (first, last): (u32, u32)) -> Vec<Vec3> {
     let mut pts = vec![];
-    if let Some(r) = plan.room(PURSUIT_FIRST - 1) {
+    if let Some(r) = plan.room(first - 1) {
         pts.push(Vec3::new(r.exit_x, 0.0, r.min.y + 1.2));
         pts.push(Vec3::new(r.exit_x, 0.0, r.min.y + 0.4));
     }
-    for i in PURSUIT_FIRST..=PURSUIT_LAST + 1 {
+    for i in first..=last + 1 {
         let Some(r) = plan.room(i) else { continue };
         // Through the doorway.
         pts.push(Vec3::new(r.entry_x, r.entry_height, r.max.y + WALL_T + 0.4));
         let route = r.route();
-        if i == PURSUIT_LAST + 1 {
+        if i == last + 1 {
             pts.push(Vec3::new(route[0].x, r.entry_height, route[0].y));
             break;
         }
@@ -171,15 +186,19 @@ fn trigger(
     mut subs: MessageWriter<Subtitle>,
     mut surge: (ResMut<crate::surge::SurgeState>, Query<Entity, With<crate::surge::SurgeBody>>),
 ) {
-    if pursuit.phase != PursuitPhase::Idle || suppress.0 || std::env::var_os("HALLWAYS_CAPTURE").is_some() {
+    if !matches!(pursuit.phase, PursuitPhase::Idle | PursuitPhase::Done) || suppress.0 || std::env::var_os("HALLWAYS_CAPTURE").is_some() {
         return;
     }
     let Some(floor) = floor else { return };
     let Some(room) = floor.0.room(run.current_room) else { return };
-    if !room.pursuit || run.current_room != PURSUIT_FIRST {
+    let Some(chase) = chases(floor.0.last_room).find(|&(a, _)| a == run.current_room) else { return };
+    if !room.pursuit || pursuit.ran.contains(&chase.0) {
         return;
     }
-    let path = pursuit_path(&floor.0);
+    let path = pursuit_path_for(&floor.0, chase);
+    pursuit.chase = chase;
+    pursuit.ran.push(chase.0);
+    pursuit.door_shut = false;
     let Some(start) = path.first().copied() else { return };
     let e = crate::hollow::spawn_hollow(&mut commands, &mut meshes, &mut mats, start);
     commands.entity(e).insert(PursuitHollow);
@@ -240,7 +259,7 @@ fn run_pursuit(
             pursuit.phase = if t >= CUE_SECS { PursuitPhase::Chasing { seg: 0 } } else { PursuitPhase::Cue(t) };
         }
         PursuitPhase::Chasing { mut seg } => {
-            if run.current_room > PURSUIT_LAST {
+            if run.current_room > pursuit.chase.1 {
                 pursuit.phase = PursuitPhase::Sinking(0.0);
                 sfx.write(PlaySfx(Sfx::Ooze));
                 subs.write(Subtitle::info("[Behind you, the shrieking stops. It's sinking back into the ink.]"));
@@ -289,7 +308,7 @@ fn run_pursuit(
                 sfx.write(PlaySfx(Sfx::Stinger));
                 *death = DeathCause {
                     title: "THE HOLLOW CAUGHT UP".into(),
-                    cause: format!("Run down in Room {:03} during the chase after Door 040.", run.current_room),
+                    cause: format!("Run down in Room {:03} during the chase after Door {:03}.", run.current_room, pursuit.chase.0 - 1),
                     lesson: "When the lights bleed red after Door 040, hiding won't save you. Sprint and keep moving: the doors open as you reach them.".into(),
                 };
                 next_overlay.set(Overlay::Dead);
@@ -470,6 +489,10 @@ fn dev_bot(
     }
     tf.translation = best;
     pl.yaw = (-to.x).atan2(-to.z);
+    // QA: HALLWAYS_LOOKBACK glances back over the shoulder for a moment every few seconds.
+    if std::env::var_os("HALLWAYS_LOOKBACK").is_some() && now % 5.0 > 4.0 {
+        pl.yaw += std::f32::consts::PI;
+    }
 }
 
 /// The bot can't die: a death screen is closed straight away.
@@ -518,8 +541,6 @@ fn guide_light(
         });
 }
 
-/// Rooms before Door 040 where ink starts seeping down the walls.
-pub const WARNING_ROOMS: std::ops::RangeInclusive<u32> = (PURSUIT_FIRST - 3)..=(PURSUIT_FIRST - 1);
 
 #[derive(Component)]
 struct InkDrip {
@@ -560,12 +581,14 @@ fn ink_warnings(
     }
     let Some(floor) = floor else { return };
     let room = run.current_room;
-    if !WARNING_ROOMS.contains(&room) || done.contains(&room) || !floor.0.room(PURSUIT_FIRST).is_some_and(|r| r.pursuit) {
+    // The three rooms before each chase.
+    let Some((first, _)) = chases(floor.0.last_room).find(|&(a, _)| (a.saturating_sub(3)..a).contains(&room)) else { return };
+    if done.contains(&room) || !floor.0.room(first).is_some_and(|r| r.pursuit) {
         return;
     }
     let Some(r) = floor.0.room(room) else { return };
     done.push(room);
-    let step = room + 1 - *WARNING_ROOMS.start(); // 1, 2, 3
+    let step = room + 4 - first; // 1, 2, 3
     let ink = mats.add(StandardMaterial { base_color: Color::srgb(0.005, 0.004, 0.006), perceptual_roughness: 0.15, reflectance: 0.3, ..default() });
     let mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let mut rng = crate::rng::GameRng::new(r.seed ^ 0x1A4);
@@ -612,12 +635,13 @@ fn shut_door_behind(
         return;
     }
     let (Some(floor), Ok(p)) = (floor, player.single()) else { return };
-    let Some(r) = floor.0.room(PURSUIT_LAST) else { return };
+    let last = pursuit.chase.1;
+    let Some(r) = floor.0.room(last) else { return };
     let door_z = r.min.y - WALL_T;
     if !door_should_shut(p.translation.z, run.vitality > 0.0, peers.0.values().map(|s| (s.p[2], s.alive)), door_z) {
         return;
     }
-    let number = PURSUIT_LAST + 1;
+    let number = last + 1;
     for (e, mut d) in &mut doors {
         if d.number != number || d.mimic {
             continue;
@@ -642,7 +666,7 @@ fn shut_door_behind(
     shake.add(0.6);
     sfx.write(PlaySfx(Sfx::DoorLocked));
     sfx.write(PlaySfx(Sfx::Stinger));
-    subs.write(Subtitle::info("[BANG] Door 047 slams shut behind you. Keep going."));
+    subs.write(Subtitle::info(format!("[BANG] Door {number:03} slams shut behind you. Keep going.")));
 }
 
 /// Pure rule: shut once the local player (if alive) and every living teammate
@@ -682,7 +706,7 @@ fn auto_doors(
     }
     let Ok(p) = player.single() else { return };
     for (e, mut door, gt) in &mut doors {
-        if door.open || door.mimic || !(PURSUIT_FIRST + 1..=PURSUIT_LAST + 1).contains(&door.number) {
+        if door.open || door.mimic || !(pursuit.chase.0 + 1..=pursuit.chase.1 + 1).contains(&door.number) {
             continue;
         }
         let d = gt.translation() - p.translation;
@@ -736,6 +760,8 @@ mod tests {
         // In a choice room the route passes the real exit, never a fake door.
         for i in crate::floor::plan::CHASE_CHOICE_ROOMS {
             let r = plan.room(i).unwrap();
+            let chase = crate::floor::plan::chase_of(i, plan.last_room).unwrap();
+            let path = pursuit_path_for(&plan, chase);
             let at_wall: Vec<_> = path.iter().filter(|v| (v.z - r.min.y).abs() < 1.0).collect();
             assert!(!at_wall.is_empty());
             for v in at_wall {

@@ -41,6 +41,27 @@ enum Mode {
     Hunt,
     /// Standing still, head cocked, listening.
     Listen(f32),
+    /// Squeezing through the exit door after you: it crouches down, shuffles
+    /// through the doorway and stands back up in the next room.
+    Door { t: f32, from: Vec3, to: Vec3, next: u32 },
+}
+
+/// Seconds the crouch-through-the-door move takes.
+const DOOR_SECS: f32 = 2.2;
+/// How many doors it will follow you through.
+const MAX_FOLLOWS: u8 = 1;
+/// It's taller than the doors: this much bigger than its base model.
+const SIZE: f32 = 1.2;
+
+/// 0 = standing, 1 = fully crouched, during the door move (time `k` 0..1).
+pub fn door_crouch(k: f32) -> f32 {
+    if k < 0.3 {
+        k / 0.3
+    } else if k < 0.75 {
+        1.0
+    } else {
+        (1.0 - (k - 0.75) / 0.25).max(0.0)
+    }
 }
 
 #[derive(Component)]
@@ -52,11 +73,18 @@ pub struct Listener {
     step: f32,
     rng: GameRng,
     heard_cooldown: f32,
+    /// Doors followed through so far.
+    follows: u8,
+    /// 0..1 how far it's crouched (door move).
+    crouch: f32,
+    /// 0..1 how wide its jaw hangs open (hunting).
+    jaw: f32,
 }
 
 #[derive(Component, Clone, Copy)]
 enum Part {
     Head,
+    Jaw,
     Arm(bool),
     Leg(bool),
     Torso,
@@ -130,8 +158,8 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
     };
     commands
         .spawn((
-            Listener { room: r.index, mode: Mode::Patrol, target: at, phase: 0.0, step: 0.0, rng, heard_cooldown: 0.0 },
-            Transform::from_translation(at),
+            Listener { room: r.index, mode: Mode::Patrol, target: at, phase: 0.0, step: 0.0, rng, heard_cooldown: 0.0, follows: 0, crouch: 0.0, jaw: 0.0 },
+            Transform::from_translation(at).with_scale(Vec3::splat(SIZE)),
             Visibility::default(),
             DespawnOnExit(AppState::Playing),
             Name::new("The Listener"),
@@ -161,6 +189,10 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
                     piece(torso, &cyl, &bark, Vec3::new(0.0, y, -0.05), Quat::from_rotation_z(a) * Quat::from_rotation_x(0.18), Vec3::new(0.38, 0.05, 0.3));
                 }
                 piece(torso, &sph, &moss, Vec3::new(0.1, 0.9, -0.15), Quat::IDENTITY, Vec3::new(0.25, 0.16, 0.18));
+                // Ember-lit cracks running through the bark, as if it burns inside.
+                for (x, y, a, len) in [(-0.08f32, 0.35f32, 0.3f32, 0.35f32), (0.1, 0.55, -0.5, 0.3), (-0.02, 0.75, 0.15, 0.28), (0.12, 0.25, 0.7, 0.2), (-0.13, 0.62, -0.2, 0.22)] {
+                    piece(torso, &cyl, &glow, Vec3::new(x, y, -0.21), Quat::from_rotation_z(a) * Quat::from_rotation_x(0.18), Vec3::new(0.012, len, 0.012));
+                }
                 piece(torso, &sph, &moss, Vec3::new(-0.12, 0.4, 0.1), Quat::IDENTITY, Vec3::new(0.18, 0.12, 0.14));
                 // A cage of roots over the chest, like ribs.
                 for k in 0..4 {
@@ -181,6 +213,20 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
                 torso.spawn((Part::Head, Transform::from_xyz(0.0, 1.18, -0.16), Visibility::default())).with_children(|h| {
                     piece(h, &sph, &pale, Vec3::new(0.0, 0.18, 0.0), Quat::IDENTITY, Vec3::new(0.3, 0.46, 0.32));
                     piece(h, &cyl, &glow, Vec3::new(0.0, 0.08, -0.155), Quat::IDENTITY, Vec3::new(0.025, 0.22, 0.01));
+                    // A long hinged jaw full of splinter teeth; it gapes when it hears you.
+                    h.spawn((Part::Jaw, Transform::from_xyz(0.0, 0.0, -0.05), Visibility::default())).with_children(|j| {
+                        piece(j, &sph, &pale, Vec3::new(0.0, -0.08, -0.06), Quat::IDENTITY, Vec3::new(0.24, 0.14, 0.26));
+                        piece(j, &sph, &glow, Vec3::new(0.0, -0.03, -0.1), Quat::IDENTITY, Vec3::new(0.16, 0.04, 0.16));
+                        for k in 0..7 {
+                            let a = (k as f32 - 3.0) * 0.32;
+                            piece(j, &cone, &pale, Vec3::new(a.sin() * 0.1, 0.0, -0.06 - a.cos() * 0.1), Quat::IDENTITY, Vec3::new(0.025, 0.09, 0.025));
+                        }
+                    });
+                    // Upper teeth hanging from the skull.
+                    for k in 0..7 {
+                        let a = (k as f32 - 3.0) * 0.32;
+                        piece(h, &cone, &pale, Vec3::new(a.sin() * 0.11, -0.02, -0.11 - a.cos() * 0.1), Quat::from_rotation_x(std::f32::consts::PI), Vec3::new(0.025, 0.1, 0.025));
+                    }
                     // A faint ember glow leaking from the split.
                     h.spawn((PointLight { color: Color::srgb(1.0, 0.55, 0.2), intensity: 6_000.0, range: 2.5, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(0.0, 0.08, -0.25)));
                     // Bark knots on the pale skull.
@@ -219,6 +265,7 @@ fn spawn_listener(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut
 fn think(
     time: Res<Time>,
     floor: Option<Res<Floor>>,
+    rt: Option<Res<FloorRuntime>>,
     mut listeners: Query<(&mut Listener, &mut Transform), Without<Player>>,
     player: Query<(&Player, &Transform), Without<Listener>>,
     hide: Res<HideState>,
@@ -241,6 +288,48 @@ fn think(
         let pos = Vec3::new(tf.translation.x, 0.0, tf.translation.z);
         let dist = pos.distance(ppos);
         l.heard_cooldown = (l.heard_cooldown - dt).max(0.0);
+        let hunting = matches!(l.mode, Mode::Hunt | Mode::Door { .. });
+        l.jaw += ((if hunting { 1.0 } else { 0.0 }) - l.jaw) * (dt * 3.0).min(1.0);
+        // Squeezing through a door: crouch, shuffle through, stand back up.
+        if let Mode::Door { t, from, to, next } = l.mode {
+            let t = t + dt;
+            let k = (t / DOOR_SECS).min(1.0);
+            l.crouch = door_crouch(k);
+            let p = from.lerp(to, ((k - 0.25) / 0.55).clamp(0.0, 1.0));
+            tf.translation = Vec3::new(p.x, 0.0, p.z);
+            tf.rotation = Quat::IDENTITY;
+            l.phase += dt * 1.6;
+            l.mode = if k >= 1.0 {
+                l.room = next;
+                l.follows += 1;
+                info!("QA listener came through into room {next:03}");
+                l.target = ppos;
+                sfx.write(PlaySfx(Sfx::Whisper));
+                Mode::Hunt
+            } else {
+                Mode::Door { t, from, to, next }
+            };
+            tf.scale = Vec3::new(SIZE, SIZE * (1.0 - 0.42 * l.crouch), SIZE);
+            continue;
+        }
+        l.crouch = 0.0;
+        tf.scale = Vec3::splat(SIZE);
+        // You left through the exit door while it was hunting you: it follows.
+        let door_open = rt.as_ref().is_some_and(|rt| rt.opened.contains(&r.exit_door()));
+        let raised = matches!(r.feature, Some(crate::floor::plan::Feature::RaisedExit { .. }));
+        let gone_ahead = ptf.translation.z < r.min.y - crate::floor::plan::WALL_T - 0.3;
+        if l.mode == Mode::Hunt && gone_ahead && door_open && !raised && l.follows < MAX_FOLLOWS && floor.0.room(l.room + 1).is_some() {
+            let door_front = Vec3::new(r.exit_x, 0.0, r.min.y + 0.7);
+            l.target = door_front;
+            if pos.distance(door_front) < 0.45 {
+                let to = Vec3::new(r.exit_x, 0.0, r.min.y - crate::floor::plan::WALL_T - 1.3);
+                l.mode = Mode::Door { t: 0.0, from: door_front, to, next: l.room + 1 };
+                info!("QA listener crouching through door {:03}", r.exit_door());
+                sfx.write(PlaySfx(Sfx::GateRattle));
+                subs.write(Subtitle::danger("[It hunches down and squeezes through the doorway after you.]"));
+                continue;
+            }
+        }
         // Hearing (only while you're in its garden).
         let in_room = ptf.translation.z <= r.max.y + 0.2 && ptf.translation.z >= r.min.y - 0.3;
         let radius = noise_radius(pl.speed, pl.crouching, pl.sprinting, hiding);
@@ -257,8 +346,10 @@ fn think(
         // Movement.
         let (speed, arrived) = match l.mode {
             Mode::Patrol => (PATROL_SPEED, pos.distance(l.target) < 0.4),
+            // Heading for the door after you: don't stop to listen on the way.
+            Mode::Hunt if gone_ahead && l.follows < MAX_FOLLOWS => (HUNT_SPEED, false),
             Mode::Hunt => (HUNT_SPEED, pos.distance(l.target) < 0.5),
-            Mode::Listen(_) => (0.0, false),
+            Mode::Listen(_) | Mode::Door { .. } => (0.0, false),
         };
         if arrived {
             l.mode = match l.mode {
@@ -333,13 +424,19 @@ fn animate(time: Res<Time>, listeners: Query<(&Listener, &Children)>, children: 
                 }
                 Part::Torso => {
                     tf.translation.y = 1.35 + (l.phase * 2.0).sin().abs() * 0.04;
-                    tf.rotation = Quat::from_rotation_z((l.phase).sin() * 0.05);
+                    // Hunched forward when hunting, folded right over to fit through a door.
+                    let hunch = if matches!(l.mode, Mode::Hunt) { 0.25 } else { 0.0 } + l.crouch * 0.8;
+                    tf.rotation = Quat::from_rotation_x(-hunch) * Quat::from_rotation_z((l.phase).sin() * 0.05);
+                }
+                Part::Jaw => {
+                    tf.rotation = Quat::from_rotation_x(l.jaw * 0.55 + l.jaw * (t * 14.0).sin() * 0.06);
                 }
                 Part::Head => {
                     // Listening: the head cocks to one side and twitches.
                     tf.rotation = match l.mode {
                         Mode::Listen(_) => Quat::from_rotation_z(0.45 + (t * 9.0).sin() * 0.04) * Quat::from_rotation_y((t * 1.3).sin() * 0.5),
-                        Mode::Hunt => Quat::from_rotation_x(0.2),
+                        Mode::Hunt => Quat::from_rotation_x(0.2) * Quat::from_rotation_z((t * 11.0).sin() * 0.08),
+                        Mode::Door { .. } => Quat::from_rotation_x(0.5),
                         Mode::Patrol => Quat::from_rotation_y((t * 0.7).sin() * 0.4),
                     };
                 }
@@ -350,7 +447,9 @@ fn animate(time: Res<Time>, listeners: Query<(&Listener, &Children)>, children: 
 
 fn despawn_when_left(mut commands: Commands, run: Res<RunState>, listeners: Query<(Entity, &Listener)>) {
     for (e, l) in &listeners {
-        if run.current_room > l.room + 1 || run.current_room + 2 < l.room {
+        // While it can still follow you through a door it stays a room longer.
+        let reach = if l.follows < MAX_FOLLOWS { 2 } else { 1 };
+        if run.current_room > l.room + reach || run.current_room + 2 < l.room {
             commands.entity(e).try_despawn();
         }
     }
@@ -359,6 +458,17 @@ fn despawn_when_left(mut commands: Commands, run: Res<RunState>, listeners: Quer
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crouches_down_through_the_door_and_stands_back_up() {
+        assert_eq!(door_crouch(0.0), 0.0);
+        assert_eq!(door_crouch(0.5), 1.0);
+        assert_eq!(door_crouch(1.0), 0.0);
+        // Taller than a door standing up; fits through crouched.
+        let height = 2.9 * SIZE;
+        assert!(height > crate::floor::plan::DOOR_H);
+        assert!(height * (1.0 - 0.42) < crate::floor::plan::DOOR_H + 0.1);
+    }
 
     #[test]
     fn hearing_rules() {

@@ -1,7 +1,7 @@
 // HALLWAYS item tuning. `weight` is the relative chance of the item appearing
 // when a drawer rolls an item instead of Lumens.
 (
-    item_chance: 0.17,
+    item_chance: 0.11,
     flashlight:    (name: "Flashlight",    weight: 3.0, max_stack: 1, power: 150.0),  // power = battery seconds
     lockpick:      (name: "Lockpick",      weight: 2.0, max_stack: 3, power: 0.0),
     vitamins:      (name: "Vitamins",      weight: 2.5, max_stack: 3, power: 8.0),    // power = boost seconds

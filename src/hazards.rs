@@ -16,7 +16,7 @@
 use bevy::prelude::*;
 
 use crate::audio::{PlaySfx, Sfx};
-use crate::floor::plan::{door_zones, zones_overlap, FloorPlan, RoomPlan, Zone, LANDING_DEPTH, PURSUIT_FIRST, PURSUIT_LAST, STEP_RISE, STEP_RUN};
+use crate::floor::plan::{chases, door_zones, zones_overlap, FloorPlan, RoomPlan, Zone, LANDING_DEPTH, STEP_RISE, STEP_RUN};
 use crate::floor::{Floor, FloorRuntime, RoomMember};
 use crate::hollow::DeathCause;
 use crate::player::Player;
@@ -141,7 +141,7 @@ fn forced_kind(n: usize) -> Option<f32> {
 
 /// All chase hazards on a floor.
 pub fn floor_hazards(plan: &FloorPlan) -> Vec<Hazard> {
-    (PURSUIT_FIRST..=PURSUIT_LAST).filter_map(|i| plan.room(i)).flat_map(|r| room_hazards(plan.seed, r)).collect()
+    chases(plan.last_room).flat_map(|(a, b)| a..=b).filter_map(|i| plan.room(i)).flat_map(|r| room_hazards(plan.seed, r)).collect()
 }
 
 /// 0..1: how far the hands are out at time `t`.
@@ -235,7 +235,8 @@ fn spawn_hazards(
 ) {
     let (Some(floor), Some(rt)) = (floor, rt) else { return };
     built.0.retain(|i| rt.loaded.contains(i));
-    for i in PURSUIT_FIRST..=PURSUIT_LAST {
+    let rooms: Vec<u32> = chases(floor.0.last_room).flat_map(|(a, b)| a..=b).collect();
+    for i in rooms {
         if built.0.contains(&i) || !rt.loaded.contains(&i) {
             continue;
         }
@@ -377,7 +378,7 @@ fn run_hazards(
                     shake.add(0.5);
                     sfx.write(PlaySfx(Sfx::Whoosh));
                     subs.write(Subtitle::danger("[Hands burst from the wall and claw at you!]"));
-                    hurt = Some((15.0, "THE WALLS GRABBED YOU", "Hands reach out of the walls in waves during the chase. Keep to the far side, or slip past while they pull back."));
+                    hurt = Some((22.0, "THE WALLS GRABBED YOU", "Hands reach out of the walls in waves during the chase. Keep to the far side, or slip past while they pull back."));
                 }
             }
             HazardKind::Fire { .. } => {
@@ -400,7 +401,7 @@ fn run_hazards(
                     if hurt.is_none() {
                         subs.write(Subtitle::danger("[The vents roar. You're burning!]"));
                     }
-                    hurt = Some((8.0, "BURNED IN THE CHASE", "Fire vents flare in bursts during the chase. Watch for the flicker, then run past while they're out, or take the clear lane beside them."));
+                    hurt = Some((12.0, "BURNED IN THE CHASE", "Fire vents flare in bursts during the chase. Watch for the flicker, then run past while they're out, or take the clear lane beside them."));
                 }
             }
             HazardKind::Debris => {
@@ -444,7 +445,7 @@ fn run_hazards(
                         sfx.write(PlaySfx(Sfx::Rumble));
                         if Vec2::new(x, h.z).distance(pp) < DEBRIS_RADIUS && p.translation.y < 1.0 {
                             subs.write(Subtitle::danger("[Falling stone hits you!]"));
-                            hurt = Some((25.0, "CRUSHED IN THE CHASE", "When the ceiling cracks during the chase, a shadow marks where it falls. Sidestep out of the shadow."));
+                            hurt = Some((35.0, "CRUSHED IN THE CHASE", "When the ceiling cracks during the chase, a shadow marks where it falls. Sidestep out of the shadow."));
                         }
                     }
                 }
@@ -476,7 +477,7 @@ mod tests {
         let mut kinds = [0; 3];
         for seed in 0..300 {
             let plan = generate(seed);
-            for i in PURSUIT_FIRST..=PURSUIT_LAST {
+            for i in chases(plan.last_room).flat_map(|(a, b)| a..=b) {
                 let r = plan.room(i).unwrap();
                 let hs = room_hazards(seed, r);
                 assert!(!hs.is_empty(), "seed {seed} room {i} has no hazard");

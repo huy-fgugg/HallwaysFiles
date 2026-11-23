@@ -19,7 +19,7 @@ use crate::run::{RunState, Subtitle};
 use crate::state::AppState;
 use crate::world::materials::SurfaceMaterials;
 use crate::world::Builder;
-use build::{OpenOnSpawn, PropMaterials};
+use build::{BackCap, OpenOnSpawn, PropMaterials};
 use plan::{FloorPlan, RoomKind, FIRST_ROOM};
 #[cfg(test)]
 use plan::LAST_ROOM;
@@ -141,6 +141,7 @@ fn stream_rooms(
     mut images: ResMut<Assets<Image>>,
     mut std_mats: ResMut<Assets<StandardMaterial>>,
     members: Query<(Entity, &RoomMember)>,
+    caps: Query<(Entity, &BackCap)>,
 ) {
     let (Some(floor), Some(mats), Some(props)) = (floor, mats, props) else { return };
     let gate_open = chase.phase == ChasePhase::Done;
@@ -165,6 +166,20 @@ fn stream_rooms(
         build::close_south_side(&mut b, room, floor.0.room(i.wrapping_sub(1)), &props);
         build::final_door_surround(&mut b, room);
         rt.loaded.insert(i);
+    }
+    // The oldest loaded room gets a back wall while the room behind it is unloaded.
+    let lo = *wanted.start();
+    for (e, c) in &caps {
+        if c.0 != lo || rt.loaded.contains(&(c.0 - 1)) {
+            commands.entity(e).try_despawn();
+        }
+    }
+    let capped = caps.iter().any(|(_, c)| c.0 == lo);
+    if lo > FIRST_ROOM && rt.loaded.contains(&lo) && !rt.loaded.contains(&(lo - 1)) && !capped
+        && let (Some(r), Some(prev)) = (floor.0.room(lo), floor.0.room(lo - 1))
+    {
+        let mut b = Builder { commands: &mut commands, meshes: &mut meshes, mats: mats.clone(), cache: HashMap::new(), scope: AppState::Playing, parent: None, member: None, base_y: 0.0 };
+        build::back_cap(&mut b, r, prev, &props, &mut images, &mut std_mats);
     }
 }
 

@@ -542,6 +542,43 @@ pub fn close_south_side(b: &mut Builder, r: &RoomPlan, prev: Option<&RoomPlan>, 
     b.member = None;
 }
 
+/// Marker on the temporary back wall of the oldest loaded room (see [`back_cap`]).
+#[derive(Component)]
+pub struct BackCap(pub u32);
+
+/// A room has no south wall of its own: it shares the previous room's north
+/// wall. Once the previous room is unloaded (it's two rooms behind you), that
+/// wall disappears and looking back through the doors would show the void.
+/// This fills the shared stretch with a wall and a closed door until the
+/// previous room is loaded again.
+pub fn back_cap(b: &mut Builder, r: &RoomPlan, prev: &RoomPlan, props: &PropMaterials, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) {
+    b.member = Some(r.index);
+    let style = style_for(prev.area, b, props);
+    let (z0, z1) = (r.max.y, r.max.y + WALL_T);
+    let (x0, x1) = (r.min.x.max(prev.min.x) - WALL_T, r.max.x.min(prev.max.x) + WALL_T);
+    let top = r.height.min(prev.height);
+    let eh = r.entry_height;
+    let (dx0, dx1) = (r.entry_x - DOOR_W / 2.0, r.entry_x + DOOR_W / 2.0);
+    let mut ids = vec![];
+    for (a, c, y0, y1) in [(x0, dx0, 0.0, top), (dx1, x1, 0.0, top), (dx0, dx1, eh + DOOR_H, top), (dx0, dx1, 0.0, eh)] {
+        if c - a > 0.005 && y1 - y0 > 0.005 {
+            ids.push(b.block(Vec3::new(a, y0, z0), Vec3::new(c, y1, z1), &style.wall, style.wall_tile, false));
+        }
+    }
+    // The door you came through, shut, seen from this room.
+    let door_tf = Transform::from_xyz(r.entry_x, eh, z0).with_rotation(Quat::from_rotation_y(PI));
+    let assembly = b.commands.spawn((door_tf, Visibility::default())).id();
+    b.tag(assembly);
+    b.parent = Some(assembly);
+    b.door(0.0, 0.0, r.index, true, images, std_mats);
+    b.parent = None;
+    ids.push(assembly);
+    for id in ids {
+        b.commands.entity(id).insert(BackCap(r.index));
+    }
+    b.member = None;
+}
+
 /// Marker: this door was already open when its room was (re)built.
 #[derive(Component)]
 pub struct OpenOnSpawn;
@@ -1452,9 +1489,29 @@ pub fn final_door_surround(b: &mut Builder, r: &RoomPlan) {
         .spawn((PointLight { color: Color::srgb(1.0, 0.3, 0.2), intensity: 60_000.0, range: 8.0, ..default() }, Flicker { base: 60_000.0, seed: 99.0, depth: 0.3 }, Transform::from_xyz(x, 3.0, z + 1.0)))
         .id();
     b.tag(e);
+    // A dim landing corridor behind Door 100 (the ending's lift set replaces
+    // it when the cutscene starts), so the open door never shows the void.
+    let a = Vec3::new(x, 0.0, z - WALL_T);
+    let concrete = b.mats.concrete_wall.clone();
+    let floor_mat = b.mats.concrete_floor.clone();
+    let mut ids = vec![
+        b.block(a + Vec3::new(-1.6, -0.1, -2.7), a + Vec3::new(1.6, 0.0, 0.0), &floor_mat, 1.0, true),
+        b.block(a + Vec3::new(-1.8, 0.0, -2.7), a + Vec3::new(-1.6, 3.2, 0.0), &concrete, 1.0, true),
+        b.block(a + Vec3::new(1.6, 0.0, -2.7), a + Vec3::new(1.8, 3.2, 0.0), &concrete, 1.0, true),
+        b.block(a + Vec3::new(-1.8, 3.2, -2.9), a + Vec3::new(1.8, 3.4, 0.0), &concrete, 1.0, false),
+        b.block(a + Vec3::new(-1.8, 0.0, -2.9), a + Vec3::new(1.8, 3.2, -2.7), &concrete, 1.0, true),
+    ];
+    ids.push(b.commands.spawn((PointLight { color: Color::srgb(1.0, 0.75, 0.45), intensity: 8_000.0, range: 4.0, shadow_maps_enabled: false, ..default() }, Transform::from_translation(a + Vec3::new(0.0, 2.8, -1.4)))).id());
+    for id in ids {
+        b.tag(id);
+        b.commands.entity(id).insert(FinalVestibule);
+    }
     b.member = None;
-    let _ = WALL_T;
 }
+
+/// The stand-in corridor behind Door 100 (see [`final_door_surround`]).
+#[derive(Component)]
+pub struct FinalVestibule;
 
 #[allow(dead_code)]
 fn member_of(e: Entity, q: &Query<&RoomMember>) -> Option<u32> {

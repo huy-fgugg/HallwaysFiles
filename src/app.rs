@@ -60,7 +60,8 @@ pub fn run() {
     };
 
     App::new()
-        .insert_resource(ClearColor(Color::srgb(0.02, 0.025, 0.035)))
+        // QA: HALLWAYS_VOID_DEBUG=1 paints the void magenta so missing walls stand out.
+        .insert_resource(ClearColor(if std::env::var_os("HALLWAYS_VOID_DEBUG").is_some() { Color::srgb(1.0, 0.0, 1.0) } else { Color::srgb(0.02, 0.025, 0.035) }))
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {

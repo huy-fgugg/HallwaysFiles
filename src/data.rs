@@ -38,7 +38,7 @@ pub struct EntityConfig {
 }
 
 fn default_listener() -> EntityTuning {
-    EntityTuning { min_room: 21, chance: 0.45, cooldown: 2, warn: 2.0, warn_min: 2.0, window: 0.0, damage: 100.0 }
+    EntityTuning { min_room: 21, chance: 0.65, cooldown: 2, warn: 2.0, warn_min: 2.0, window: 0.0, damage: 100.0 }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
