@@ -391,7 +391,6 @@ struct FaceKit {
     ball: Handle<Mesh>,
     white: Handle<StandardMaterial>,
     dark: Handle<StandardMaterial>,
-    lip: Handle<StandardMaterial>,
 }
 
 impl FaceKit {
@@ -400,7 +399,6 @@ impl FaceKit {
             ball: meshes.add(Sphere::new(1.0).mesh().uv(12, 8)),
             white: mats.add(StandardMaterial { base_color: Color::srgb(0.93, 0.92, 0.9), perceptual_roughness: 0.3, ..default() }),
             dark: mats.add(StandardMaterial { base_color: Color::srgb(0.06, 0.05, 0.05), perceptual_roughness: 0.4, ..default() }),
-            lip: mats.add(StandardMaterial { base_color: Color::srgb(0.45, 0.22, 0.2), perceptual_roughness: 0.6, ..default() }),
         }
     }
 }

@@ -479,6 +479,7 @@ mod tests {
             hiding: false,
             alive: true,
             room: 7,
+            skin: Some(crate::body::Skin::for_id(2)),
         };
         for m in [PeerMsg::State(s), PeerMsg::Door { number: 12 }, PeerMsg::Notice { text: "hi".into() }] {
             let v = serde_json::to_value(&m).unwrap();
