@@ -427,11 +427,12 @@ fn send_voice(
         pending.clear();
         return;
     }
-    if mic.is_none() {
+    let held = (keys.pressed(KeyCode::KeyV) && !typing.0) || touch.0;
+    // Push to talk only switches the microphone on the first time you talk.
+    if mic.is_none() && (mode == VoiceMode::OpenMic || held) {
         *mic = open_mic();
     }
     let Some(m) = mic.as_ref() else { return };
-    let held = (keys.pressed(KeyCode::KeyV) && !typing.0) || touch.0;
     while let Ok(s) = m.rx.try_recv() {
         pending.extend(s);
     }
