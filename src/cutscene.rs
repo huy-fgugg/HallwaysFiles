@@ -153,6 +153,9 @@ pub struct ActiveCutscene {
     pub t: f32,
     fired: usize,
     skip_hold: f32,
+    /// A skip press began during this cutscene (a key already held when it
+    /// started, e.g. the Enter that started the run, doesn't count).
+    skip_armed: bool,
     fade: FadeState,
     title: Option<(String, String, f32, f32)>,
     /// Ending-set commands waiting for `ending` to run them (cue, instant).
@@ -368,7 +371,17 @@ fn skip_input(
         return;
     }
     let held = keys.any_pressed([KeyCode::Space, KeyCode::Enter]) || pads.iter().any(|p| p.pressed(GamepadButton::South));
-    active.skip_hold = if held { active.skip_hold + time.delta_secs() } else { 0.0 };
+    let began = keys.any_just_pressed([KeyCode::Space, KeyCode::Enter]) || pads.iter().any(|p| p.just_pressed(GamepadButton::South));
+    if began && active.t > 0.0 {
+        active.skip_armed = true;
+    }
+    if !held {
+        active.skip_armed = false;
+    }
+    // Count real holding time, at most 1/20 s per frame so one long frame
+    // (a loading hitch on a slow device) can't skip the cutscene by itself.
+    let dt = time.delta_secs().min(1.0 / 20.0);
+    active.skip_hold = if held && active.skip_armed { active.skip_hold + dt } else { 0.0 };
     if active.skip_hold >= SKIP_HOLD {
         active.title = None;
         finish(&mut active, &def, &settings, &mut mood, &mut shake, &mut sfx, &mut subs, &mut hollow, &mut lift, &mut ended);
