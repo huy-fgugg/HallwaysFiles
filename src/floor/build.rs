@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use super::plan::{steps_for, Area, Feature, LightState, RoomKind, RoomPlan, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
+use super::plan::{door_zones, zones_overlap, Zone, steps_for, Area, Feature, LightState, RoomKind, RoomPlan, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
 use super::{FloorRuntime, RoomMember};
 use crate::interaction::{AnimatedPart, Door, Drawer, HidingSpot, InteractKind, Interactable, PartMotion};
 use crate::physics::{Aabb, Collider, Ground};
@@ -149,6 +149,17 @@ struct Slot {
     inward: f32,
     /// Floor height under the slot (lofts).
     y: f32,
+}
+
+/// Floor footprint of furniture standing in a wall slot (up to 1 m deep).
+fn slot_footprint(s: &Slot) -> Zone {
+    let (ax, bx) = (s.x, s.x + s.inward * 1.0);
+    (Vec2::new(ax.min(bx), s.z - 0.65), Vec2::new(ax.max(bx), s.z + 0.65))
+}
+
+fn slot_free(s: &Slot, blocked: &[Zone]) -> bool {
+    let f = slot_footprint(s);
+    !blocked.iter().any(|b| zones_overlap(&f, b))
 }
 
 fn side_slots(r: &RoomPlan, rng: &mut GameRng) -> Vec<Slot> {
@@ -404,12 +415,10 @@ pub fn spawn_room(
     }
 
     // ---- Furniture ----
+    // Doors must swing and be reached freely.
+    blocked.extend(door_zones(r));
     let mut slots = side_slots(r, &mut rng);
-    slots.retain(|s| {
-        let (ax, bx) = (s.x, s.x + s.inward * 1.0);
-        let (fx0, fx1) = (ax.min(bx), ax.max(bx));
-        !blocked.iter().any(|(lo, hi)| fx0 < hi.x && fx1 > lo.x && s.z - 0.65 < hi.y && s.z + 0.65 > lo.y)
-    });
+    slots.retain(|s| slot_free(s, &blocked));
     // Atrium columns occupy the side walls; furniture stands between them.
     let narrow = r.width() < 4.0;
     let mut drawer_id: u8 = 0;
@@ -539,6 +548,24 @@ pub struct OpenOnSpawn;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn furniture_never_stands_in_a_door_swing() {
+        for seed in 0..200 {
+            let plan = super::super::plan::generate(seed);
+            for r in &plan.rooms {
+                let doors = door_zones(r);
+                let mut rng = GameRng::new(r.seed);
+                for s in side_slots(r, &mut rng).iter().filter(|s| slot_free(s, &doors)) {
+                    let f = slot_footprint(s);
+                    assert!(!doors.iter().any(|d| zones_overlap(&f, d)), "seed {seed} room {}", r.index);
+                }
+                // Every door keeps its swing clear of columns and rocks too.
+                let keep = stair_zones(r);
+                assert!(doors.iter().all(|d| keep.contains(d)));
+            }
+        }
+    }
 
     #[test]
     fn atrium_columns_leave_a_wide_path() {
@@ -1261,6 +1288,10 @@ fn quarry_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan) {
     let mut z = r.max.y - 1.2;
     while z > r.min.y + 0.8 {
         for x in [r.min.x + 0.12, r.max.x - 0.12] {
+            let post = (Vec2::new(x - 0.12, z - 0.12), Vec2::new(x + 0.12, z + 0.12));
+            if door_zones(r).iter().any(|d| zones_overlap(&post, d)) {
+                continue;
+            }
             b.block(Vec3::new(x - 0.12, 0.0, z - 0.12), Vec3::new(x + 0.12, h, z + 0.12), &timber, 1.0, true);
         }
         b.block(Vec3::new(r.min.x, h - 0.3, z - 0.14), Vec3::new(r.max.x, h - 0.04, z + 0.14), &timber, 1.0, false);
@@ -1317,7 +1348,8 @@ fn tunnel_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan) {
 /// little clearance), so decorative columns never block them.
 pub fn stair_zones(r: &RoomPlan) -> Vec<(Vec2, Vec2)> {
     let run = |h: f32| h / super::plan::STEP_RISE * STEP_RUN;
-    let mut z = vec![];
+    // Door swings and the space in front of doors count too.
+    let mut z = door_zones(r);
     if let Some(Feature::RaisedExit { height }) = r.feature {
         z.push((Vec2::new(r.exit_x - 1.3, r.min.y), Vec2::new(r.exit_x + 1.3, r.min.y + LANDING_DEPTH + run(height) + 0.8)));
     }

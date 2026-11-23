@@ -17,7 +17,59 @@ pub const FINAL_DOOR: u32 = LAST_ROOM + 1;
 /// North face of the corridor's far wall: room 2 starts here.
 pub const START_Z: f32 = -14.2;
 pub const WALL_T: f32 = 0.2;
+/// Door geometry (must match `world::Builder::door`).
+pub const DOOR_W: f32 = 1.0;
+pub const DOOR_H: f32 = 2.1;
+/// Casing and top cap stick out this far past each side of the opening.
+pub const DOOR_CASING: f32 = 0.215;
+/// The leaf opens this far (radians) into the room beyond the wall.
+pub const DOOR_SWING: f32 = 1.75;
+/// Leaf length (hinge to tip).
+pub const DOOR_LEAF: f32 = DOOR_W - 0.04;
+/// Space kept between a door's casing and the side wall.
+const DOOR_SIDE_CLEAR: f32 = 0.2;
+/// Room-generation rule for every door at x = d in a wall spanning
+/// [x_min, x_max]:
+///
+///   x_min + m <= d <= x_max - m,
+///   m = W/2 + max(casing, leaf * max(0, -cos(swing))) + side clearance.
+///
+/// The leaf overshoots its hinge by leaf * -cos(swing) when fully open, so m
+/// covers both the casing and the open leaf. See `door_margin()`; a test
+/// checks this constant against the formula.
 const DOOR_MARGIN: f32 = 0.95;
+
+/// The margin from the formula above (in metres).
+pub fn door_margin() -> f32 {
+    let overshoot = DOOR_LEAF * (-DOOR_SWING.cos()).max(0.0);
+    DOOR_W / 2.0 + DOOR_CASING.max(overshoot) + DOOR_SIDE_CLEAR
+}
+
+/// A floor rectangle (x, z) that must stay empty.
+pub type Zone = (Vec2, Vec2);
+
+/// True when two floor rectangles overlap.
+pub fn zones_overlap(a: &Zone, b: &Zone) -> bool {
+    a.0.x < b.1.x && a.1.x > b.0.x && a.0.y < b.1.y && a.1.y > b.0.y
+}
+
+/// Floor areas around this room's doors that furniture, columns, posts and
+/// hazards must never touch:
+///
+/// * the entry door's swing: its leaf opens into this room, sweeping a quarter
+///   disc of radius `leaf` from the hinge at x0 = entry_x - W/2, and its tip
+///   ends up `leaf * -cos(swing)` west of the hinge;
+/// * a 1.2 m standing area in front of the exit door and every fake door.
+pub fn door_zones(r: &RoomPlan) -> Vec<Zone> {
+    let hw = DOOR_W / 2.0;
+    let overshoot = DOOR_LEAF * (-DOOR_SWING.cos()).max(0.0);
+    let x0 = r.entry_x - hw;
+    let mut z = vec![(Vec2::new(x0 - overshoot - 0.25, r.max.y - DOOR_LEAF - 0.3), Vec2::new(r.entry_x + hw + 0.25, r.max.y))];
+    for x in std::iter::once(r.exit_x).chain(r.mimics.iter().map(|m| m.x)) {
+        z.push((Vec2::new(x - hw - 0.3, r.min.y), Vec2::new(x + hw + 0.3, r.min.y + 1.2)));
+    }
+    z
+}
 /// Minimum centre-to-centre distance between doors on a choice wall.
 pub const FAKE_SPACING: f32 = 1.8;
 /// Rooms of the Door 40 chase: The Hollow pursues you from Room 041 to 046.
@@ -479,11 +531,12 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         let min = Vec2::new(cx - width / 2.0, south - depth);
         let max = Vec2::new(cx + width / 2.0, south);
 
-        let exit_x = if kind == RoomKind::Final {
-            cx
-        } else {
-            ((rng.range_f32(min.x + DOOR_MARGIN, max.x - DOOR_MARGIN)) * 10.0).round() / 10.0
+        // Doors snap to 10 cm, always inward so they stay inside the margin.
+        let snap = |x: f32| {
+            let (lo, hi) = ((min.x + DOOR_MARGIN) * 10.0, (max.x - DOOR_MARGIN) * 10.0);
+            if lo.ceil() <= hi.floor() { (x * 10.0).round().clamp(lo.ceil(), hi.floor()) / 10.0 } else { (min.x + max.x) / 2.0 }
         };
+        let exit_x = if kind == RoomKind::Final { cx } else { snap(rng.range_f32(min.x + DOOR_MARGIN, max.x - DOOR_MARGIN)) };
 
         let light = match kind {
             _ if reading_hall => LightState::Dim,
@@ -586,8 +639,9 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
                 let mut slots = Vec::new();
                 let mut x = min.x + DOOR_MARGIN;
                 while x <= max.x - DOOR_MARGIN + 1e-3 {
-                    if (x - exit_x).abs() >= FAKE_SPACING {
-                        slots.push((x * 10.0).round() / 10.0);
+                    let sx = snap(x);
+                    if (sx - exit_x).abs() >= FAKE_SPACING {
+                        slots.push(sx);
                     }
                     x += FAKE_SPACING;
                 }
@@ -781,6 +835,67 @@ mod tests {
         }
     }
     const DOOR_W_HALF: f32 = 0.5;
+
+    #[test]
+    fn door_margin_matches_the_formula() {
+        assert!(DOOR_MARGIN + 1e-4 >= door_margin(), "margin {DOOR_MARGIN} < formula {}", door_margin());
+        // The open leaf's overshoot stays inside the casing allowance.
+        assert!(DOOR_LEAF * (-DOOR_SWING.cos()) < DOOR_CASING + DOOR_SIDE_CLEAR);
+    }
+
+    fn option_sets() -> Vec<GenOptions> {
+        vec![
+            GenOptions::default(),
+            GenOptions { size: 0.5, ..default_opts() },
+            GenOptions { size: 1.8, ..default_opts() },
+            GenOptions { fake_doors: 8.0, stairs: 6.0, ..default_opts() },
+            GenOptions { last_room: 30, areas: Some(vec![Area::Grounds, Area::ServiceTunnels, Area::Atrium]), ..default_opts() },
+        ]
+    }
+    /// Every door on every floor obeys the room-generation rule: inside its
+    /// wall by the door margin, tall enough rooms on both sides, fake doors
+    /// never overlapping, and door swings / door fronts never cut by a
+    /// divider or a loft.
+    #[test]
+    fn every_door_obeys_the_generation_rule() {
+        let m = door_margin();
+        for opt in option_sets() {
+            for seed in 0..300u64 {
+                let plan = generate_custom(seed, &EntityConfig::default(), &opt);
+                for (k, r) in plan.rooms.iter().enumerate() {
+                    let tag = format!("seed {seed} room {} opt {opt:?}", r.index);
+                    for x in [r.entry_x, r.exit_x].into_iter().chain(r.mimics.iter().map(|mm| mm.x)) {
+                        assert!(x >= r.min.x + m - 1e-3 && x <= r.max.x - m + 1e-3, "{tag}: door at {x} outside [{}, {}]", r.min.x, r.max.x);
+                    }
+                    let mut xs: Vec<f32> = r.mimics.iter().map(|mm| mm.x).chain([r.exit_x]).collect();
+                    xs.sort_by(f32::total_cmp);
+                    for w in xs.windows(2) {
+                        assert!(w[1] - w[0] >= DOOR_W + 2.0 * DOOR_CASING - 1e-3, "{tag}: doors overlap");
+                    }
+                    // A raised exit's opening and sign fit under both ceilings.
+                    if let Some(Feature::RaisedExit { height }) = r.feature {
+                        let top = height + DOOR_H + 0.46;
+                        assert!(top <= r.height + 1e-3, "{tag}: raised door taller than the room");
+                        let next = &plan.rooms[k + 1];
+                        assert!((next.entry_height - height).abs() < 1e-4 && top <= next.height + 1e-3, "{tag}: next room can't take the raised door");
+                    }
+                    let zones = door_zones(r);
+                    for zn in &zones {
+                        assert!(zn.0.y >= r.min.y - 1e-3 && zn.1.y <= r.max.y + 1e-3, "{tag}: door zone leaves the room");
+                        for d in r.dividers() {
+                            let line = (Vec2::new(r.min.x, d.z - 0.15), Vec2::new(r.max.x, d.z + 0.15));
+                            assert!(!zones_overlap(zn, &line), "{tag}: divider cuts a door zone");
+                        }
+                        if let Some(Feature::KeyLoft { east }) = r.feature {
+                            let (x0, x1) = if east { (r.max.x - 1.7, r.max.x) } else { (r.min.x, r.min.x + 1.7) };
+                            let loft = (Vec2::new(x0, r.min.y + 1.6), Vec2::new(x1, r.min.y + 3.8 + LOFT_HEIGHT / STEP_RISE * STEP_RUN));
+                            assert!(!zones_overlap(zn, &loft), "{tag}: loft blocks a door");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn areas_follow_the_floor() {

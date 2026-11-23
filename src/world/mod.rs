@@ -27,8 +27,8 @@ use materials::SurfaceMaterials;
 use meshes::tiled_box;
 
 pub const WALL_T: f32 = 0.2;
-pub const DOOR_W: f32 = 1.0;
-pub const DOOR_H: f32 = 2.1;
+pub const DOOR_W: f32 = crate::floor::plan::DOOR_W;
+pub const DOOR_H: f32 = crate::floor::plan::DOOR_H;
 
 /// A named room region; entering it updates the HUD room counter.
 #[derive(Component, Debug, Clone, Copy)]
@@ -355,7 +355,7 @@ impl Builder<'_, '_, '_> {
             id
         };
 
-        let leaf_w = w - 0.04;
+        let leaf_w = crate::floor::plan::DOOR_LEAF;
         let leaf_h = h - 0.025;
         let hinge = Vec3::new(x0 + 0.02, by, line - t / 2.0);
         let mut root_cmd = self.commands.spawn((Transform::from_translation(hinge), Visibility::default(), Name::new(format!("Door {number:03}"))));

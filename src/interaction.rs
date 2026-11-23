@@ -505,7 +505,7 @@ fn animate_props(
         let target = if door.open { 1.0 } else { 0.0 };
         door.t += (target - door.t) * (dt * 2.2).min(1.0);
         // Doors swing away from the player into the next room (+Y rotation).
-        tf.rotation = Quat::from_rotation_y(door.t * 1.75);
+        tf.rotation = Quat::from_rotation_y(door.t * crate::floor::plan::DOOR_SWING);
     }
     for mut d in &mut drawers {
         let target = if d.open { 1.0 } else { 0.0 };
