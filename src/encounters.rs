@@ -54,6 +54,28 @@ pub struct ForceEncounter(pub Option<(u32, Encounter)>);
 
 #[derive(Component)]
 struct WhispererBody;
+/// One of the Whisperer's reaching arms (-1 left, 1 right).
+#[derive(Component)]
+struct WhisperArm(f32);
+/// A trailing wisp: its angle around the body and length.
+#[derive(Component)]
+struct WhisperWisp {
+    angle: f32,
+    len: f32,
+}
+/// The Hush: a tall faceless figure that appears in a corner and holds a
+/// finger to where its lips should be while you must stay still.
+#[derive(Component)]
+struct HushFigure {
+    room: u32,
+    /// Seconds since it appeared, and how visible it is (0..1).
+    t: f32,
+    shown: f32,
+}
+#[derive(Component)]
+struct HushHead;
+#[derive(Component)]
+struct HushArm;
 #[derive(Component)]
 struct GalleryEye {
     open: f32,
@@ -74,7 +96,12 @@ impl Plugin for EncountersPlugin {
             .init_resource::<ForceEncounter>()
             .add_systems(OnEnter(AppState::Playing), (spawn_hush_ui, |mut c: Commands| c.insert_resource(EncounterState::default())))
             .add_systems(Update, (trigger, whisperer, gallery, hush).chain().run_if(gameplay_active))
-            .add_systems(Update, (animate_whisperer, animate_eyes, hush_ui).run_if(in_state(AppState::Playing)));
+            .add_systems(Update, (animate_whisperer, animate_eyes, hush_ui, hush_figure).run_if(in_state(AppState::Playing)));
+        // QA: HALLWAYS_MONSTER_VIEW=whisperer|hush|surge|undertow stands that
+        // monster in front of you to check its look and animation.
+        if std::env::var_os("HALLWAYS_MONSTER_VIEW").is_some() {
+            app.add_systems(Update, monster_view.run_if(in_state(AppState::Playing)));
+        }
     }
 }
 
@@ -401,7 +428,7 @@ fn spawn_whisperer(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mu
             let bone = meshes.add(Capsule3d::new(0.012, 0.32));
             let finger = meshes.add(Capsule3d::new(0.005, 0.11));
             for side in [-1.0f32, 1.0] {
-                c.spawn((Transform::from_xyz(side * 0.13, -0.3, -0.05).with_rotation(Quat::from_rotation_x(-1.1) * Quat::from_rotation_z(side * 0.25)), Visibility::default())).with_children(|arm| {
+                c.spawn((Transform::from_xyz(side * 0.13, -0.3, -0.05).with_rotation(Quat::from_rotation_x(-1.1) * Quat::from_rotation_z(side * 0.25)), Visibility::default(), WhisperArm(side))).with_children(|arm| {
                     arm.spawn((Mesh3d(bone.clone()), MeshMaterial3d(pale.clone()), Transform::from_xyz(0.0, -0.18, 0.0)));
                     arm.spawn((Mesh3d(bone.clone()), MeshMaterial3d(pale.clone()), Transform::from_xyz(0.0, -0.5, 0.03).with_rotation(Quat::from_rotation_x(-0.2))));
                     for f in 0..4 {
@@ -417,16 +444,171 @@ fn spawn_whisperer(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mu
                     Mesh3d(strip.clone()),
                     MeshMaterial3d(wisp.clone()),
                     Transform::from_xyz(a.sin() * 0.14, -0.2 - len / 2.0, a.cos() * 0.12).with_rotation(Quat::from_rotation_y(a)).with_scale(Vec3::new(1.0, len, 1.0)),
+                    WhisperWisp { angle: a, len },
                 ));
             }
         });
 }
 
-fn animate_whisperer(time: Res<Time>, mut q: Query<&mut Transform, With<WhispererBody>>) {
+/// The Whisperer drifts and sways, its head lolls, its arms grope toward you
+/// and the rags of its body swirl around it.
+#[allow(clippy::type_complexity)]
+fn animate_whisperer(
+    time: Res<Time>,
+    mut q: Query<&mut Transform, (With<WhispererBody>, Without<WhisperArm>, Without<WhisperWisp>)>,
+    mut arms: Query<(&WhisperArm, &mut Transform), (Without<WhispererBody>, Without<WhisperWisp>)>,
+    mut wisps: Query<(&WhisperWisp, &mut Transform), (Without<WhispererBody>, Without<WhisperArm>)>,
+) {
     let t = time.elapsed_secs();
     for mut tf in &mut q {
         tf.translation.y = 1.5 + (t * 1.7).sin() * 0.06;
+        let yaw = tf.rotation.to_euler(EulerRot::YXZ).0;
+        tf.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_z((t * 0.9).sin() * 0.12) * Quat::from_rotation_x((t * 0.6).sin() * 0.06);
     }
+    for (arm, mut tf) in &mut arms {
+        // Slow, uneven grabbing: one arm reaches while the other draws back.
+        let reach = (t * 1.3 + arm.0 * 1.4).sin();
+        tf.rotation = Quat::from_rotation_x(-1.1 - 0.35 * reach) * Quat::from_rotation_z(arm.0 * (0.25 + 0.12 * (t * 2.1).sin()));
+    }
+    for (w, mut tf) in &mut wisps {
+        let a = w.angle + t * 0.8;
+        let flutter = 1.0 + 0.15 * (t * 3.0 + w.angle * 3.0).sin();
+        tf.translation = Vec3::new(a.sin() * 0.15, -0.2 - w.len * flutter / 2.0, a.cos() * 0.13);
+        tf.rotation = Quat::from_rotation_y(a) * Quat::from_rotation_x((t * 2.0 + w.angle).sin() * 0.25);
+        tf.scale = Vec3::new(1.0, w.len * flutter, 1.0);
+    }
+}
+
+/// The Hush appears once its warning is over: in the far corner of the room,
+/// finger raised, its blank head slowly turning to face you. It fades away
+/// when the pressure lifts.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn hush_figure(
+    mut commands: Commands,
+    time: Res<Time>,
+    state: Res<EncounterState>,
+    cfg: Res<EntityConfig>,
+    floor: Option<Res<Floor>>,
+    player: Query<&Transform, (With<Player>, Without<HushFigure>, Without<HushHead>, Without<HushArm>)>,
+    mut figures: Query<(Entity, &mut HushFigure, &mut Transform, &Children), (Without<HushHead>, Without<HushArm>)>,
+    mut heads: Query<&mut Transform, (With<HushHead>, Without<HushFigure>, Without<HushArm>)>,
+    mut arms: Query<&mut Transform, (With<HushArm>, Without<HushFigure>, Without<HushHead>)>,
+    children: Query<&Children>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    let dt = time.delta_secs();
+    let active = match state.0 {
+        Active::Hush { room, t } if t >= cfg.hush.warn_for(room) => Some(room),
+        _ => None,
+    };
+    let ppos = player.single().map(|p| p.translation).unwrap_or_default();
+    if let (Some(room), true) = (active, figures.is_empty())
+        && let Some(r) = floor.as_ref().and_then(|f| f.0.room(room))
+    {
+        // The corner farthest from you.
+        let corners = [Vec2::new(r.min.x + 0.7, r.min.y + 0.7), Vec2::new(r.max.x - 0.7, r.min.y + 0.7), Vec2::new(r.min.x + 0.7, r.max.y - 0.7), Vec2::new(r.max.x - 0.7, r.max.y - 0.7)];
+        let at = corners.into_iter().max_by(|a, b| a.distance(ppos.xz()).total_cmp(&b.distance(ppos.xz()))).unwrap_or(r.center());
+        spawn_hush(&mut commands, &mut meshes, &mut mats, room, Vec3::new(at.x, 0.0, at.y));
+    }
+    let t_now = time.elapsed_secs();
+    for (e, mut f, mut tf, kids) in &mut figures {
+        f.t += dt;
+        let want = if active == Some(f.room) || f.room == 0 { 1.0 } else { 0.0 };
+        f.shown += (want - f.shown) * (dt * 2.5).min(1.0);
+        if want == 0.0 && f.shown < 0.03 {
+            commands.entity(e).try_despawn();
+            continue;
+        }
+        // It rises out of the floor as it appears and sinks as it fades.
+        tf.scale = Vec3::new(1.0, f.shown.max(0.01), 1.0);
+        // The whole body turns toward you, slowly.
+        let to = ppos - tf.translation;
+        let want_yaw = (-to.x).atan2(-to.z);
+        let cur = tf.rotation.to_euler(EulerRot::YXZ).0;
+        let d = (want_yaw - cur + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        tf.rotation = Quat::from_rotation_y(cur + d * (dt * 0.6).min(1.0));
+        let mut stack: Vec<Entity> = kids.iter().collect();
+        while let Some(c) = stack.pop() {
+            if let Ok(ch) = children.get(c) {
+                stack.extend(ch.iter());
+            }
+            if let Ok(mut h) = heads.get_mut(c) {
+                // Head cocks to one side and twitches.
+                h.rotation = Quat::from_rotation_z(0.35 + (t_now * 7.0).sin() * 0.03) * Quat::from_rotation_x(0.15);
+            }
+            if let Ok(mut a) = arms.get_mut(c) {
+                // Finger raised to its blank face: "shh".
+                let lift = (f.t / 0.8).min(1.0);
+                let raised = Quat::from_rotation_arc(Vec3::NEG_Y, (HUSH_LIPS - HUSH_SHOULDER).normalize());
+                a.rotation = Quat::IDENTITY.slerp(raised, lift);
+            }
+        }
+    }
+}
+
+fn monster_view(
+    mut commands: Commands,
+    run: Res<RunState>,
+    player: Query<(&Player, &Transform)>,
+    mut done: Local<bool>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut bodies: Query<&mut Transform, (Or<(With<WhispererBody>, With<crate::surge::SurgeBody>)>, Without<Player>)>,
+) {
+    if run.elapsed < 4.0 {
+        return;
+    }
+    let Ok((p, tf)) = player.single() else { return };
+    let fwd = Vec3::new(-p.yaw.sin(), 0.0, -p.yaw.cos());
+    let at = tf.translation + fwd * 3.0;
+    if !*done {
+        *done = true;
+        match std::env::var("HALLWAYS_MONSTER_VIEW").unwrap_or_default().as_str() {
+            "whisperer" => spawn_whisperer(&mut commands, &mut meshes, &mut mats, at + Vec3::Y * 1.5),
+            "hush" => spawn_hush(&mut commands, &mut meshes, &mut mats, 0, at + fwd * 1.5),
+            "surge" => crate::surge::spawn_surge(&mut commands, &mut meshes, &mut mats, at + Vec3::Y * 1.4, false),
+            "undertow" => crate::surge::spawn_surge(&mut commands, &mut meshes, &mut mats, at + Vec3::Y * 1.4, true),
+            _ => {}
+        }
+        return;
+    }
+    // Face the camera.
+    for mut b in &mut bodies {
+        let tilt = b.rotation.to_euler(EulerRot::YXZ);
+        b.rotation = Quat::from_euler(EulerRot::YXZ, p.yaw + std::f32::consts::PI, tilt.1, tilt.2);
+    }
+}
+
+/// The Hush's raised shoulder and where its finger rests (its blank "lips").
+const HUSH_SHOULDER: Vec3 = Vec3::new(0.26, 2.12, 0.0);
+const HUSH_LIPS: Vec3 = Vec3::new(0.02, 2.47, -0.2);
+
+fn spawn_hush(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, room: u32, at: Vec3) {
+    let skin = mats.add(StandardMaterial { base_color: Color::srgb(0.82, 0.8, 0.78), perceptual_roughness: 0.9, ..default() });
+    let robe = mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.05, 0.07), perceptual_roughness: 1.0, ..default() });
+    let cap = meshes.add(Capsule3d::new(0.5, 1.0));
+    let ball = meshes.add(Sphere::new(0.5).mesh().uv(20, 12));
+    commands
+        .spawn((Transform::from_translation(at), Visibility::default(), HushFigure { room, t: 0.0, shown: 0.0 }, DespawnOnExit(AppState::Playing), Name::new("The Hush")))
+        .with_children(|c| {
+            // A tall, gaunt body in a long dark shroud.
+            // Shroud from the floor to the shoulders (capsule half-height = scale.y).
+            // A shroud that flares out at the hem, under a narrow torso.
+            let skirt = meshes.add(Cone::new(0.42, 1.5));
+            c.spawn((Mesh3d(skirt), MeshMaterial3d(robe.clone()), Transform::from_xyz(0.0, 0.75, 0.0).with_scale(Vec3::new(1.0, 1.0, 0.75))));
+            c.spawn((Mesh3d(cap.clone()), MeshMaterial3d(robe.clone()), Transform::from_xyz(0.0, 1.72, 0.0).with_scale(Vec3::new(0.46, 0.5, 0.3))));
+            c.spawn((Mesh3d(cap.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 2.24, 0.0).with_scale(Vec3::new(0.12, 0.1, 0.12))));
+            // A smooth, featureless head.
+            c.spawn((Transform::from_xyz(0.0, 2.35, 0.0), Visibility::default(), HushHead)).with_child((Mesh3d(ball.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.2, 0.0).with_scale(Vec3::new(0.3, 0.42, 0.32))));
+            // One long arm, hanging; the other raises a finger to the face.
+            c.spawn((Mesh3d(cap.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(-0.27, 1.62, 0.0).with_rotation(Quat::from_rotation_z(-0.08)).with_scale(Vec3::new(0.075, 0.5, 0.075))));
+            c.spawn((Transform::from_xyz(HUSH_SHOULDER.x, HUSH_SHOULDER.y, HUSH_SHOULDER.z), Visibility::default(), HushArm)).with_children(|a| {
+                a.spawn((Mesh3d(cap.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.22, 0.0).with_scale(Vec3::new(0.075, 0.22, 0.075))));
+                a.spawn((Mesh3d(ball.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.47, 0.0).with_scale(Vec3::new(0.08, 0.1, 0.05))));
+                a.spawn((Mesh3d(cap.clone()), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.56, 0.0).with_scale(Vec3::new(0.022, 0.06, 0.022))));
+            });
+        });
 }
 
 fn spawn_eyes(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, r: &RoomPlan) {

@@ -51,6 +51,13 @@ impl Default for SurgeState {
 pub struct SurgeBody;
 
 #[derive(Component)]
+struct SurgeFace;
+#[derive(Component)]
+struct SurgeJaw;
+#[derive(Component)]
+struct SurgeEye;
+
+#[derive(Component)]
 struct Shard {
     seed: f32,
     radius: f32,
@@ -111,7 +118,7 @@ impl Plugin for SurgePlugin {
         app.init_resource::<SurgeState>()
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands| c.insert_resource(SurgeState::default()))
             .add_systems(Update, (trigger, run_surge).chain().run_if(gameplay_active))
-            .add_systems(Update, animate_shards.run_if(in_state(AppState::Playing)));
+            .add_systems(Update, (animate_shards, animate_face).run_if(in_state(AppState::Playing)));
     }
 }
 
@@ -265,7 +272,7 @@ fn run_surge(
     }
 }
 
-fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3, undertow: bool) {
+pub(crate) fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, at: Vec3, undertow: bool) {
     // The Undertow is the same kind of thing, but sick green and heavier.
     let glow = if undertow { LinearRgba::rgb(4.0, 14.0, 9.0) } else { LinearRgba::rgb(9.0, 12.0, 18.0) };
     let shard_mat = mats.add(StandardMaterial { base_color: Color::WHITE, emissive: glow, unlit: true, ..default() });
@@ -282,6 +289,30 @@ fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut As
             Name::new("The Surge"),
         ))
         .with_children(|c| {
+            // A screaming face at the heart of the storm, facing where it's going (-Z).
+            let eye_glow = mats.add(StandardMaterial { base_color: Color::WHITE, emissive: if undertow { LinearRgba::rgb(6.0, 20.0, 10.0) } else { LinearRgba::rgb(20.0, 22.0, 26.0) }, unlit: true, ..default() });
+            let void = mats.add(StandardMaterial { base_color: Color::BLACK, unlit: true, ..default() });
+            let ball = meshes.add(Sphere::new(0.5).mesh().uv(20, 12));
+            let tooth = meshes.add(Cone::new(0.5, 1.0));
+            c.spawn((Transform::default(), Visibility::default(), SurgeFace)).with_children(|f| {
+                f.spawn((Mesh3d(ball.clone()), MeshMaterial3d(dark_mat.clone()), Transform::from_scale(Vec3::new(0.95, 1.15, 0.8))));
+                for x in [-0.2f32, 0.2] {
+                    // Narrow, slanted, blazing eyes.
+                    f.spawn((Mesh3d(ball.clone()), MeshMaterial3d(eye_glow.clone()), Transform::from_xyz(x, 0.22, -0.37).with_rotation(Quat::from_rotation_z(-x.signum() * 0.45)).with_scale(Vec3::new(0.3, 0.08, 0.08)), SurgeEye));
+                }
+                // The jaw: a gaping black mouth ringed with teeth; it flaps as it screams.
+                f.spawn((Transform::from_xyz(0.0, -0.22, -0.34), Visibility::default(), SurgeJaw)).with_children(|j| {
+                    j.spawn((Mesh3d(ball.clone()), MeshMaterial3d(void.clone()), Transform::from_scale(Vec3::new(0.56, 0.62, 0.18))));
+                    for k in 0..18 {
+                        let a = k as f32 / 18.0 * std::f32::consts::TAU;
+                        j.spawn((
+                            Mesh3d(tooth.clone()),
+                            MeshMaterial3d(eye_glow.clone()),
+                            Transform::from_xyz(a.sin() * 0.25, a.cos() * 0.29, -0.05).with_rotation(Quat::from_rotation_z(-a + std::f32::consts::PI)).with_scale(Vec3::new(0.04, 0.12 + 0.05 * ((k * 7) % 3) as f32, 0.02)),
+                        ));
+                    }
+                });
+            });
             for i in 0..56 {
                 let streak = i >= 44;
                 let dark = i % 5 == 0 && !streak;
@@ -293,6 +324,29 @@ fn spawn_surge(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut As
                 ));
             }
         });
+}
+
+/// The face judders, the jaw flaps open and shut in a scream, the eyes flicker.
+#[allow(clippy::type_complexity)]
+fn animate_face(
+    time: Res<Time>,
+    mut faces: Query<&mut Transform, (With<SurgeFace>, Without<SurgeJaw>, Without<SurgeEye>)>,
+    mut jaws: Query<&mut Transform, (With<SurgeJaw>, Without<SurgeFace>, Without<SurgeEye>)>,
+    mut eyes: Query<&mut Transform, (With<SurgeEye>, Without<SurgeFace>, Without<SurgeJaw>)>,
+) {
+    let t = time.elapsed_secs();
+    for mut f in &mut faces {
+        f.translation = Vec3::new((t * 37.0).sin() * 0.05, (t * 29.0).cos() * 0.05, 0.0);
+        f.rotation = Quat::from_rotation_z((t * 13.0).sin() * 0.12);
+    }
+    for mut j in &mut jaws {
+        let open = 0.75 + 0.45 * (t * 11.0).sin().abs();
+        j.scale = Vec3::new(1.0 + 0.1 * (t * 7.0).sin(), open, 1.0);
+    }
+    for mut e in &mut eyes {
+        let flicker = if (t * 9.0).sin() > 0.9 { 0.4 } else { 1.0 };
+        e.scale = Vec3::new(0.3, 0.08 * flicker, 0.08);
+    }
 }
 
 fn animate_shards(time: Res<Time>, mut shards: Query<(&Shard, &mut Transform)>) {
