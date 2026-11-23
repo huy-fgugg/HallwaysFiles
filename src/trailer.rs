@@ -134,7 +134,7 @@ fn pick_room(plan: &crate::floor::plan::FloorPlan, shot: Shot) -> Option<RoomPla
         Shot::FakeDoors { .. } => plan.rooms.iter().filter(|r| !r.mimics.is_empty()).max_by_key(|r| r.mimics.len()),
         Shot::Dark { .. } => plan.rooms.iter().find(|r| r.light == LightState::Dark && r.index >= 10 && r.encounter.is_none()),
         Shot::Gallery { .. } => plan.rooms.iter().filter(|r| r.index >= 30).find(lit),
-        Shot::Listener { .. } => plan.rooms.iter().find(|r| r.area == Area::Grounds && r.light != LightState::Dark && r.depth() > 12.0 && r.index > 52),
+        Shot::Listener { .. } => plan.rooms.iter().find(|r| r.area == Area::Grounds && r.light != LightState::Dark && r.depth() > 12.0),
         Shot::Route { pick: Pick::Zigzag, .. } => plan.rooms.iter().find(|r| r.feature == Some(Feature::Zigzag) && r.light != LightState::Dark && r.encounter.is_none()),
         Shot::Route { pick: Pick::ReadingHall, .. } => plan.room(READING_HALL),
         Shot::Route { .. } | Shot::Walk { .. } => None,

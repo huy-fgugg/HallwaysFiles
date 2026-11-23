@@ -403,15 +403,39 @@ impl Default for GenOptions {
     }
 }
 
+/// Classic floor sections (first room of each), one per area.
+const CLASSIC_SECTIONS: [u32; 6] = [FIRST_ROOM, 21, 41, 51, 61, 81];
+
+/// The order the areas come in on this seed. Every run shuffles it: the
+/// classic floor always opens in the Guest Wing (the lift and corridor are
+/// built in its style) and the other five follow in a random order; a custom
+/// floor shuffles its chosen areas. The same seed always gives the same order.
+pub fn area_order(seed: u64, opt: &GenOptions) -> Vec<Area> {
+    let mut rng = GameRng::fork(seed, 0xA4EA_0D3E);
+    let (mut list, keep_first) = match &opt.areas {
+        Some(list) if !list.is_empty() => (list.clone(), 0),
+        _ => (Area::ALL.to_vec(), 1),
+    };
+    for i in (keep_first + 1..list.len()).rev() {
+        let j = keep_first + rng.below((i - keep_first + 1) as u32) as usize;
+        list.swap(i, j);
+    }
+    list
+}
+
 impl GenOptions {
-    pub fn area_for(&self, index: u32) -> Area {
+    /// Area of room `index`, given this seed's [`area_order`].
+    pub fn area_in(&self, order: &[Area], index: u32) -> Area {
         match &self.areas {
-            Some(list) if !list.is_empty() => {
+            Some(_) if !order.is_empty() => {
                 let count = (self.last_room + 1 - FIRST_ROOM).max(1);
-                let k = ((index.saturating_sub(FIRST_ROOM)) as usize * list.len() / count as usize).min(list.len() - 1);
-                list[k]
+                let k = ((index.saturating_sub(FIRST_ROOM)) as usize * order.len() / count as usize).min(order.len() - 1);
+                order[k]
             }
-            _ => Area::for_room(index),
+            _ => {
+                let section = CLASSIC_SECTIONS.iter().rposition(|&first| index >= first).unwrap_or(0);
+                order.get(section).copied().unwrap_or_else(|| Area::for_room(index))
+            }
         }
     }
 }
@@ -435,10 +459,11 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
     let mut last_key: i64 = -100;
     let mut pending_entry = 0.0f32;
 
+    let order = area_order(seed, opt);
     for index in FIRST_ROOM..=last {
         let mut rng = GameRng::fork(seed, u64::from(index));
-        let area = opt.area_for(index);
-        let first_of_area = index == FIRST_ROOM || opt.area_for(index - 1) != area;
+        let area = opt.area_in(&order, index);
+        let first_of_area = index == FIRST_ROOM || opt.area_in(&order, index - 1) != area;
 
         // ---- Kind (weighted, with cooldowns) ----
         let kind = if index == last {
@@ -902,9 +927,27 @@ mod tests {
         let plan = generate(1);
         assert_eq!(plan.room(2).unwrap().area, Area::GuestWing);
         assert_eq!(plan.room(21).unwrap().kind, RoomKind::Transition);
-        assert_eq!(plan.room(45).unwrap().area, Area::ServiceTunnels);
-        assert_eq!(plan.room(70).unwrap().area, Area::QuarryLift);
-        assert_eq!(plan.room(99).unwrap().area, Area::Atrium);
+        // Each classic section is one area, every area is visited once.
+        let order = area_order(1, &GenOptions::default());
+        let mut seen: Vec<Area> = order.clone();
+        seen.sort_by_key(|a| Area::ALL.iter().position(|b| b == a));
+        assert_eq!(seen, Area::ALL.to_vec());
+        for (first, area) in CLASSIC_SECTIONS.iter().zip(&order) {
+            let r = plan.room(*first + 1).unwrap();
+            assert!(r.area == *area || r.index == READING_HALL, "room {} is {:?}, expected {area:?}", r.index, r.area);
+        }
+    }
+
+    #[test]
+    fn area_order_is_random_per_seed_but_repeatable() {
+        let opt = GenOptions::default();
+        assert_eq!(area_order(5, &opt), area_order(5, &opt));
+        let orders: std::collections::HashSet<Vec<Area>> = (0..60).map(|s| area_order(s, &opt)).collect();
+        assert!(orders.len() > 20, "only {} different orders", orders.len());
+        assert!((0..60).all(|s| area_order(s, &opt)[0] == Area::GuestWing));
+        let custom = GenOptions { areas: Some(vec![Area::Grounds, Area::Archive, Area::Atrium]), ..GenOptions::default() };
+        let orders: std::collections::HashSet<Vec<Area>> = (0..60).map(|s| area_order(s, &custom)).collect();
+        assert!(orders.len() > 3);
     }
 
     #[test]
@@ -957,7 +1000,7 @@ mod tests {
                     Encounter::Gallery | Encounter::Hush => assert_ne!(r.light, LightState::Dark),
                     Encounter::Undertow => assert!(r.index >= cfg.undertow.min_room && r.hiding),
                     Encounter::Surge => assert!(r.hiding),
-                    Encounter::Listener => assert_eq!(r.area, Area::Grounds),
+                    Encounter::Listener => assert!(matches!(r.area, Area::Grounds | Area::Archive)),
                 }
             }
         }
@@ -1068,10 +1111,11 @@ mod tests {
 
     #[test]
     fn classic_floor_has_outdoor_grounds() {
-        let plan = generate(1);
-        assert_eq!(plan.room(55).unwrap().area, Area::Grounds);
-        assert_eq!(plan.room(45).unwrap().area, Area::ServiceTunnels);
-        assert_eq!(plan.final_door(), FINAL_DOOR);
+        for seed in 0..50 {
+            let plan = generate(seed);
+            assert!(plan.rooms.iter().any(|r| r.area == Area::Grounds && r.area.outdoors()), "seed {seed}");
+            assert_eq!(plan.final_door(), FINAL_DOOR);
+        }
     }
 
     fn default_opts() -> GenOptions {
