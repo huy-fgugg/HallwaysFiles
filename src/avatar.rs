@@ -31,6 +31,11 @@ const COLORS: [Color; 6] = [
     Color::srgb(0.12, 0.48, 0.48),
 ];
 
+/// Crouch pose: hips drop 0.33 m; thigh forward and knee bend chosen so the
+/// feet stay on the floor: 0.44·cos(thigh) + 0.48·cos(knee − thigh) = 0.57.
+pub const CROUCH_THIGH: f32 = 1.0;
+pub const CROUCH_KNEE: f32 = 1.8;
+
 #[derive(Component)]
 struct Avatar {
     id: u8,
@@ -70,7 +75,13 @@ impl Plugin for AvatarPlugin {
         app.add_systems(
             Update,
             (send_state, sync_doors, apply_peer_events, spawn_avatars, animate_avatars, place_name_tags).chain().run_if(in_state(AppState::Playing)),
-        )
+        );
+        // QA: HALLWAYS_AVATAR_VIEW stands three teammates in front of you
+        // (still, walking, crouching) to check the models up close.
+        if std::env::var_os("HALLWAYS_AVATAR_VIEW").is_some() {
+            app.add_systems(Update, avatar_view.before(spawn_avatars).run_if(in_state(AppState::Playing)));
+        }
+        app
         .add_systems(OnExit(AppState::Playing), |mut c: Commands, q: Query<Entity, Or<(With<Avatar>, With<NameTag>)>>| {
             for e in &q {
                 c.entity(e).try_despawn();
@@ -168,6 +179,35 @@ fn apply_peer_events(
     }
 }
 
+fn avatar_view(time: Res<Time>, player: Query<(&Player, &Transform)>, mut peers: ResMut<Peers>) {
+    let Ok((p, tf)) = player.single() else { return };
+    let fwd = Vec3::new(-p.yaw.sin(), 0.0, -p.yaw.cos());
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let t = time.elapsed_secs();
+    for (k, id) in [1u8, 2, 3].into_iter().enumerate() {
+        let at = tf.translation + fwd * 2.6 + right * ((k as f32 - 1.0) * 0.9);
+        peers.0.insert(
+            id,
+            PeerState {
+                p: at.to_array(),
+                yaw: p.yaw + std::f32::consts::PI + (k as f32 - 1.0) * 0.4,
+                pitch: 0.0,
+                crouch: id == 3,
+                speed: if id == 2 { crate::player::WALK_SPEED } else { 0.0 },
+                phase: t * 4.2,
+                gesture: crate::viewmodel::Gesture::None,
+                gt: 0.0,
+                right: if id == 1 { Some(ItemKind::Flashlight) } else { None },
+                left: None,
+                light: false,
+                hiding: false,
+                alive: true,
+                room: 0,
+            },
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_avatars(
     mut commands: Commands,
@@ -243,11 +283,15 @@ fn spawn_avatar(commands: &mut Commands, kit: &BodyKit, id: u8, st: &PeerState, 
             for right in [true, false] {
                 let x = if right { 0.1 } else { -0.1 };
                 root.spawn((Limb::Thigh(right), Transform::from_xyz(x, 0.9, 0.0), Visibility::default())).with_children(|thigh| {
-                    piece(thigh, &kit.capsule, &pants, Vec3::new(0.0, -0.22, 0.0), Vec3::new(0.16, 0.21, 0.16));
+                    // Overlaps the pelvis above and the knee below so the leg reads as one piece.
+                    piece(thigh, &kit.capsule, &pants, Vec3::new(0.0, -0.23, 0.0), Vec3::new(0.17, 0.25, 0.17));
                     // Cargo pocket on the outside of the thigh.
                     piece(thigh, &kit.cube, &patch, Vec3::new(if right { 0.075 } else { -0.075 }, -0.24, 0.0), Vec3::new(0.025, 0.12, 0.1));
                     thigh.spawn((Limb::Shin(right), Transform::from_xyz(0.0, -0.44, 0.0), Visibility::default())).with_children(|shin| {
-                        piece(shin, &kit.capsule, &pants, Vec3::new(0.0, -0.19, 0.0), Vec3::new(0.13, 0.19, 0.13));
+                        // Knee joint, shin (overlapping the knee) and an ankle into the boot.
+                        piece(shin, &kit.sphere, &pants, Vec3::ZERO, Vec3::splat(0.15));
+                        piece(shin, &kit.capsule, &pants, Vec3::new(0.0, -0.17, 0.0), Vec3::new(0.14, 0.22, 0.14));
+                        piece(shin, &kit.cyl, &pants, Vec3::new(0.0, -0.33, 0.0), Vec3::new(0.11, 0.1, 0.11));
                         // Knee patch.
                         piece(shin, &kit.cube, &patch, Vec3::new(0.0, -0.02, -0.06), Vec3::new(0.1, 0.09, 0.03));
                         // Boot: upper, toe cap, sole and laces.
@@ -313,15 +357,17 @@ fn spawn_avatar(commands: &mut Commands, kit: &BodyKit, id: u8, st: &PeerState, 
                 for right in [true, false] {
                     let x = if right { 0.25 } else { -0.25 };
                     hips.spawn((Limb::Arm(right), Transform::from_xyz(x, 0.52, 0.0), Visibility::default())).with_children(|arm| {
-                        piece(arm, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.15, 0.0), Vec3::new(0.115, 0.15, 0.115));
+                        piece(arm, &kit.sphere, &kit.sleeve, Vec3::ZERO, Vec3::splat(0.13));
+                        piece(arm, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.155, 0.0), Vec3::new(0.115, 0.17, 0.115));
                         // Elbow patch.
                         piece(arm, &kit.sphere, &kit.cuff, Vec3::new(0.0, -0.29, 0.03), Vec3::new(0.08, 0.07, 0.06));
                         arm.spawn((Limb::Forearm(right), Transform::from_xyz(0.0, -0.3, 0.0), Visibility::default())).with_children(|fore| {
-                            piece(fore, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.13, 0.0), Vec3::new(0.1, 0.12, 0.1));
+                            piece(fore, &kit.sphere, &kit.sleeve, Vec3::ZERO, Vec3::splat(0.105));
+                            piece(fore, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.12, 0.0), Vec3::new(0.1, 0.14, 0.1));
                             // Rolled cuff at the wrist.
                             piece(fore, &kit.cyl, &kit.cuff, Vec3::new(0.0, -0.245, 0.0), Vec3::new(0.105, 0.04, 0.105));
                             // Hand at the wrist, fingers pointing down the arm.
-                            fore.spawn((Transform::from_xyz(0.0, -0.29, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), Visibility::default())).with_children(|hand| {
+                            fore.spawn((Transform::from_xyz(0.0, -0.262, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), Visibility::default())).with_children(|hand| {
                                 build_hand(hand, kit, right, 1.3);
                                 for kind in ItemKind::ALL {
                                     hand.spawn((AvatarItem { kind, right }, grip_transform(right, 1.3, true), Visibility::Hidden)).with_children(|it| build_item(it, kit, kind, 1.3));
@@ -394,11 +440,11 @@ fn animate_avatars(
                     Limb::Thigh(right) => {
                         let s = if right { swing } else { -swing };
                         lt.translation.y = 0.9 - 0.33 * c;
-                        lt.rotation = Quat::from_rotation_x(s - 1.0 * c);
+                        lt.rotation = Quat::from_rotation_x(s * (1.0 - 0.6 * c) - CROUCH_THIGH * c);
                     }
                     Limb::Shin(right) => {
                         let s = if right { ph.sin() } else { -ph.sin() };
-                        lt.rotation = Quat::from_rotation_x((s.max(0.0) * 0.7 * walk) + 1.5 * c);
+                        lt.rotation = Quat::from_rotation_x((s.max(0.0) * 0.7 * walk) * (1.0 - 0.6 * c) + CROUCH_KNEE * c);
                     }
                     Limb::Arm(right) => {
                         let s = if right { -swing } else { swing };
@@ -468,5 +514,19 @@ fn place_name_tags(
             }
             None => *vis = Visibility::Hidden,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feet_stay_on_the_floor() {
+        // Thigh 0.44 m (hip to knee), shin and boot 0.48 m (knee to sole).
+        let crouched = 0.9 - 0.33 - 0.44 * CROUCH_THIGH.cos() - 0.48 * (CROUCH_KNEE - CROUCH_THIGH).cos();
+        assert!(crouched.abs() < 0.03, "crouched feet at {crouched}");
+        let standing: f32 = 0.9 - 0.44 - 0.48;
+        assert!(standing.abs() < 0.03, "standing feet at {standing}");
     }
 }
