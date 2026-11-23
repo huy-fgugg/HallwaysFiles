@@ -131,6 +131,20 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.0.9
+- [x] No missing walls: the oldest loaded room gets a back wall with the closed door while the room behind it is unloaded, and a corridor stands behind Door 100 (checked with a magenta-void QA mode, including looking back through doors)
+- [x] Much harder: monsters spawn far more often (Surge 32%, Undertow 22%, Gallery and Hush 25%, Whisperer 75%, Listener 65%) and hit harder with less time to react; faster Hollow; stronger chase hazards; less loot
+- [x] Bigger, longer rooms; much bigger gardens
+- [x] A second Hollow chase (rooms 076-081, Door 082 slams)
+- [x] Retry starts a new random floor (unless you typed a seed)
+- [x] The Listener is scarier (taller, ember cracks, gaping toothed jaw) and follows you through the door: it crouches, squeezes through and stands back up
+- [x] Scarier Surge (screaming face in its storm); the Whisperer gropes and sways; the Hush is a shrouded figure that raises a finger to its face
+- [x] New structures: pillar halls and garden streams with footbridges
+- [x] Player models joined up (knees, elbows, ankles, hands) with feet on the floor; cutscene players use the same body and animations
+- [x] Lift boarding: start in a boarding hall and walk in; everyone aboard = down in 5 s, otherwise a 20 s countdown leaves stragglers behind; up to 5 players online
+- [x] Cutscenes change with the number of players; remade arrival
+- [x] 14 achievements with pop-ups and an Achievements screen; pop-ups when players join or leave
+
 ## 1.0.8
 - [x] "CREATED BY DONUT STUDIOS!" splash with the studio logo when the game starts (any key or tap skips it); Donut Studios in the credits
 - [x] Room generation follows a door rule: every door sits at least m = W/2 + max(casing, open-leaf overshoot) + clearance from the side walls, rounding only ever moves doors inward, and each door's swing arc and the space in front of doors and fake doors are kept clear of furniture, columns, posts and rocks (checked on 1,500 floors in tests)
