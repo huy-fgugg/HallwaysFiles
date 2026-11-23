@@ -58,6 +58,9 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<DeathFall>()
+            .add_systems(OnEnter(crate::state::Overlay::Dead), |mut f: ResMut<DeathFall>| f.0 = Some(0.0))
+            .add_systems(OnExit(crate::state::Overlay::Dead), |mut f: ResMut<DeathFall>| f.0 = None);
         app.add_systems(
             Update,
             ((look, movement).chain().run_if(gameplay_active), apply_camera).chain().in_set(CameraSet),
@@ -203,10 +206,22 @@ fn movement(
 }
 
 /// Writes yaw/pitch, eye height, head-bob and shake into the transforms.
+/// Seconds since you died (the death animation), while the death screen is up.
+#[derive(Resource, Default)]
+pub struct DeathFall(pub Option<f32>);
+
+/// How far the death collapse has got (0..1) after `t` seconds.
+pub fn death_fall(t: f32) -> f32 {
+    let k = (t / 0.95).clamp(0.0, 1.0);
+    // Knees buckle, then a heavy drop.
+    k * k * (3.0 - 2.0 * k)
+}
+
 fn apply_camera(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     settings: Res<Settings>,
     mut shake: ResMut<CameraShake>,
+    mut fall: ResMut<DeathFall>,
     player_q: Query<(&Player, &mut Transform), Without<PlayerCamera>>,
     mut cam_q: Query<&mut Transform, With<PlayerCamera>>,
 ) {
@@ -226,6 +241,15 @@ fn apply_camera(
 
     cam.translation = Vec3::new(0.0, player.eye + bob, 0.0) + shake_off;
     cam.rotation = Quat::from_euler(EulerRot::YXZ, 0.0, player.pitch, shake_roll);
+    // Death: you slump sideways and crumple to the floor, looking up.
+    if let Some(t) = fall.0.as_mut() {
+        // Capped per frame so the fall is always seen, even on a slow device.
+        *t += time.delta_secs().min(1.0 / 20.0);
+        let k = death_fall(*t);
+        let twitch = if *t < 0.5 { (*t * 40.0).sin() * 0.03 * (1.0 - *t * 2.0) } else { 0.0 };
+        cam.translation = Vec3::new(0.25 * k, player.eye + (0.22 - player.eye) * k, 0.0) + shake_off;
+        cam.rotation = Quat::from_euler(EulerRot::YXZ, 0.0, player.pitch * (1.0 - k) + 0.35 * k + twitch, 1.35 * k);
+    }
 }
 
 #[cfg(test)]

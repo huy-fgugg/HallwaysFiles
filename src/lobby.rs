@@ -4,7 +4,7 @@
 //! starts as soon as the first player boards, and when it runs out the lift
 //! leaves without them. The host can also start it at once (Enter / gamepad A).
 //!
-//! Solo runs board alone. Online (up to 5 players) only the host's game
+//! Solo runs board alone. Online (up to 4 players) only the host's game
 //! decides when to go; everyone departs together when the server relays the
 //! host's Start, and anyone not inside the car is left behind.
 
@@ -106,6 +106,7 @@ fn begin(
     preset: Res<crate::presets::ActivePreset>,
     session: Res<crate::net::NetSession>,
     mut lift: MessageWriter<ElevatorCommand>,
+    mut play: MessageWriter<PlayCutscene>,
 ) {
     let capture = std::env::var_os("HALLWAYS_CAPTURE").is_some() || std::env::var_os("HALLWAYS_TRAILER").is_some();
     // A solo custom floor starts straight in its first room (see floor::custom_quick_start).
@@ -113,12 +114,19 @@ fn begin(
     let waiting = !(skip.0 || capture || custom_solo);
     // Scripted QA runs (autopilot, warps, click tests) start aboard.
     let qa = ["HALLWAYS_BOT", "HALLWAYS_WARP", "HALLWAYS_QA", "HALLWAYS_FAKE_TOUCH"].iter().any(|v| std::env::var_os(v).is_some());
+    // QA: HALLWAYS_QA_CUTSCENES keeps the retry / custom-floor openings in scripted runs.
+    let qa_scenes = std::env::var_os("HALLWAYS_QA_CUTSCENES").is_some();
     *lobby = LiftLobby { waiting, start_in_car: !waiting || qa, ..default() };
     if !waiting {
-        // Retry / capture: you're already on the floor; the gate is open.
         lift.write(ElevatorCommand::Needle { to: 1.0, seconds: 0.0 });
-        lift.write(ElevatorCommand::OpenGate { seconds: 0.0 });
         lift.write(ElevatorCommand::CloseRear { seconds: 0.0 });
+        if skip.0 && !capture && !custom_solo && (!qa || qa_scenes) {
+            // Retry: a short scene in the lift; it opens the gate itself.
+            play.write(PlayCutscene(crate::cutscene::RETRY.into()));
+        } else {
+            // Capture / solo custom floor: the gate is simply open.
+            lift.write(ElevatorCommand::OpenGate { seconds: 0.0 });
+        }
     }
 }
 

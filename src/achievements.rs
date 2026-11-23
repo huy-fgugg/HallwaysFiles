@@ -35,7 +35,7 @@ pub const ALL: [Achievement; 14] = [
     Achievement { id: "locksmith", name: "LOCKSMITH", how: "Find a key in a drawer." },
     Achievement { id: "left_behind", name: "LEFT BEHIND", how: "Miss the lift." },
     Achievement { id: "team_player", name: "TEAM PLAYER", how: "Play an online run with 3 or more players." },
-    Achievement { id: "full_house", name: "FULL HOUSE", how: "Play an online run with 5 players." },
+    Achievement { id: "full_house", name: "FULL HOUSE", how: "Play an online run with a full room of 4 players." },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static Achievement> {
@@ -132,7 +132,7 @@ fn detect(
     if session.online() && session.players.len() >= 3 {
         out.write(Unlock("team_player"));
     }
-    if session.online() && session.players.len() >= 5 {
+    if session.online() && session.players.len() >= usize::from(crate::net::proto::MAX_PLAYERS) {
         out.write(Unlock("full_house"));
     }
     // Past a Listener's garden and still alive.
@@ -168,7 +168,7 @@ fn join_toasts(session: Res<crate::net::NetSession>, mut seen: Local<Option<Vec<
     if let Some(before) = seen.as_ref() {
         for (id, name) in &now {
             if *id != session.my_id && !before.iter().any(|(b, _)| b == id) {
-                out.write(Toast { kind: ToastKind::Joined, title: "PLAYER JOINED".into(), body: format!("{name} joined the room ({} / 5)", now.len()) });
+                out.write(Toast { kind: ToastKind::Joined, title: "PLAYER JOINED".into(), body: format!("{name} joined the room ({} / {})", now.len(), session.max.max(1)) });
             }
         }
         for (id, name) in before {

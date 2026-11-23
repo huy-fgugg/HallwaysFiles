@@ -38,6 +38,7 @@ impl Plugin for MenusPlugin {
                     credits_actions.run_if(in_state(Screen::Credits)),
                     cutscene_actions.run_if(in_state(Screen::Cutscenes)),
                     death_actions.run_if(in_state(Screen::Death)),
+                    reveal_death_screen.run_if(in_state(Screen::Death)),
                     death_actions.run_if(in_state(Screen::Summary)),
                     animate_victory.run_if(in_state(Screen::Summary)),
                 ),
@@ -392,6 +393,35 @@ fn credits_actions(
     }
 }
 
+/// The death screen waits for the death animation, then fades in.
+#[derive(Component)]
+struct DeathReveal(f32);
+
+const DEATH_ANIM: f32 = 1.6;
+
+fn reveal_death_screen(
+    time: Res<Time<Real>>,
+    mut q: Query<(&mut DeathReveal, &mut Visibility, &mut BackgroundColor, &Children)>,
+    mut panel: Query<&mut Visibility, Without<DeathReveal>>,
+) {
+    for (mut r, mut v, mut bg, kids) in &mut q {
+        r.0 += time.delta_secs().min(1.0 / 20.0);
+        for c in kids.iter() {
+            if let Ok(mut pv) = panel.get_mut(c) {
+                *pv = if r.0 < DEATH_ANIM { Visibility::Hidden } else { Visibility::Inherited };
+            }
+        }
+        // A red wash while you fall, then the panel.
+        let k = ((r.0 - DEATH_ANIM) / 0.5).clamp(0.0, 1.0);
+        if r.0 < DEATH_ANIM {
+            *v = Visibility::Visible;
+            bg.0 = Color::srgba(0.35, 0.0, 0.0, (r.0 / DEATH_ANIM) * 0.45);
+        } else {
+            bg.0 = Color::srgba(0.35 * (1.0 - k), 0.0, 0.0, 0.45 + 0.43 * k);
+        }
+    }
+}
+
 fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<crate::hollow::DeathCause>, run: Res<crate::run::RunState>, profile: Res<crate::profile::Profile>) {
     let earned = (run.lumens as f32 * profile.lumen_multiplier()).round() as u32;
     commands
@@ -404,10 +434,12 @@ fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<cr
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::BLACK.with_alpha(0.88)),
+            BackgroundColor(Color::BLACK.with_alpha(0.0)),
             GlobalZIndex(40),
             DespawnOnExit(Screen::Death),
             Name::new("Death screen"),
+            DeathReveal(0.0),
+            Visibility::Hidden,
         ))
         .with_children(|root| {
             root.spawn(theme.danger_panel(720.0)).with_children(|p| {

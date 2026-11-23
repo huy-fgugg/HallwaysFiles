@@ -37,6 +37,8 @@ struct Avatar {
     phase: f32,
     crouch: f32,
     skin: crate::body::Skin,
+    /// Seconds since this player died (their body falls, then fades out).
+    dead: f32,
 }
 
 #[derive(Component)]
@@ -231,7 +233,7 @@ fn spawn_avatar(commands: &mut Commands, model: &crate::body::PlayerModel, id: u
     let skin = st.skin.unwrap_or_else(|| crate::body::Skin::for_id(id));
     commands
         .spawn((
-            Avatar { id, shown: pos, yaw: st.yaw, pitch: st.pitch, phase: st.phase, crouch: 0.0, skin },
+            Avatar { id, shown: pos, yaw: st.yaw, pitch: st.pitch, phase: st.phase, crouch: 0.0, skin, dead: 0.0 },
             BodyPose::default(),
             Transform::from_translation(pos),
             Visibility::default(),
@@ -289,7 +291,10 @@ fn animate_avatars(
     let k = (dt * 12.0).min(1.0);
     for (ent, mut av, mut tf, mut vis, mut pose, kids) in &mut avatars {
         let Some(st) = peers.0.get(&av.id) else { continue };
-        *vis = if st.alive && !st.hiding { Visibility::Inherited } else { Visibility::Hidden };
+        av.dead = if st.alive { 0.0 } else { av.dead + dt };
+        // A teammate who dies collapses where they stood, then fades from view.
+        let fallen = !st.alive && av.dead < 4.0;
+        *vis = if (st.alive && !st.hiding) || fallen { Visibility::Inherited } else { Visibility::Hidden };
         let target = Vec3::from_array(st.p);
         if target.distance(av.shown) > 4.0 {
             av.shown = target; // teleport (hiding spot, respawn)
@@ -302,6 +307,13 @@ fn animate_avatars(
         av.crouch += ((if st.crouch { 1.0 } else { 0.0 }) - av.crouch) * k;
         tf.translation = av.shown;
         tf.rotation = Quat::from_rotation_y(av.yaw);
+        if fallen {
+            let k = crate::player::death_fall(av.dead);
+            tf.rotation = Quat::from_rotation_y(av.yaw) * Quat::from_rotation_x(1.5 * k);
+            tf.translation.y += 0.12 * k;
+            *pose = BodyPose { arm: [0.6 * k, 0.4 * k], arm_roll: [-1.0 * k, 1.0 * k], thigh: [0.25 * k, 0.05], calf: [0.4 * k, 0.1], head: -0.3 * k, ..default() };
+            continue;
+        }
         *pose = pose_for(st.speed, av.phase, av.crouch, av.pitch, st.right.is_some(), st.left.is_some(), st.gesture, st.gesture.envelope(st.gt));
         // A teammate who changed their look.
         if let Some(skin) = st.skin

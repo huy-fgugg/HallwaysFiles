@@ -23,12 +23,26 @@ use crate::world::{elevator::ElevatorCommand, Mood};
 pub const INTRO: &str = "01_intro";
 pub const THE_HOLLOW: &str = "02_the_hollow";
 pub const ENDING: &str = "03_ending";
+/// Opening of a custom floor (and maps from the map builder).
+pub const CUSTOM_START: &str = "04_custom_start";
+/// Retry: back in the lift for a fresh floor.
+pub const RETRY: &str = "05_retry";
+
+/// Extra words for captions: `{floor}`, `{area}` and `{doors}`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct CutsceneVars {
+    pub floor: String,
+    pub area: String,
+    pub doors: u32,
+}
 
 fn embedded(id: &str) -> Option<&'static str> {
     match id {
         INTRO => Some(include_str!("../assets/cutscenes/01_intro/cutscene.ron")),
         THE_HOLLOW => Some(include_str!("../assets/cutscenes/02_the_hollow/cutscene.ron")),
         ENDING => Some(include_str!("../assets/cutscenes/03_ending/cutscene.ron")),
+        CUSTOM_START => Some(include_str!("../assets/cutscenes/04_custom_start/cutscene.ron")),
+        RETRY => Some(include_str!("../assets/cutscenes/05_retry/cutscene.ron")),
         _ => None,
     }
 }
@@ -113,16 +127,22 @@ pub fn party_text(text: &str, players: u8) -> String {
 impl CutsceneDef {
     /// The version of this cutscene for `players` players: shots and events
     /// meant for other group sizes are dropped and captions are filled in.
-    pub fn for_players(mut self, players: u8) -> Self {
+    pub fn for_players(self, players: u8) -> Self {
+        self.with_vars(players, &CutsceneVars::default())
+    }
+
+    /// As [`Self::for_players`], also filling in `{floor}`, `{area}` and `{doors}`.
+    pub fn with_vars(mut self, players: u8, vars: &CutsceneVars) -> Self {
+        let fill = |t: &str| party_text(t, players).replace("{floor}", &vars.floor.to_uppercase()).replace("{area}", &vars.area.to_uppercase()).replace("{doors}", &vars.doors.to_string());
         let fits = |r: Option<(u8, u8)>| r.is_none_or(|(lo, hi)| (lo..=hi).contains(&players));
         self.shots.retain(|s| fits(s.players));
         self.events.retain(|e| fits(e.players));
         for e in &mut self.events {
             match &mut e.action {
-                CueAction::Subtitle { text, .. } => *text = party_text(text, players),
+                CueAction::Subtitle { text, .. } => *text = fill(text),
                 CueAction::Title { text, sub, .. } => {
-                    *text = party_text(text, players);
-                    *sub = party_text(sub, players);
+                    *text = fill(text);
+                    *sub = fill(sub);
                 }
                 _ => {}
             }
@@ -251,6 +271,7 @@ impl Plugin for CutscenePlugin {
         app.add_message::<PlayCutscene>()
             .add_message::<CutsceneEnded>()
             .init_resource::<ActiveCutscene>()
+            .init_resource::<CutsceneVars>()
             .init_resource::<SeenCutscenes>()
             .add_systems(OnEnter(AppState::Playing), (spawn_cutscene_ui, reset).chain())
             .add_systems(OnExit(AppState::Playing), |mut a: ResMut<ActiveCutscene>| *a = ActiveCutscene::default())
@@ -272,11 +293,13 @@ fn start_cutscenes(
     mut active: ResMut<ActiveCutscene>,
     mut seen: ResMut<SeenCutscenes>,
     peers: Option<Res<crate::net::Peers>>,
+    vars: Option<Res<CutsceneVars>>,
 ) {
     for PlayCutscene(id) in reader.read() {
         // You plus everyone else in the room.
         let players = 1 + peers.as_ref().map_or(0, |p| p.0.values().filter(|s| s.alive).count()) as u8;
-        match load_def(id).map(|d| d.for_players(players.min(5))) {
+        let vars = vars.as_deref().cloned().unwrap_or_default();
+        match load_def(id).map(|d| d.with_vars(players.min(5), &vars)) {
             Some(def) => {
                 info!("cutscene: {id} ({:.1}s)", def.duration);
                 *active = ActiveCutscene { id: id.clone(), def: Some(def), ..default() };
@@ -656,7 +679,7 @@ mod tests {
 
     #[test]
     fn bundled_cutscenes_parse() {
-        for id in [INTRO, THE_HOLLOW] {
+        for id in [INTRO, THE_HOLLOW, ENDING, CUSTOM_START, RETRY] {
             let def = parse(embedded(id).unwrap()).unwrap_or_else(|e| panic!("{id}: {e}"));
             assert!(def.duration > 0.0);
             assert!(!def.shots.is_empty());

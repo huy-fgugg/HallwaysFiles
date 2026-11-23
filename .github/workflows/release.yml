@@ -153,7 +153,7 @@ jobs:
             Needs a graphics card with Vulkan (Linux/Android) or DirectX 12/Vulkan (Windows).
 
             ## Online rooms
-            Host or join with a 5-letter room code (up to 5 players), with crossplay between Windows, Linux and Android.
+            Host or join with a 5-letter room code (up to 4 players), with crossplay between Windows, Linux and Android.
 
             ## Your own music
             Drop a song into a folder in `assets/music/` (Windows: next to the exe; Linux: `/opt/hallways/assets/music/`).

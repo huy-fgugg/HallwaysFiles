@@ -197,6 +197,7 @@ fn custom_quick_start(
     mut player: Query<(&mut crate::player::Player, &mut Transform)>,
     mut subs: MessageWriter<Subtitle>,
     mut done: Local<bool>,
+    (mut anchor, mut vars, mut play): (ResMut<crate::ending::CutsceneAnchor>, ResMut<crate::cutscene::CutsceneVars>, MessageWriter<crate::cutscene::PlayCutscene>),
 ) {
     if run.elapsed < 0.2 {
         *done = false;
@@ -213,7 +214,15 @@ fn custom_quick_start(
     tf.translation = Vec3::new(r.entry_x, r.entry_height, r.max.y - 0.9);
     pl.yaw = 0.0;
     pl.pitch = 0.0;
-    subs.write(Subtitle { text: format!("-  {}  -   {}", p.name.to_uppercase(), r.area.name().to_uppercase()), seconds: 4.0, danger: false });
+    // A proper opening: a sweep over the first room under the floor's title.
+    let qa = ["HALLWAYS_BOT", "HALLWAYS_WARP", "HALLWAYS_QA", "HALLWAYS_TRAILER"].iter().any(|v| std::env::var_os(v).is_some()) && std::env::var_os("HALLWAYS_QA_CUTSCENES").is_none();
+    if qa {
+        subs.write(Subtitle { text: format!("-  {}  -   {}", p.name.to_uppercase(), r.area.name().to_uppercase()), seconds: 4.0, danger: false });
+    } else {
+        anchor.0 = Vec3::new(r.entry_x, r.entry_height, r.max.y);
+        *vars = crate::cutscene::CutsceneVars { floor: p.name.clone(), area: r.area.name().to_string(), doors: floor.0.final_door() };
+        play.write(crate::cutscene::PlayCutscene(crate::cutscene::CUSTOM_START.into()));
+    }
 }
 
 /// Doors rebuilt in the "already open" state lose their blocking collider.
