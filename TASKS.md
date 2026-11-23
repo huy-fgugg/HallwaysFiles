@@ -131,6 +131,14 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.0.8
+- [x] "CREATED BY DONUT STUDIOS!" splash with the studio logo when the game starts (any key or tap skips it); Donut Studios in the credits
+- [x] Room generation follows a door rule: every door sits at least m = W/2 + max(casing, open-leaf overshoot) + clearance from the side walls, rounding only ever moves doors inward, and each door's swing arc and the space in front of doors and fake doors are kept clear of furniture, columns, posts and rocks (checked on 1,500 floors in tests)
+- [x] Levels come in a random order every run: the Guest Wing first, then the other five areas shuffled by the seed (type a seed on the Play screen to replay a floor)
+- [x] The Door 40 chase is different every run: hands burst out of the walls, fire vents roar up and the ceiling collapses where you run, always leaving a free lane
+- [x] Divider openings (barricades, shelves, zigzag walls) stay clear in every area
+- [x] Three full-floor autopilot runs on random seeds (chase in the Grounds and the Atrium), click-through QA on PC and touch QA in a phone-sized window
+
 ## 1.0.7
 - [x] Fix: menus could not be clicked during a run (an invisible cutscene fade layer was catching clicks)
 - [x] Fix: admin panel: the code box is focused, Enter unlocks, the panel rebuilds in place and item buttons sit in tidy rows
