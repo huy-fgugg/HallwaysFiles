@@ -30,6 +30,7 @@ pub enum Overlay {
     Admin,
     Dead,
     Summary,
+    Achievements,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,6 +46,7 @@ pub enum Screen {
     Admin,
     Death,
     Summary,
+    Achievements,
 }
 
 impl ComputedStates for Screen {
@@ -58,6 +60,7 @@ impl ComputedStates for Screen {
             (AppState::MainMenu, Overlay::Play) => Screen::Play,
             (AppState::MainMenu, Overlay::Custom) => Screen::Custom,
             (AppState::MainMenu, Overlay::Cutscenes) => Screen::Cutscenes,
+            (AppState::MainMenu, Overlay::Achievements) => Screen::Achievements,
             (AppState::MainMenu, _) => Screen::MainMenu,
             (AppState::Playing, Overlay::Pause) => Screen::Pause,
             (AppState::Playing, Overlay::Admin) => Screen::Admin,

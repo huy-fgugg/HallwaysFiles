@@ -80,11 +80,13 @@ pub struct Profile {
     pub modifiers: Vec<Modifier>,
     /// Last seed typed on the Play screen ("" = random each run).
     pub seed_text: String,
+    /// Unlocked achievement ids (see `achievements::ALL`).
+    pub achievements: Vec<String>,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { version: PROFILE_VERSION, name: "Player".into(), lumens: 0, runs: 0, wins: 0, best_room: 0, loadout: vec![], modifiers: vec![], seed_text: String::new() }
+        Self { version: PROFILE_VERSION, name: "Player".into(), lumens: 0, runs: 0, wins: 0, best_room: 0, loadout: vec![], modifiers: vec![], seed_text: String::new(), achievements: vec![] }
     }
 }
 

@@ -28,6 +28,8 @@ pub enum MenuAction {
     ResetSettings,
     OpenCredits,
     CloseCredits,
+    OpenAchievements,
+    CloseAchievements,
     Retry,
     OpenPlay,
     ClosePlay,

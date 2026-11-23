@@ -299,6 +299,7 @@ fn hush(
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
     (mut death, mut next): (ResMut<DeathCause>, ResMut<NextState<Overlay>>),
+    mut unlock: MessageWriter<crate::achievements::Unlock>,
 ) {
     let Active::Hush { room, t } = &mut state.0 else { return };
     let room = *room;
@@ -318,6 +319,7 @@ fn hush(
     } else if *t >= warn + tune.window {
         sfx.write(PlaySfx(Sfx::Whoosh));
         subs.write(Subtitle::info("[The pressure lifts]"));
+        unlock.write(crate::achievements::Unlock("still_as_stone"));
         true
     } else {
         false

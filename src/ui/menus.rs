@@ -105,7 +105,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                 // Grouped: play first, then extras and options, quit apart at the bottom.
                 let groups: [(&str, &[(&str, MenuAction)]); 3] = [
                     ("", &[("Play", MenuAction::OpenPlay)]),
-                    ("EXTRAS", &[("Cutscenes", MenuAction::OpenCutscenes), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
+                    ("EXTRAS", &[("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
                     ("", &[("Quit", MenuAction::Quit)]),
                 ];
                 let mut i = 0;
@@ -227,6 +227,7 @@ fn main_menu_actions(
             MenuAction::OpenCutscenes => next_overlay.set(Overlay::Cutscenes),
             MenuAction::OpenSettings => next_overlay.set(Overlay::Settings),
             MenuAction::OpenCredits => next_overlay.set(Overlay::Credits),
+            MenuAction::OpenAchievements => next_overlay.set(Overlay::Achievements),
             MenuAction::Quit => {
                 exit.write(AppExit::Success);
             }
