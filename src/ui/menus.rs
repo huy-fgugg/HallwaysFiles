@@ -47,7 +47,7 @@ impl Plugin for MenusPlugin {
 
 /// Seconds since the main menu opened (drives the intro animation).
 #[derive(Resource, Default)]
-struct MenuClock(f32);
+pub(crate) struct MenuClock(pub(crate) f32);
 
 /// Fades text in after `delay` seconds.
 #[derive(Component)]
@@ -322,6 +322,7 @@ fn manage_cursor(
 /// come from Poly Haven's API; music credits are read from
 /// `assets/music/CREDITS.txt` so drop-in tracks can be credited without code.
 pub const CREDITS: &[(&str, &[&str])] = &[
+    ("A GAME BY", &["Donut Studios"]),
     (
         "3D MODELS  -  Poly Haven, CC0",
         &[

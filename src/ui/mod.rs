@@ -8,6 +8,7 @@ pub mod custom_menu;
 pub mod play_menu;
 pub mod scroll;
 pub mod settings_menu;
+pub mod splash;
 
 use bevy::prelude::*;
 
@@ -24,6 +25,7 @@ impl Plugin for UiPlugin {
             custom_menu::CustomMenuPlugin,
             scroll::ScrollPlugin,
             crash_report::CrashReportPlugin,
+            splash::SplashPlugin,
         ));
     }
 }
