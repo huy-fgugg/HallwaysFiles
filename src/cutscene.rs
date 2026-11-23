@@ -378,9 +378,9 @@ fn skip_input(
     if !held {
         active.skip_armed = false;
     }
-    // Count real holding time, at most 1/20 s per frame so one long frame
+    // Count real holding time, at most 1/4 s per frame so one long frame
     // (a loading hitch on a slow device) can't skip the cutscene by itself.
-    let dt = time.delta_secs().min(1.0 / 20.0);
+    let dt = time.delta_secs().min(0.25);
     active.skip_hold = if held && active.skip_armed { active.skip_hold + dt } else { 0.0 };
     if active.skip_hold >= SKIP_HOLD {
         active.title = None;
