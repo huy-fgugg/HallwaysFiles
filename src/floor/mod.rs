@@ -125,7 +125,12 @@ fn setup_floor(
         }
         None => plan::GenOptions::default(),
     };
-    commands.insert_resource(Floor(plan::generate_custom(seed.0, &cfg, &opts)));
+    // A hand-built map lays out its own rooms; anything else is generated.
+    let plan = match preset.0.as_ref().filter(|p| !p.rooms.is_empty()) {
+        Some(p) => plan::from_map(&p.rooms, seed.0),
+        None => plan::generate_custom(seed.0, &cfg, &opts),
+    };
+    commands.insert_resource(Floor(plan));
     let custom_light = preset.0.as_ref().map_or(1.0, |p| p.light_scale());
     let light_scale = custom_light * if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
     let players = (peers.0.len() + 1).min(crate::net::proto::MAX_PLAYERS as usize) as u8;

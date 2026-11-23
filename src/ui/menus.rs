@@ -106,7 +106,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                 // Grouped: play first, then extras and options, quit apart at the bottom.
                 let groups: [(&str, &[(&str, MenuAction)]); 3] = [
                     ("", &[("Play", MenuAction::OpenPlay), ("Customise", MenuAction::OpenSkin)]),
-                    ("EXTRAS", &[("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
+                    ("EXTRAS", &[("Map Builder", MenuAction::OpenMapBuilder), ("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
                     ("", &[("Quit", MenuAction::Quit)]),
                 ];
                 let mut i = 0;

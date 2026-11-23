@@ -39,6 +39,9 @@ pub struct Preset {
     pub gallery: bool,
     pub hush: bool,
     pub listener: bool,
+    /// A hand-built map (Map Builder): its rooms in order. Empty = generated.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rooms: Vec<crate::mapfile::MapRoom>,
 }
 
 impl Default for Preset {
@@ -62,6 +65,7 @@ impl Default for Preset {
             gallery: true,
             hush: true,
             listener: true,
+            rooms: Vec::new(),
         }
     }
 }
@@ -197,6 +201,14 @@ impl Preset {
             self.areas = Area::ALL.to_vec();
         }
         self.room_size = self.room_size.clamp(60, 160);
+        self.rooms.truncate(crate::mapfile::MAX_ROOMS);
+        for r in &mut self.rooms {
+            *r = r.sanitized();
+        }
+        if !self.rooms.is_empty() {
+            // A map's last door: one per room, plus the final hall's.
+            self.doors = FIRST_ROOM + self.rooms.len() as u32 + 1;
+        }
         self.brightness = self.brightness.clamp(20, 160);
         for v in [&mut self.dark_rooms, &mut self.entities, &mut self.fake_doors, &mut self.stair_rooms, &mut self.loot] {
             *v = (*v).min(300);
@@ -286,7 +298,7 @@ pub struct Entry {
 pub fn load_all(dir: &Path) -> Vec<Entry> {
     let mut list: Vec<Entry> = builtin().into_iter().map(|preset| Entry { preset, path: None }).collect();
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case(EXTENSION))).collect())
+        .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case(EXTENSION) || x.eq_ignore_ascii_case(crate::mapfile::MAP_EXTENSION))).collect())
         .unwrap_or_default();
     files.sort();
     for path in files {
@@ -304,10 +316,15 @@ pub fn file_name(name: &str) -> String {
     format!("{}.{EXTENSION}", clean_name(name))
 }
 
+/// File name for a preset: maps (with rooms) are `.hallwaysmap` files.
+pub fn file_name_for(p: &Preset) -> String {
+    if p.rooms.is_empty() { file_name(&p.name) } else { format!("{}.{}", clean_name(&p.name), crate::mapfile::MAP_EXTENSION) }
+}
+
 /// Writes the preset as `<name>.hallways` in `dir`; returns the path.
 pub fn save(dir: &Path, p: &Preset) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let path = dir.join(file_name(&p.name));
+    let path = dir.join(file_name_for(p));
     std::fs::write(&path, p.to_ron())?;
     Ok(path)
 }

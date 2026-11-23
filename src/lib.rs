@@ -28,6 +28,7 @@ pub mod profile;
 pub mod pursuit;
 pub mod qa;
 pub mod body;
+pub mod mapfile;
 pub mod achievements;
 pub mod hazards;
 pub mod tap;

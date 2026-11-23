@@ -253,8 +253,11 @@ pub fn potted_plant(b: &mut Builder, props: &PropMaterials, at: Vec3, k: f32, rn
     let (cyl, sphere, cone, pot, leaf) = (props.unit_cyl.clone(), props.sphere.clone(), props.cone.clone(), props.terracotta.clone(), props.hedge.clone());
     let fronds: Vec<(f32, f32)> = (0..7).map(|_| (rng.range_f32(0.0, std::f32::consts::TAU), rng.range_f32(0.5, 0.9))).collect();
     b.commands.entity(root).with_children(|p| {
-        p.spawn((Mesh3d(cone), MeshMaterial3d(pot.clone()), Transform::from_xyz(0.0, 0.22 * k, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::PI)).with_scale(Vec3::new(0.62, 0.44, 0.62) * k)));
-        p.spawn((Mesh3d(cyl), MeshMaterial3d(pot), Transform::from_xyz(0.0, 0.42 * k, 0.0).with_scale(Vec3::new(0.46, 0.06, 0.46) * k)));
+        // A flat-bottomed pot: narrow foot, wider body, a lip at the top.
+        p.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(pot.clone()), Transform::from_xyz(0.0, 0.04 * k, 0.0).with_scale(Vec3::new(0.3, 0.08, 0.3) * k)));
+        p.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(pot.clone()), Transform::from_xyz(0.0, 0.24 * k, 0.0).with_scale(Vec3::new(0.4, 0.34, 0.4) * k)));
+        p.spawn((Mesh3d(cyl), MeshMaterial3d(pot), Transform::from_xyz(0.0, 0.43 * k, 0.0).with_scale(Vec3::new(0.48, 0.07, 0.48) * k)));
+        let _ = cone;
         p.spawn((Mesh3d(sphere.clone()), MeshMaterial3d(leaf.clone()), Transform::from_xyz(0.0, 0.75 * k, 0.0).with_scale(Vec3::new(0.55, 0.6, 0.55) * k)));
         for (a, tilt) in fronds {
             p.spawn((Mesh3d(sphere.clone()), MeshMaterial3d(leaf.clone()), Transform::from_xyz(a.cos() * 0.22 * k, 0.85 * k, a.sin() * 0.22 * k).with_rotation(Quat::from_rotation_y(-a) * Quat::from_rotation_z(tilt)).with_scale(Vec3::new(0.6, 0.08, 0.2) * k)));

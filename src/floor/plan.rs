@@ -837,6 +837,194 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
     FloorPlan { seed, rooms, last_room: last }
 }
 
+/// Lays out a hand-built map (the Map Builder) with the same rules as the
+/// generator: rooms chain north, doors keep their margins, and every room is
+/// grown or adjusted until what it asks for fits (pillars need a big room, a
+/// stream needs a long garden, a Whisperer needs the dark, and so on). A
+/// grand final hall with the last door is added after the map's rooms.
+pub fn from_map(rooms: &[crate::mapfile::MapRoom], seed: u64) -> FloorPlan {
+    use crate::mapfile::{MapFeature, MapKind, MapLight, MapMonster, MAX_ROOMS};
+    let mut specs: Vec<crate::mapfile::MapRoom> = rooms.iter().take(MAX_ROOMS).map(|r| r.sanitized()).collect();
+    if specs.is_empty() {
+        specs.push(crate::mapfile::MapRoom::default());
+    }
+    // A room after stairs starts on a landing: no Rusher there (nowhere to hide
+    // at the top of the stairs), so the stairs give way.
+    for i in 1..specs.len() {
+        if matches!(specs[i].monster, MapMonster::Surge | MapMonster::Undertow) && specs[i - 1].feature == MapFeature::Stairs {
+            specs[i - 1].feature = MapFeature::None;
+        }
+    }
+    let last = FIRST_ROOM + specs.len() as u32;
+    let mut out: Vec<RoomPlan> = Vec::new();
+    let mut entry_x = 0.0f32;
+    let mut south = START_Z;
+    let mut pending_entry = 0.0f32;
+    for (i, spec) in specs.iter().map(Some).chain(std::iter::once(None)).enumerate() {
+        let index = FIRST_ROOM + i as u32;
+        let mut rng = GameRng::fork(seed, u64::from(index) ^ 0x0BA9_0000);
+        let entry_height = std::mem::take(&mut pending_entry);
+        let Some(spec) = spec else {
+            // The final hall.
+            let (width, depth) = (13.0, 15.0);
+            let lo = entry_x + DOOR_MARGIN - width / 2.0;
+            let hi = entry_x - DOOR_MARGIN + width / 2.0;
+            let cx = 0.0f32.clamp(lo, hi);
+            let min = Vec2::new(cx - width / 2.0, south - depth);
+            let max = Vec2::new(cx + width / 2.0, south);
+            let area = specs.last().map_or(Area::GuestWing, |s| s.area);
+            out.push(RoomPlan {
+                index,
+                area,
+                kind: RoomKind::Final,
+                light: LightState::Bright,
+                min,
+                max,
+                height: area.ceiling().max(entry_height + 2.9),
+                entry_x,
+                exit_x: cx,
+                containers: 0,
+                hiding: false,
+                encounter: None,
+                mimics: vec![],
+                feature: None,
+                pursuit: false,
+                entry_height,
+                seed: rng.next_u64(),
+            });
+            break;
+        };
+        let area = spec.area;
+        let mut feature = spec.feature;
+        let mut kind = match spec.kind {
+            MapKind::Hall => RoomKind::Hall,
+            MapKind::Locked => RoomKind::KeyPuzzle,
+            MapKind::Loot | MapKind::Empty => RoomKind::Loot,
+        };
+        // Structures that only work in some rooms.
+        match feature {
+            MapFeature::Stream if area != Area::Grounds => feature = MapFeature::None,
+            MapFeature::Zigzag | MapFeature::Pillars if matches!(area, Area::Grounds) && feature == MapFeature::Zigzag => feature = MapFeature::None,
+            MapFeature::Pillars if !matches!(area, Area::GuestWing | Area::Archive | Area::Atrium | Area::QuarryLift) => feature = MapFeature::None,
+            MapFeature::Zigzag if area == Area::Atrium => feature = MapFeature::None,
+            MapFeature::Loft => kind = RoomKind::KeyPuzzle,
+            _ => {}
+        }
+        if kind == RoomKind::Hall && feature != MapFeature::Stream {
+            feature = MapFeature::None;
+        }
+        let monster = spec.monster;
+        let mut light = match spec.light {
+            MapLight::Bright => LightState::Bright,
+            MapLight::Dim => LightState::Dim,
+            MapLight::Dark => LightState::Dark,
+        };
+        match monster {
+            MapMonster::Whisperer => light = LightState::Dark,
+            MapMonster::Listener | MapMonster::Gallery | MapMonster::Hush if light == LightState::Dark => light = LightState::Dim,
+            _ => {}
+        }
+        if light == LightState::Dark && kind == RoomKind::Loot {
+            kind = RoomKind::Dark;
+        }
+        let needs_hiding = matches!(monster, MapMonster::Surge | MapMonster::Undertow);
+        if needs_hiding && feature == MapFeature::Stairs {
+            feature = MapFeature::None;
+        }
+        // ---- Size: grown until everything fits ----
+        let (mut width, mut depth) = match kind {
+            RoomKind::Hall => (if area == Area::Grounds { 7.0 } else { 3.4 }, spec.depth.max(12.0)),
+            _ => (spec.width, spec.depth),
+        };
+        match feature {
+            MapFeature::Pillars => {
+                width = width.max(8.5);
+                depth = depth.max(10.0);
+            }
+            MapFeature::Zigzag => {
+                width = width.max(5.0);
+                depth = depth.max(8.0);
+            }
+            MapFeature::Stairs => depth = depth.max(7.5),
+            MapFeature::Stream => depth = depth.max(14.0),
+            MapFeature::Loft => {
+                width = width.max(5.5);
+                depth = depth.max(7.6);
+            }
+            MapFeature::None => {}
+        }
+        if entry_height > 0.0 {
+            depth = depth.max(7.0);
+        }
+        let width = (width * 10.0).round() / 10.0;
+        let depth = (depth * 10.0).round() / 10.0;
+        let lo = entry_x + DOOR_MARGIN - width / 2.0;
+        let hi = entry_x - DOOR_MARGIN + width / 2.0;
+        let mut cx = rng.range_f32(lo, hi);
+        cx = cx.clamp(lo.max(-6.0).min(hi), hi.min(6.0).max(lo));
+        let min = Vec2::new(cx - width / 2.0, south - depth);
+        let max = Vec2::new(cx + width / 2.0, south);
+        let snap = |x: f32| {
+            let (lo, hi) = ((min.x + DOOR_MARGIN) * 10.0, (max.x - DOOR_MARGIN) * 10.0);
+            if lo.ceil() <= hi.floor() { (x * 10.0).round().clamp(lo.ceil(), hi.floor()) / 10.0 } else { (min.x + max.x) / 2.0 }
+        };
+        let exit_x = snap(rng.range_f32(min.x + DOOR_MARGIN, max.x - DOOR_MARGIN));
+        let feature = match feature {
+            MapFeature::None => None,
+            MapFeature::Pillars => Some(Feature::PillarHall),
+            MapFeature::Zigzag => Some(Feature::Zigzag),
+            MapFeature::Stairs => Some(Feature::RaisedExit { height: 1.2 }),
+            MapFeature::Stream => Some(Feature::Stream { z: ((max.y - depth * 0.3) * 10.0).round() / 10.0 }),
+            MapFeature::Loft => Some(Feature::KeyLoft { east: rng.next_f32() < 0.5 }),
+        };
+        if let Some(Feature::RaisedExit { height }) = feature {
+            pending_entry = height;
+        }
+        let encounter = match monster {
+            MapMonster::None => None,
+            MapMonster::Surge => Some(Encounter::Surge),
+            MapMonster::Undertow => Some(Encounter::Undertow),
+            MapMonster::Whisperer => Some(Encounter::Whisperer),
+            MapMonster::Gallery => Some(Encounter::Gallery),
+            MapMonster::Hush => Some(Encounter::Hush),
+            MapMonster::Listener => Some(Encounter::Listener),
+        };
+        let containers = match (spec.kind, kind) {
+            (MapKind::Empty, _) => 0,
+            (_, RoomKind::KeyPuzzle) => 3,
+            (_, RoomKind::Hall) => 1,
+            _ => 2 + rng.below(2) as u8,
+        };
+        let climb = match feature {
+            Some(Feature::RaisedExit { height }) => height,
+            _ => 0.0,
+        }
+        .max(entry_height);
+        out.push(RoomPlan {
+            index,
+            area,
+            kind,
+            light,
+            min,
+            max,
+            height: if climb > 0.0 { area.ceiling().max(climb + 2.9) } else { area.ceiling() },
+            entry_x,
+            exit_x,
+            containers,
+            hiding: needs_hiding || rng.next_f32() < 0.5,
+            encounter,
+            mimics: vec![],
+            feature,
+            pursuit: false,
+            entry_height,
+            seed: rng.next_u64(),
+        });
+        entry_x = exit_x;
+        south = min.y - WALL_T;
+    }
+    FloorPlan { seed, rooms: out, last_room: last }
+}
+
 /// Every entity that can appear (chance > 0) appears at least once per floor:
 /// any that the dice skipped is placed in a suitable free room, keeping the
 /// usual rules (never in adjacent rooms, not in the chase or transition rooms).
@@ -1354,5 +1542,62 @@ mod tests {
         }
         assert_eq!(plan.room_at_z(0.0), None);
     }
-}
 
+    #[test]
+    fn hand_built_maps_lay_out_safely() {
+        use crate::mapfile::*;
+        let mut rng = GameRng::new(7);
+        for seed in 0..40u64 {
+            // Random maps, every option mixed in.
+            let n = 3 + rng.below(30) as usize;
+            let rooms: Vec<MapRoom> = (0..n)
+                .map(|_| MapRoom {
+                    area: AREAS[rng.below(6) as usize],
+                    width: rng.range_f32(1.0, 30.0),
+                    depth: rng.range_f32(1.0, 60.0),
+                    kind: KINDS[rng.below(4) as usize],
+                    light: LIGHTS[rng.below(3) as usize],
+                    monster: MONSTERS[rng.below(7) as usize],
+                    feature: FEATURES[rng.below(6) as usize],
+                })
+                .collect();
+            let plan = from_map(&rooms, seed);
+            assert_eq!(plan.rooms.len(), n + 1, "every room plus the final hall");
+            assert_eq!(plan.rooms.last().unwrap().kind, RoomKind::Final);
+            assert_eq!(plan.final_door(), FIRST_ROOM + n as u32 + 1);
+            for (i, r) in plan.rooms.iter().enumerate() {
+                assert_eq!(r.index, FIRST_ROOM + i as u32);
+                for x in [r.entry_x, r.exit_x] {
+                    assert!(x >= r.min.x + DOOR_MARGIN - 1e-3 && x <= r.max.x - DOOR_MARGIN + 1e-3, "seed {seed} room {}: door at {x} outside {:?}..{:?}", r.index, r.min, r.max);
+                }
+                if i > 0 {
+                    let p = &plan.rooms[i - 1];
+                    assert!((p.min.y - WALL_T - r.max.y).abs() < 1e-3, "rooms chain north");
+                    assert!((p.exit_x - r.entry_x).abs() < 1e-4, "doors line up");
+                    let raised = matches!(p.feature, Some(Feature::RaisedExit { .. }));
+                    assert_eq!(raised, r.entry_height > 0.0);
+                    if raised {
+                        assert!(!r.surge(), "no Rusher at the top of stairs");
+                    }
+                }
+                match r.feature {
+                    Some(Feature::Stream { z }) => {
+                        assert_eq!(r.area, Area::Grounds);
+                        assert!(z - STREAM_HALF > r.min.y + 2.0 && z + STREAM_HALF < r.max.y - 2.0);
+                    }
+                    Some(Feature::PillarHall) => assert!(r.width() >= 8.5 - 1e-3 && r.depth() >= 10.0 - 1e-3),
+                    Some(Feature::KeyLoft { .. }) => assert_eq!(r.kind, RoomKind::KeyPuzzle),
+                    _ => {}
+                }
+                if r.encounter == Some(Encounter::Whisperer) {
+                    assert_eq!(r.light, LightState::Dark);
+                }
+                if r.surge() {
+                    assert!(r.hiding, "a Rusher room always has somewhere to hide");
+                }
+            }
+        }
+        // An empty map still makes a floor.
+        assert_eq!(from_map(&[], 1).rooms.len(), 2);
+    }
+}

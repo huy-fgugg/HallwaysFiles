@@ -32,6 +32,7 @@ pub enum Overlay {
     Summary,
     Achievements,
     Skin,
+    MapBuilder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,6 +50,7 @@ pub enum Screen {
     Summary,
     Achievements,
     Skin,
+    MapBuilder,
 }
 
 impl ComputedStates for Screen {
@@ -59,6 +61,7 @@ impl ComputedStates for Screen {
             (AppState::Restarting, _) => return None,
             (_, Overlay::Settings) => Screen::Settings,
             (_, Overlay::Skin) => Screen::Skin,
+            (AppState::MainMenu, Overlay::MapBuilder) => Screen::MapBuilder,
             (AppState::MainMenu, Overlay::Credits) => Screen::Credits,
             (AppState::MainMenu, Overlay::Play) => Screen::Play,
             (AppState::MainMenu, Overlay::Custom) => Screen::Custom,

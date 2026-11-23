@@ -22,6 +22,7 @@ pub enum FieldKind {
     AdminCode,
     PresetName,
     PresetSeed,
+    MapName,
 }
 
 impl FieldKind {
@@ -33,6 +34,7 @@ impl FieldKind {
             FieldKind::AdminCode => "CODE",
             FieldKind::PresetName => "PRESET NAME",
             FieldKind::PresetSeed => "SEED",
+            FieldKind::MapName => "MAP NAME",
         }
     }
 
@@ -44,6 +46,7 @@ impl FieldKind {
             FieldKind::AdminCode => 5,
             FieldKind::PresetName => 24,
             FieldKind::PresetSeed => 24,
+            FieldKind::MapName => 24,
         }
     }
 
@@ -55,6 +58,7 @@ impl FieldKind {
             FieldKind::AdminCode => c.is_ascii_digit(),
             FieldKind::PresetName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::PresetSeed => c.is_ascii_graphic() || c == ' ',
+            FieldKind::MapName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
         }
     }
 }
@@ -182,6 +186,7 @@ fn type_into_fields(
     theme: Res<UiTheme>,
     mut focus_once: Local<bool>,
     mut editor: Option<ResMut<crate::ui::custom_menu::CustomEditor>>,
+    mut map_editor: Option<ResMut<crate::ui::map_builder::MapEditor>>,
     time: Res<Time<Real>>,
     mut profile: ResMut<Profile>,
 ) {
@@ -252,6 +257,12 @@ fn type_into_fields(
                         ed.edit.seed = field.value.clone();
                     }
                 }
+                // Typing doesn't redraw the builder (that would drop the caret).
+                FieldKind::MapName => {
+                    if let Some(m) = map_editor.as_mut() {
+                        m.map.name = field.value.clone();
+                    }
+                }
             }
         }
         let caret = if active && (time.elapsed_secs() * 2.0) as i32 % 2 == 0 { "_" } else { " " };
@@ -260,7 +271,7 @@ fn type_into_fields(
                 FieldKind::Seed => "random".to_string(),
                 FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
                 FieldKind::PresetSeed => "random".to_string(),
-                FieldKind::Name | FieldKind::PresetName => String::new(),
+                FieldKind::Name | FieldKind::PresetName | FieldKind::MapName => String::new(),
             }
         } else {
             let v = if field.kind == FieldKind::AdminCode { "*".repeat(field.value.len()) } else { field.value.clone() };
@@ -325,8 +336,10 @@ fn play_actions(
                 profile.name = crate::profile::clean_name(&profile.name);
                 save_profile(&profile);
                 *seed = RunSeed(chosen_seed(&profile));
-                // QA: HALLWAYS_PRESET=<name> plays a built-in custom floor from Solo Run.
-                preset.0 = std::env::var("HALLWAYS_PRESET").ok().and_then(|n| crate::presets::builtin().into_iter().find(|p| p.name.replace(' ', "_").eq_ignore_ascii_case(&n.replace(' ', "_"))));
+                // QA: HALLWAYS_PRESET=<name> plays a custom floor or map (built-in or saved) from Solo Run.
+                preset.0 = std::env::var("HALLWAYS_PRESET").ok().and_then(|n| {
+                    crate::presets::load_all(&crate::presets::presets_dir()).into_iter().map(|e| e.preset).find(|p| p.name.replace(' ', "_").eq_ignore_ascii_case(&n.replace(' ', "_")))
+                });
                 next_overlay.set(Overlay::None);
                 next_app.set(AppState::Playing);
             }

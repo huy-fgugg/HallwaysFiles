@@ -179,7 +179,7 @@ fn custom_actions(
                     p.name = presets::unique_name(&ed.list, &base);
                 } else if let Some(old) = ed.list[ed.index].path.clone() {
                     // Renamed: replace the old file.
-                    if old.file_name().map(|f| f.to_string_lossy().to_string()) != Some(presets::file_name(&p.name)) {
+                    if old.file_name().map(|f| f.to_string_lossy().to_string()) != Some(presets::file_name_for(&p)) {
                         let _ = std::fs::remove_file(old);
                     }
                 }

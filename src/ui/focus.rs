@@ -63,6 +63,26 @@ pub enum MenuAction {
     CloseSkin,
     /// Step a part of your look (index into `SkinPart::ALL`) by +/-1.
     SkinStep(u8, i8),
+    OpenMapBuilder,
+    CloseMapBuilder,
+    MapPrev,
+    MapNext,
+    MapNew,
+    MapSelect(u16),
+    MapAdd,
+    MapCopy,
+    MapRemove,
+    MapUp,
+    MapDown,
+    /// Change a setting of the selected room (index into `RoomField::ALL`).
+    MapAdjust(u8, i8),
+    MapPlay,
+    MapHost,
+    MapSave,
+    MapExport,
+    MapImport,
+    MapFolder,
+    MapDeleteFile,
     WatchCutscene(u8),
 }
 
