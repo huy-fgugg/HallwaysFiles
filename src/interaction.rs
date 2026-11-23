@@ -26,6 +26,8 @@ pub enum InteractKind {
     Door,
     Drawer,
     HidingSpot,
+    /// The Skin table in the boarding hall: opens the customise screen.
+    Skin,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -196,6 +198,7 @@ pub fn prompt_text(
             (if d.open { "Close drawer".into() } else { "Search drawer".into() }, false)
         }
         InteractKind::HidingSpot => ("Hide".into(), false),
+        InteractKind::Skin => ("Skin".into(), false),
     })
 }
 
@@ -419,6 +422,7 @@ fn interact(
                 sfx.write(PlaySfx(Sfx::DrawerClose));
             }
         }
+        InteractKind::Skin => next_overlay.set(crate::state::Overlay::Skin),
         InteractKind::HidingSpot => {
             let Ok(spot) = spots.get(e) else { return };
             if hide.cooldown > 0.0 {

@@ -763,10 +763,18 @@ fn spawn_test_level(
     ));
 
     // ---- Player + camera ----------------------------------------------------
+    // QA: HALLWAYS_START="x,z,yaw_degrees" puts the player somewhere else to begin with.
+    let (start, start_yaw) = std::env::var("HALLWAYS_START")
+        .ok()
+        .and_then(|v| {
+            let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            (n.len() == 3).then(|| (Vec3::new(n[0], 0.0, n[1]), n[2].to_radians()))
+        })
+        .unwrap_or((elevator::PLAYER_START, 0.0));
     commands
         .spawn((
-            Player::new(0.0),
-            Transform::from_translation(elevator::PLAYER_START),
+            Player::new(start_yaw),
+            Transform::from_translation(start),
             Visibility::default(),
             DespawnOnExit(AppState::Playing),
             Name::new("Player"),

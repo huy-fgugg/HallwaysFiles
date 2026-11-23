@@ -68,7 +68,7 @@ struct TitleFlicker;
 #[derive(Component)]
 struct PulseLine;
 
-fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
+fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>, preview: Option<Res<super::skin_menu::PreviewImage>>) {
     commands
         .spawn((
             Node { width: percent(100), height: percent(100), ..default() },
@@ -105,7 +105,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                 ));
                 // Grouped: play first, then extras and options, quit apart at the bottom.
                 let groups: [(&str, &[(&str, MenuAction)]); 3] = [
-                    ("", &[("Play", MenuAction::OpenPlay)]),
+                    ("", &[("Play", MenuAction::OpenPlay), ("Customise", MenuAction::OpenSkin)]),
                     ("EXTRAS", &[("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
                     ("", &[("Quit", MenuAction::Quit)]),
                 ];
@@ -123,6 +123,17 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                         i += 1;
                     }
                 }
+            });
+            // Your character, floating on the right: drag it to turn it around.
+            root.spawn((
+                Node { position_type: PositionType::Absolute, right: percent(9), top: percent(16), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(2), ..default() },
+                FadeIn { delay: 1.6, base: Color::WHITE },
+            ))
+            .with_children(|c| {
+                if let Some(p) = &preview {
+                    super::skin_menu::spawn_preview(c, p, 320.0, 412.0);
+                }
+                c.spawn((theme.dim_text("Drag to turn  -  Customise to change"), FadeIn { delay: 1.8, base: theme.text_dim }));
             });
             root.spawn(Node {
                 position_type: PositionType::Absolute,

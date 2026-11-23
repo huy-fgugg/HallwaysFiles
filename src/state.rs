@@ -31,6 +31,7 @@ pub enum Overlay {
     Dead,
     Summary,
     Achievements,
+    Skin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,6 +48,7 @@ pub enum Screen {
     Death,
     Summary,
     Achievements,
+    Skin,
 }
 
 impl ComputedStates for Screen {
@@ -56,6 +58,7 @@ impl ComputedStates for Screen {
         Some(match (app, overlay) {
             (AppState::Restarting, _) => return None,
             (_, Overlay::Settings) => Screen::Settings,
+            (_, Overlay::Skin) => Screen::Skin,
             (AppState::MainMenu, Overlay::Credits) => Screen::Credits,
             (AppState::MainMenu, Overlay::Play) => Screen::Play,
             (AppState::MainMenu, Overlay::Custom) => Screen::Custom,

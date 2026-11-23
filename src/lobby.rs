@@ -91,6 +91,7 @@ pub struct LobbyPlugin;
 
 impl Plugin for LobbyPlugin {
     fn build(&self, app: &mut App) {
+        app.add_systems(OnEnter(AppState::Playing), spawn_skin_table).add_systems(Update, float_skin_doll.run_if(in_state(AppState::Playing)));
         app.init_resource::<LiftLobby>()
             .init_resource::<SkipLobby>()
             .add_systems(OnEnter(AppState::MainMenu), |mut s: ResMut<SkipLobby>| s.0 = false)
@@ -337,5 +338,60 @@ mod tests {
         assert_eq!(l.tick(0.1, true), LobbyTick::Depart);
         let mut guest = LiftLobby { is_host: false, ..lobby(2, 0) };
         assert_eq!(guest.tick(0.1, true), LobbyTick::Wait);
+    }
+}
+
+/// The little figure floating over the Skin table.
+#[derive(Component)]
+struct SkinDoll(crate::body::Skin);
+
+const SKIN_TABLE: Vec3 = Vec3::new(2.45, 0.0, crate::world::elevator::HALL_MAX.y - 1.1);
+
+/// A round table in the boarding hall with a small copy of your character
+/// floating above it: walk up and press E ("Skin") to change your look.
+fn spawn_skin_table(mut commands: Commands, model: Option<Res<crate::body::PlayerModel>>, profile: Res<crate::profile::Profile>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, asset_server: Res<AssetServer>) {
+    use crate::interaction::{InteractKind, Interactable};
+    use crate::physics::{Aabb, Collider};
+    let Some(model) = model else { return };
+    let at = SKIN_TABLE;
+    let wood = mats.add(StandardMaterial { base_color: Color::srgb(0.32, 0.19, 0.1), perceptual_roughness: 0.6, ..default() });
+    let cloth = mats.add(StandardMaterial { base_color: Color::srgb(0.45, 0.08, 0.1), perceptual_roughness: 0.9, ..default() });
+    let glow = mats.add(StandardMaterial { base_color: Color::srgb(0.6, 0.8, 1.0), emissive: LinearRgba::rgb(1.2, 2.0, 3.2), ..default() });
+    let cyl = meshes.add(Cylinder::new(0.5, 1.0));
+    commands
+        .spawn((
+            Transform::from_translation(at),
+            Visibility::default(),
+            Collider(Aabb { min: at + Vec3::new(-0.5, 0.0, -0.5), max: at + Vec3::new(0.5, 0.8, 0.5) }),
+            Interactable { kind: InteractKind::Skin, aabb: Aabb { min: at + Vec3::new(-0.6, 0.0, -0.6), max: at + Vec3::new(0.6, 1.9, 0.6) } },
+            DespawnOnExit(AppState::Playing),
+            Name::new("Skin table"),
+        ))
+        .with_children(|t| {
+            t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(wood.clone()), Transform::from_xyz(0.0, 0.76, 0.0).with_scale(Vec3::new(0.95, 0.05, 0.95))));
+            t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(cloth), Transform::from_xyz(0.0, 0.79, 0.0).with_scale(Vec3::new(0.7, 0.01, 0.7))));
+            t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(wood.clone()), Transform::from_xyz(0.0, 0.38, 0.0).with_scale(Vec3::new(0.1, 0.76, 0.1))));
+            t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(wood), Transform::from_xyz(0.0, 0.03, 0.0).with_scale(Vec3::new(0.55, 0.06, 0.55))));
+            // A soft glowing ring under the figure.
+            t.spawn((Mesh3d(cyl), MeshMaterial3d(glow), Transform::from_xyz(0.0, 0.81, 0.0).with_scale(Vec3::new(0.32, 0.01, 0.32))));
+            t.spawn((PointLight { color: Color::srgb(0.6, 0.8, 1.0), intensity: 9_000.0, range: 2.5, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(0.0, 1.0, 0.0)));
+        });
+    commands
+        .spawn((Transform::from_translation(at + Vec3::Y * 0.9).with_scale(Vec3::splat(0.32)), Visibility::default(), crate::body::BodyPose::default(), SkinDoll(profile.skin), DespawnOnExit(AppState::Playing)))
+        .with_children(|c| crate::body::spawn_body(c, &model, profile.skin, false));
+    // A small sign on the table.
+    let _ = asset_server;
+}
+
+fn float_skin_doll(mut commands: Commands, time: Res<Time>, profile: Res<crate::profile::Profile>, mut q: Query<(Entity, &mut SkinDoll, &mut Transform, &mut crate::body::BodyPose)>) {
+    let t = time.elapsed_secs();
+    for (e, mut doll, mut tf, mut pose) in &mut q {
+        tf.translation = SKIN_TABLE + Vec3::Y * (0.92 + (t * 1.6).sin() * 0.04);
+        tf.rotation = Quat::from_rotation_y(t * 0.8);
+        *pose = crate::body::idle_pose(t);
+        if doll.0 != profile.skin {
+            doll.0 = profile.skin;
+            crate::body::reskin(&mut commands, e, profile.skin);
+        }
     }
 }

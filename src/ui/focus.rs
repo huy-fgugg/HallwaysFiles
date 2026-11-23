@@ -59,6 +59,10 @@ pub enum MenuAction {
     PresetHost,
     OpenCutscenes,
     CloseCutscenes,
+    OpenSkin,
+    CloseSkin,
+    /// Step a part of your look (index into `SkinPart::ALL`) by +/-1.
+    SkinStep(u8, i8),
     WatchCutscene(u8),
 }
 
