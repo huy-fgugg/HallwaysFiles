@@ -604,7 +604,7 @@ pub fn synth_hollow_cue() -> Vec<f32> {
 /// Ending cue (22 s): the lift's hum and a hopeful pad 0–9 s, a slow climb
 /// 9–12.5 s, dread 12.5–15.4 s, a crashing hit at 16.8 s, then silence.
 pub fn synth_ending_cue() -> Vec<f32> {
-    let len = (22.0 * SR) as usize;
+    let len = (27.0 * SR) as usize;
     let mut buf = vec![0.0; len];
     // Warm, hopeful pad (C major, then A minor).
     for (start, notes) in [(0.0f32, [48.0f32, 55.0, 60.0, 64.0]), (4.5, [45.0, 52.0, 57.0, 60.0])] {
@@ -613,22 +613,22 @@ pub fn synth_ending_cue() -> Vec<f32> {
             notes.iter().map(|n| (TAU * midi(*n) * t).sin() + 0.3 * (TAU * midi(*n) * 2.0 * t).sin()).sum::<f32>() * env * 0.05
         });
     }
-    // Climb: a slow rising line under a ticking pulse.
-    add_note(&mut buf, 9.0, 3.6, |t| {
-        let f = midi(43.0 + t * 2.2);
-        (TAU * f * t).sin() * (t / 3.6) * 0.12
+    // Climb: a long, slow rising line under a ticking pulse.
+    add_note(&mut buf, 9.0, 8.6, |t| {
+        let f = midi(43.0 + t * 1.0);
+        (TAU * f * t).sin() * (t / 8.6) * 0.12
     });
-    for b in 0..7 {
+    for b in 0..17 {
         let t0 = 9.0 + b as f32 * 0.5;
         add_note(&mut buf, t0, 0.2, |t| (TAU * 1400.0 * t).sin() * (-t * 40.0).exp() * 0.15);
     }
     // Dread: a dissonant cluster swelling until the cable snaps.
-    add_note(&mut buf, 12.5, 3.0, |t| {
+    add_note(&mut buf, 17.5, 3.0, |t| {
         let swell = (t / 2.9).powf(1.4);
         [37.0f32, 38.0, 44.0, 49.0, 50.0].iter().map(|n| (TAU * midi(*n) * t).sin()).sum::<f32>() * swell * 0.11
     });
     // The crash.
-    add_note(&mut buf, 16.8, 3.0, |t| {
+    add_note(&mut buf, 21.8, 3.0, |t| {
         let mut r = GameRng::new((t * SR) as u64 ^ 77);
         let noise = (r.next_f32() * 2.0 - 1.0) * (-t * 3.5).exp();
         let boom = (TAU * (40.0 + 60.0 * (-t * 8.0).exp()) * t).sin() * (-t * 1.6).exp();
