@@ -113,6 +113,7 @@ fn movement(
     mut sfx: MessageWriter<PlaySfx>,
     boost: Res<crate::items::SpeedBoost>,
     grabbed: Res<crate::hazards::Grabbed>,
+    peers: Res<crate::avatar::PeerBodies>,
 ) {
     let (mut player, mut transform) = player_q.into_inner();
     let dt = time.delta_secs();
@@ -159,7 +160,11 @@ fn movement(
     let speed = if grabbed.0 > 0.0 { speed * 0.5 } else { speed };
     let vel = planar_velocity(input, player.yaw, speed);
 
-    let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
+    let mut boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
+    // Teammates are solid: you bump into them instead of walking through.
+    for p in &peers.0 {
+        boxes.push(crate::physics::Aabb { min: *p + Vec3::new(-0.3, 0.0, -0.3), max: *p + Vec3::new(0.3, 1.5, 0.3) });
+    }
     let eye_target = if crouch { CROUCH_EYE } else { STAND_EYE };
     player.eye += (eye_target - player.eye) * (dt * 10.0).min(1.0);
     let feet = transform.translation.y;

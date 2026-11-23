@@ -44,11 +44,15 @@ struct Avatar {
 #[derive(Component)]
 struct NameTag(u8);
 
+/// Where living, visible teammates stand: the local player collides with them.
+#[derive(Resource, Default)]
+pub struct PeerBodies(pub Vec<Vec3>);
+
 pub struct AvatarPlugin;
 
 impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<PeerBodies>().add_systems(
             Update,
             (send_state, sync_doors, apply_peer_events, spawn_avatars, animate_avatars, place_name_tags).chain().run_if(in_state(AppState::Playing)),
         );
@@ -269,7 +273,7 @@ pub fn pose_for(speed: f32, phase: f32, crouch: f32, pitch: f32, right: bool, le
         Gesture::Flinch => {
             pose.arm[0] += 0.6 * e;
             pose.arm[1] += 0.6 * e;
-            pose.arm_roll = [-0.5 * e, 0.5 * e];
+            pose.arm_roll = [0.3 * e, 0.3 * e];
         }
         Gesture::Swap => pose.arm[0] -= 0.6 * e,
         _ => {}
@@ -286,9 +290,13 @@ fn animate_avatars(
     mut items: Query<(&HeldItem, &mut Visibility), (Without<Avatar>, Without<HeldBeam>)>,
     mut beams: Query<&mut Visibility, (With<HeldBeam>, Without<Avatar>, Without<HeldItem>)>,
     children: Query<&Children>,
+    colliders: Query<&crate::physics::Collider>,
+    mut solid: ResMut<PeerBodies>,
 ) {
     let dt = time.delta_secs();
     let k = (dt * 12.0).min(1.0);
+    let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();
+    solid.0.clear();
     for (ent, mut av, mut tf, mut vis, mut pose, kids) in &mut avatars {
         let Some(st) = peers.0.get(&av.id) else { continue };
         av.dead = if st.alive { 0.0 } else { av.dead + dt };
@@ -300,6 +308,12 @@ fn animate_avatars(
             av.shown = target; // teleport (hiding spot, respawn)
         }
         av.shown = av.shown.lerp(target, k);
+        // The body is wider than a player's collision cylinder (and smoothing
+        // can cut corners): keep it out of walls so it never pokes through.
+        if st.alive && !st.hiding {
+            av.shown = crate::physics::resolve_cylinder(av.shown, crate::body::BODY_REACH, av.shown.y + crate::player::STEP_UP, av.shown.y + 1.3, &boxes);
+            solid.0.push(av.shown);
+        }
         let dyaw = (st.yaw - av.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         av.yaw += dyaw * k;
         av.pitch += (st.pitch - av.pitch) * k;
@@ -311,7 +325,7 @@ fn animate_avatars(
             let k = crate::player::death_fall(av.dead);
             tf.rotation = Quat::from_rotation_y(av.yaw) * Quat::from_rotation_x(1.5 * k);
             tf.translation.y += 0.12 * k;
-            *pose = BodyPose { arm: [0.6 * k, 0.4 * k], arm_roll: [-1.0 * k, 1.0 * k], thigh: [0.25 * k, 0.05], calf: [0.4 * k, 0.1], head: -0.3 * k, ..default() };
+            *pose = BodyPose { arm: [0.6 * k, 0.4 * k], arm_roll: [1.0 * k, 1.0 * k], thigh: [0.25 * k, 0.05], calf: [0.4 * k, 0.1], head: -0.3 * k, ..default() };
             continue;
         }
         *pose = pose_for(st.speed, av.phase, av.crouch, av.pitch, st.right.is_some(), st.left.is_some(), st.gesture, st.gesture.envelope(st.gt));
@@ -351,7 +365,7 @@ fn place_name_tags(
             *vis = Visibility::Hidden;
             continue;
         };
-        let head = av.shown + Vec3::Y * 2.05;
+        let head = av.shown + Vec3::Y * 1.75;
         let dist = cam_tf.translation().distance(head);
         let on_screen = camera.world_to_viewport(cam_tf, head).ok().filter(|_| *av_vis != Visibility::Hidden && dist < 30.0);
         match on_screen {

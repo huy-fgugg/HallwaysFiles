@@ -544,7 +544,7 @@ fn animate_actors(time: Res<Time>, mut actors: Query<(&mut Actor, &mut Transform
                 pose.arm[i] = 2.6 + (t * 14.0 + off).sin() * 0.35;
                 pose.forearm[i] = 0.4;
             }
-            pose.arm_roll = [0.35, -0.35];
+            pose.arm_roll = [0.35, 0.35];
             pose.head = -0.6 + (t * 9.0).sin() * 0.1;
         } else if !walking {
             let idle = crate::body::idle_pose(t + a.from.x);

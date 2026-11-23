@@ -1,115 +1,73 @@
-//! The player body: a rigged low-poly character model ("Low Poly Dude",
-//! CC0, see assets/models/player/LICENSE.txt) used for teammates in game,
-//! players in cutscenes and the character preview in the menus.
+//! The player body: a chunky voxel chibi adventurer ("Voxel Chibi
+//! Adventurers" free tier by zaddy99999, CC0, see
+//! assets/models/chibi/LICENSE.txt). Used for teammates in game, players in
+//! cutscenes and the character preview in the menus.
 //!
-//! The model has no animations of its own: [`BodyPose`] on the body's root
-//! entity is turned into bone rotations every frame (walk, run, crouch, reach,
-//! panic, death), so every player body moves the same way. Clothes and skin
-//! are recoloured from the player's [`Skin`].
+//! Each hero comes split into head, torso, arms and legs; they hang on joints
+//! here, and [`BodyPose`] on the body's root entity turns into joint rotations
+//! every frame (walk, run, crouch, reach, panic, death), so every player body
+//! moves the same way. A mouth opens on the face when the player talks.
 
-use std::collections::HashMap;
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI};
 
-use bevy::gltf::GltfMaterialName;
 use bevy::prelude::*;
-use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady};
+use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use serde::{Deserialize, Serialize};
 
 use crate::items::ItemKind;
 use crate::viewmodel::{build_item, grip_transform, BodyKit};
 
-/// A player's look: indices into the palettes below.
+/// A player's look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Skin {
-    pub shirt: u8,
-    pub pants: u8,
-    pub boots: u8,
-    pub skin: u8,
-    /// 0 = no cap.
+    /// Index into [`HEROES`].
+    pub hero: u8,
+    /// 0 = nothing, 1 = crown.
     pub hat: u8,
+    /// 0 = nothing, 1 = adventurer's backpack.
+    pub pack: u8,
 }
 
 impl Default for Skin {
     fn default() -> Self {
-        Self { shirt: 0, pants: 0, boots: 0, skin: 1, hat: 1 }
+        Self { hero: 0, hat: 0, pack: 0 }
     }
 }
 
-pub const SHIRTS: [(&str, [f32; 3]); 10] = [
-    ("Ivory", [0.86, 0.84, 0.78]),
-    ("Night blue", [0.16, 0.24, 0.42]),
-    ("Moss", [0.24, 0.36, 0.2]),
-    ("Brick", [0.55, 0.18, 0.14]),
-    ("Mustard", [0.78, 0.6, 0.18]),
-    ("Charcoal", [0.14, 0.14, 0.16]),
-    ("Plum", [0.38, 0.17, 0.4]),
-    ("Teal", [0.12, 0.42, 0.44]),
-    ("Rose", [0.82, 0.45, 0.55]),
-    ("Sky", [0.45, 0.62, 0.82]),
+/// The heroes: file prefix, name and a signature colour (used for sleeves on
+/// held items).
+pub const HEROES: [(&str, &str, [f32; 3]); 4] = [
+    ("knight", "Knight", [0.5, 0.14, 0.16]),
+    ("wizard", "Wizard", [0.38, 0.17, 0.4]),
+    ("cleric", "Cleric", [0.85, 0.55, 0.15]),
+    ("ranger", "Ranger", [0.24, 0.42, 0.2]),
 ];
-pub const PANTS: [(&str, [f32; 3]); 6] = [
-    ("Denim", [0.2, 0.32, 0.56]),
-    ("Black", [0.08, 0.08, 0.1]),
-    ("Khaki", [0.52, 0.46, 0.32]),
-    ("Grey", [0.36, 0.36, 0.38]),
-    ("Brown", [0.32, 0.2, 0.12]),
-    ("Olive", [0.3, 0.32, 0.18]),
-];
-pub const BOOTS: [(&str, [f32; 3]); 5] = [
-    ("Brown", [0.28, 0.17, 0.09]),
-    ("Black", [0.05, 0.05, 0.05]),
-    ("Tan", [0.6, 0.45, 0.28]),
-    ("White", [0.85, 0.85, 0.82]),
-    ("Red", [0.55, 0.12, 0.1]),
-];
-pub const SKIN_TONES: [(&str, [f32; 3]); 6] = [
-    ("Light", [0.95, 0.8, 0.68]),
-    ("Fair", [0.88, 0.68, 0.54]),
-    ("Medium", [0.72, 0.52, 0.38]),
-    ("Tan", [0.6, 0.42, 0.29]),
-    ("Brown", [0.44, 0.29, 0.19]),
-    ("Deep", [0.28, 0.18, 0.12]),
-];
-/// Index 0 is "no cap".
-pub const HATS: [(&str, [f32; 3]); 7] = [
-    ("None", [0.0, 0.0, 0.0]),
-    ("Red", [0.62, 0.12, 0.1]),
-    ("Navy", [0.12, 0.16, 0.3]),
-    ("Green", [0.18, 0.34, 0.18]),
-    ("Black", [0.06, 0.06, 0.07]),
-    ("Yellow", [0.85, 0.7, 0.15]),
-    ("White", [0.88, 0.88, 0.86]),
-];
+pub const HATS: [&str; 2] = ["None", "Crown"];
+pub const PACKS: [&str; 2] = ["None", "Backpack"];
 
-/// The parts of a skin the customise screen can change.
+/// The parts of a look the customise screen can change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkinPart {
-    Shirt,
-    Pants,
-    Boots,
-    Skin,
+    Hero,
     Hat,
+    Pack,
 }
 
 impl SkinPart {
-    pub const ALL: [SkinPart; 5] = [SkinPart::Shirt, SkinPart::Pants, SkinPart::Boots, SkinPart::Skin, SkinPart::Hat];
+    pub const ALL: [SkinPart; 3] = [SkinPart::Hero, SkinPart::Hat, SkinPart::Pack];
     pub fn label(self) -> &'static str {
         match self {
-            SkinPart::Shirt => "Shirt",
-            SkinPart::Pants => "Trousers",
-            SkinPart::Boots => "Boots",
-            SkinPart::Skin => "Skin",
-            SkinPart::Hat => "Cap",
+            SkinPart::Hero => "Character",
+            SkinPart::Hat => "Hat",
+            SkinPart::Pack => "Back",
         }
     }
     fn len(self) -> usize {
         match self {
-            SkinPart::Shirt => SHIRTS.len(),
-            SkinPart::Pants => PANTS.len(),
-            SkinPart::Boots => BOOTS.len(),
-            SkinPart::Skin => SKIN_TONES.len(),
+            SkinPart::Hero => HEROES.len(),
             SkinPart::Hat => HATS.len(),
+            SkinPart::Pack => PACKS.len(),
         }
     }
 }
@@ -118,76 +76,104 @@ impl Skin {
     /// A different look per player id, for players who never customised.
     pub fn for_id(id: u8) -> Self {
         let i = id as usize;
-        Self { shirt: (i * 3 % SHIRTS.len()) as u8, pants: (i % PANTS.len()) as u8, boots: (i % BOOTS.len()) as u8, skin: (i * 2 % SKIN_TONES.len()) as u8, hat: ((i % (HATS.len() - 1)) + 1) as u8 }
+        Self { hero: (i % HEROES.len()) as u8, hat: ((i / HEROES.len()) % HATS.len()) as u8, pack: ((i / 2) % PACKS.len()) as u8 }
     }
 
     pub fn get(&self, part: SkinPart) -> u8 {
         match part {
-            SkinPart::Shirt => self.shirt,
-            SkinPart::Pants => self.pants,
-            SkinPart::Boots => self.boots,
-            SkinPart::Skin => self.skin,
+            SkinPart::Hero => self.hero,
             SkinPart::Hat => self.hat,
+            SkinPart::Pack => self.pack,
         }
     }
 
-    /// Steps one part to the next / previous colour (wrapping).
+    /// Steps one part to the next / previous choice (wrapping).
     pub fn step(&mut self, part: SkinPart, delta: i32) {
         let n = part.len() as i32;
         let v = (self.get(part) as i32 + delta).rem_euclid(n) as u8;
         match part {
-            SkinPart::Shirt => self.shirt = v,
-            SkinPart::Pants => self.pants = v,
-            SkinPart::Boots => self.boots = v,
-            SkinPart::Skin => self.skin = v,
+            SkinPart::Hero => self.hero = v,
             SkinPart::Hat => self.hat = v,
+            SkinPart::Pack => self.pack = v,
         }
     }
 
     pub fn name(&self, part: SkinPart) -> &'static str {
         let i = self.get(part) as usize;
         match part {
-            SkinPart::Shirt => SHIRTS[i % SHIRTS.len()].0,
-            SkinPart::Pants => PANTS[i % PANTS.len()].0,
-            SkinPart::Boots => BOOTS[i % BOOTS.len()].0,
-            SkinPart::Skin => SKIN_TONES[i % SKIN_TONES.len()].0,
-            SkinPart::Hat => HATS[i % HATS.len()].0,
+            SkinPart::Hero => HEROES[i % HEROES.len()].1,
+            SkinPart::Hat => HATS[i % HATS.len()],
+            SkinPart::Pack => PACKS[i % PACKS.len()],
         }
     }
 
+    fn hero_index(&self) -> usize {
+        self.hero as usize % HEROES.len()
+    }
+
     pub fn shirt_color(&self) -> Color {
-        rgb(SHIRTS[self.shirt as usize % SHIRTS.len()].1)
-    }
-
-    pub fn skin_color(&self) -> Color {
-        rgb(SKIN_TONES[self.skin as usize % SKIN_TONES.len()].1)
-    }
-
-    fn color_for(&self, material: &str) -> Option<Color> {
-        Some(match material {
-            "Shirt" => self.shirt_color(),
-            "Pants" => rgb(PANTS[self.pants as usize % PANTS.len()].1),
-            "Boots" => rgb(BOOTS[self.boots as usize % BOOTS.len()].1),
-            "Skin" => self.skin_color(),
-            "Hat" => rgb(HATS[(self.hat as usize % HATS.len()).max(1)].1),
-            _ => return None,
-        })
+        let c = HEROES[self.hero_index()].2;
+        Color::srgb(c[0], c[1], c[2])
     }
 }
 
-fn rgb(c: [f32; 3]) -> Color {
-    Color::srgb(c[0], c[1], c[2])
+/// How far a body reaches out from its centre (the widest head, or the arms):
+/// bodies are kept at least this far from walls so nothing pokes through.
+pub const BODY_REACH: f32 = 0.47;
+
+/// Overall size: the heroes are 2.4-2.7 m tall at the pack's scale.
+pub const BODY_SCALE: f32 = 0.58;
+/// The big chibi heads are shrunk a little more so they fit through doors.
+const HEAD_SCALE: f32 = 0.78;
+
+// Joints in the hero grid, as metres in the body frame (facing -Z, right = +X):
+// hips (torso pivot), neck, shoulders and hips for the legs.
+const HIPS: Vec3 = Vec3::new(0.0, 0.6, 0.0);
+const NECK: Vec3 = Vec3::new(0.0, 0.6, 0.0); // above the hips
+// Tucked in a little from the pack's 0.65 so the arms stay inside BODY_REACH.
+const SHOULDER: Vec3 = Vec3::new(0.55, 0.5, 0.0); // above the hips; x mirrored for the left
+const LEG: Vec3 = Vec3::new(0.25, 0.0, 0.05);
+const HAND: Vec3 = Vec3::new(0.0, -0.5, 0.0); // below the shoulder
+/// Where the mouth sits on each hero's face, from the neck (measured from the
+/// meshes: just in front of the face surface).
+const MOUTHS: [Vec3; 4] = [Vec3::new(0.0, 0.25, -0.615), Vec3::new(0.0, 0.25, -0.615), Vec3::new(0.0, 0.15, -0.715), Vec3::new(0.0, 0.25, -0.615)];
+
+const PART_FILES: [&str; 6] = ["torso", "head", "arm_r", "arm_l", "leg_r", "leg_l"];
+
+/// Mesh offsets from each joint (metres at full size, body frame facing -Z), generated from the pack's manifest.
+const HERO_PARTS: [[[f32; 3]; 6]; 4] = [
+    [[-0.0, -0.3, -0.1], [-0.0, 0.0, -0.0], [-0.0, -0.5, -0.0], [-0.0, -0.5, -0.0], [-0.0, -0.6, -0.05], [-0.0, -0.6, -0.05]], // knight
+    [[-0.0, -0.5, -0.05], [-0.0, -0.3, -0.0], [-0.0, -0.6, -0.0], [-0.0, -0.6, -0.0], [-0.0, -0.6, -0.05], [-0.0, -0.6, -0.05]], // wizard
+    [[-0.0, -0.5, -0.05], [-0.0, -0.1, -0.05], [-0.0, -0.5, -0.0], [-0.0, -0.5, -0.0], [-0.0, -0.6, -0.05], [-0.0, -0.6, -0.05]], // cleric
+    [[-0.3, -0.3, 0.1], [-0.0, -0.1, 0.05], [-0.0, -0.5, -0.0], [-0.0, -0.5, -0.0], [-0.0, -0.6, -0.05], [-0.0, -0.6, -0.05]], // ranger
+];
+const CROWN_OFFSET: [f32; 3] = [0.05, 0.9, 0.05];
+const PACK_OFFSET: [f32; 3] = [-0.0, -0.3, 0.4];
+
+/// The loaded hero parts and accessories.
+#[derive(Resource, Clone)]
+pub struct PlayerModel {
+    parts: Vec<[Handle<WorldAsset>; 6]>,
+    crown: Handle<WorldAsset>,
+    pack: Handle<WorldAsset>,
+    mouth_mesh: Handle<Mesh>,
+    mouth_mat: Handle<StandardMaterial>,
 }
 
-/// The loaded character model.
-#[derive(Resource)]
-pub struct PlayerModel(pub Handle<WorldAsset>);
+impl PlayerModel {
+    fn load(assets: &AssetServer, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> Self {
+        let scene = |name: &str| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("models/chibi/{name}.glb")));
+        Self {
+            parts: HEROES.iter().map(|(h, _, _)| PART_FILES.map(|p| scene(&format!("{h}__{p}")))).collect(),
+            crown: scene("crown"),
+            pack: scene("adventurer_backpack"),
+            mouth_mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+            mouth_mat: mats.add(StandardMaterial { base_color: Color::srgb(0.12, 0.03, 0.04), perceptual_roughness: 0.8, ..default() }),
+        }
+    }
+}
 
-/// Recoloured materials, shared by every body with the same skin.
-#[derive(Resource, Default)]
-struct SkinMaterials(HashMap<(Skin, &'static str), Handle<StandardMaterial>>);
-
-/// On the model's scene entity until it's rigged.
+/// The body under a [`BodyPose`] entity.
 #[derive(Component)]
 pub struct BodyModel {
     pub skin: Skin,
@@ -220,28 +206,24 @@ enum Part {
     Spine,
     Head,
     Thigh(usize),
-    Calf(usize),
     Bicep(usize),
-    Forearm(usize),
-    Hand(usize),
 }
 
-/// A posable bone: its rest transform and the body root's axes expressed in
-/// its parent's space (so a rotation "about the body's X axis" can be applied
-/// whatever the bone's own orientation).
+/// A posable joint and its rest position. Joints rest unrotated, in the body's
+/// frame (facing -Z), so a pose angle is a plain rotation about X / Y / Z.
 #[derive(Component, Debug, Clone, Copy)]
 struct Bone {
     part: Part,
-    rest: Quat,
     rest_pos: Vec3,
-    x: Vec3,
-    y: Vec3,
-    z: Vec3,
 }
 
-/// A body's mouth (scaled open by voice chat).
+/// A body's mouth (opened by voice chat).
 #[derive(Component)]
 pub struct Mouth;
+
+/// How open a body's mouth is, 0..1 (set by voice chat on the body's root).
+#[derive(Component, Default, Clone, Copy)]
+pub struct Talking(pub f32);
 
 /// A held item on a body's hand.
 #[derive(Component)]
@@ -254,39 +236,29 @@ pub struct HeldItem {
 #[derive(Component)]
 pub struct HeldBeam;
 
-fn part_for(name: &str) -> Option<Part> {
-    let side = |s: &str| if s.ends_with(".R") { 0 } else { 1 };
-    Some(match name {
-        "Hips" => Part::Hips,
-        "Spine1" => Part::Spine,
-        "Head" => Part::Head,
-        n if n.starts_with("Thigh.") => Part::Thigh(side(n)),
-        n if n.starts_with("Calf.") => Part::Calf(side(n)),
-        n if n.starts_with("Bicep.") => Part::Bicep(side(n)),
-        n if n.starts_with("Forearm.") => Part::Forearm(side(n)),
-        n if n.starts_with("Hand.") => Part::Hand(side(n)),
-        _ => return None,
-    })
-}
+/// Marks a hand, where items are held.
+#[derive(Component)]
+struct Hand(usize);
 
 pub struct BodyPlugin;
 
 impl Plugin for BodyPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SkinMaterials>()
-            .add_systems(Startup, |mut c: Commands, assets: Res<AssetServer>| c.insert_resource(PlayerModel(assets.load(GltfAssetLabel::Scene(0).from_asset("models/player/player.glb")))))
-            .add_observer(rig_body)
-            .add_systems(PostUpdate, apply_poses.before(TransformSystems::Propagate));
+        app.add_systems(PreStartup, |mut c: Commands, assets: Res<AssetServer>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>| {
+            c.insert_resource(PlayerModel::load(&assets, &mut meshes, &mut mats))
+        })
+        .add_systems(Update, (apply_reskins, rig_bodies).chain())
+        .add_systems(PostUpdate, apply_poses.before(TransformSystems::Propagate));
     }
 }
 
 /// Adds a body under `parent` (which should carry a [`BodyPose`]).
 pub fn spawn_body(c: &mut ChildSpawnerCommands, model: &PlayerModel, skin: Skin, items: bool) {
-    // The model faces +Z; bodies face -Z like the player.
-    c.spawn((WorldAssetRoot(model.0.clone()), Transform::from_rotation(Quat::from_rotation_y(PI)), Visibility::default(), BodyModel { skin, items }));
+    let mut e = c.spawn((Transform::from_scale(Vec3::splat(BODY_SCALE)), Visibility::default(), BodyModel { skin, items }));
+    build_hero(&mut e, model, skin);
 }
 
-/// Changes the skin of a body that's already rigged (or still loading).
+/// Changes the look of a body (on its [`BodyPose`] root entity).
 pub fn reskin(commands: &mut Commands, body: Entity, skin: Skin) {
     commands.entity(body).insert(Reskin(skin));
 }
@@ -294,189 +266,155 @@ pub fn reskin(commands: &mut Commands, body: Entity, skin: Skin) {
 #[derive(Component)]
 struct Reskin(Skin);
 
-#[allow(clippy::too_many_arguments)]
-fn rig_body(
-    ready: On<WorldInstanceReady>,
+fn v(a: [f32; 3]) -> Vec3 {
+    Vec3::new(a[0], a[1], a[2])
+}
+
+/// A part's model under its joint, turned to face -Z.
+fn part(c: &mut ChildSpawnerCommands, scene: &Handle<WorldAsset>, at: Vec3) {
+    c.spawn((WorldAssetRoot(scene.clone()), Transform::from_translation(at).with_rotation(Quat::from_rotation_y(PI)), Visibility::default()));
+}
+
+fn build_hero(root: &mut EntityCommands, m: &PlayerModel, skin: Skin) {
+    let h = skin.hero_index();
+    let files = m.parts[h].clone();
+    let offs = HERO_PARTS[h];
+    let (crown, pack) = (m.crown.clone(), m.pack.clone());
+    let (mouth_mesh, mouth_mat) = (m.mouth_mesh.clone(), m.mouth_mat.clone());
+    root.with_children(|b| {
+        b.spawn((Transform::from_translation(HIPS), Visibility::default(), Bone { part: Part::Hips, rest_pos: HIPS })).with_children(|hips| {
+            for (s, x) in [(0usize, 1.0f32), (1, -1.0)] {
+                let at = LEG * Vec3::new(x, 1.0, 1.0);
+                hips.spawn((Transform::from_translation(at), Visibility::default(), Bone { part: Part::Thigh(s), rest_pos: at })).with_children(|leg| part(leg, &files[4 + s], v(offs[4 + s])));
+            }
+            hips.spawn((Transform::default(), Visibility::default(), Bone { part: Part::Spine, rest_pos: Vec3::ZERO })).with_children(|sp| {
+                part(sp, &files[0], v(offs[0]));
+                if skin.pack == 1 {
+                    part(sp, &pack, v(PACK_OFFSET));
+                }
+                sp.spawn((Transform::from_translation(NECK).with_scale(Vec3::splat(HEAD_SCALE)), Visibility::default(), Bone { part: Part::Head, rest_pos: NECK })).with_children(|hd| {
+                    part(hd, &files[1], v(offs[1]));
+                    if skin.hat == 1 {
+                        part(hd, &crown, v(CROWN_OFFSET));
+                    }
+                    hd.spawn((Mesh3d(mouth_mesh.clone()), MeshMaterial3d(mouth_mat.clone()), Transform::from_translation(MOUTHS[h]).with_scale(Vec3::new(0.16, 0.0, 0.02)), Visibility::Hidden, Mouth));
+                });
+                for (s, x) in [(0usize, 1.0f32), (1, -1.0)] {
+                    let at = SHOULDER * Vec3::new(x, 1.0, 1.0);
+                    sp.spawn((Transform::from_translation(at), Visibility::default(), Bone { part: Part::Bicep(s), rest_pos: at })).with_children(|arm| {
+                        part(arm, &files[2 + s], v(offs[2 + s]));
+                        arm.spawn((Transform::from_translation(HAND), Visibility::default(), Hand(s)));
+                    });
+                }
+            });
+        });
+    });
+}
+
+/// Rebuilds bodies whose look changed.
+fn apply_reskins(mut commands: Commands, model: Option<Res<PlayerModel>>, q: Query<(Entity, &Reskin, &Children)>, bodies: Query<&BodyModel>) {
+    let Some(model) = model else { return };
+    for (root, Reskin(skin), kids) in &q {
+        for k in kids.iter() {
+            if let Ok(b) = bodies.get(k) {
+                let items = b.items;
+                commands.entity(k).despawn();
+                commands.entity(root).with_children(|c| spawn_body(c, &model, *skin, items));
+            }
+        }
+        commands.entity(root).remove::<Reskin>();
+    }
+}
+
+/// Gives new bodies their held items and flashlight beam.
+fn rig_bodies(
     mut commands: Commands,
-    models: Query<(&BodyModel, &ChildOf)>,
+    bodies: Query<(Entity, &BodyModel), Added<BodyModel>>,
     children: Query<&Children>,
-    names: Query<&Name>,
-    transforms: Query<&Transform>,
-    parents: Query<&ChildOf>,
-    mat_names: Query<&GltfMaterialName>,
-    mut skins: ResMut<SkinMaterials>,
+    hands: Query<&Hand>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let scene = ready.entity;
-    let Ok((model, root)) = models.get(scene) else { return };
-    let root = root.parent();
-    let skin = model.skin;
-    let mut stack = vec![scene];
-    let mut hands: Vec<(Entity, usize, Quat)> = vec![];
-    let mut heads: Vec<(Entity, Quat)> = vec![];
-    while let Some(e) = stack.pop() {
-        if let Ok(k) = children.get(e) {
-            stack.extend(k.iter());
+    for (body, model) in &bodies {
+        if !model.items {
+            continue;
         }
-        if let Ok(m) = mat_names.get(e) {
-            paint(&mut commands, e, &m.0, skin, &mut skins, &mut mats);
-        }
-        let Some(part) = names.get(e).ok().and_then(|n| part_for(n.as_str())) else { continue };
-        let Ok(tf) = transforms.get(e) else { continue };
-        // The parent's rest rotation relative to the body root.
-        let mut rot = Quat::IDENTITY;
-        let mut cur = parents.get(e).ok().map(|p| p.parent());
-        while let Some(p) = cur {
-            if p == root {
-                break;
+        let kit = BodyKit::new(&mut mats, &mut meshes, model.skin.shirt_color());
+        let mut stack = vec![body];
+        while let Some(e) = stack.pop() {
+            if let Ok(k) = children.get(e) {
+                stack.extend(k.iter());
             }
-            rot = transforms.get(p).map(|t| t.rotation).unwrap_or_default() * rot;
-            cur = parents.get(p).ok().map(|q| q.parent());
-        }
-        let inv = rot.inverse();
-        commands.entity(e).insert(Bone { part, rest: tf.rotation, rest_pos: tf.translation, x: inv * Vec3::X, y: inv * Vec3::Y, z: inv * Vec3::Z });
-        if let Part::Hand(side) = part {
-            hands.push((e, side, rot * tf.rotation));
-        }
-        if part == Part::Head {
-            heads.push((e, rot * tf.rotation));
-        }
-    }
-    commands.entity(scene).remove::<BodyModel>();
-    // The model's head is blank: give it a face (laid out in the body's frame,
-    // which faces -Z, with the head bone at the top of the neck).
-    let face = FaceKit::new(&mut meshes, &mut mats);
-    for (head, rot) in heads {
-        let frame = Transform::from_rotation(rot.inverse());
-        commands.entity(head).with_children(|h| {
-            h.spawn((frame, Visibility::default())).with_children(|f| {
-                for x in [-0.034f32, 0.034] {
-                    f.spawn((Mesh3d(face.ball.clone()), MeshMaterial3d(face.white.clone()), Transform::from_xyz(x, 0.062, -0.094).with_scale(Vec3::new(0.024, 0.017, 0.012))));
-                    f.spawn((Mesh3d(face.ball.clone()), MeshMaterial3d(face.dark.clone()), Transform::from_xyz(x, 0.062, -0.104).with_scale(Vec3::splat(0.01))));
-                    f.spawn((Mesh3d(face.ball.clone()), MeshMaterial3d(face.dark.clone()), Transform::from_xyz(x, 0.087, -0.097).with_rotation(Quat::from_rotation_z(-x.signum() * 0.15)).with_scale(Vec3::new(0.028, 0.006, 0.01))));
-                }
-                // The mouth opens when the player talks (voice chat).
-                f.spawn((Mesh3d(face.ball.clone()), MeshMaterial3d(face.dark.clone()), Transform::from_xyz(0.0, 0.008, -0.095).with_scale(Vec3::new(0.034, 0.008, 0.012)), Mouth));
+            let Ok(Hand(side)) = hands.get(e) else { continue };
+            let right = *side == 0;
+            commands.entity(e).with_children(|h| {
+                h.spawn((Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2)).with_scale(Vec3::splat(1.0 / BODY_SCALE)), Visibility::default())).with_children(|f| {
+                    for kind in ItemKind::ALL {
+                        f.spawn((HeldItem { kind, right }, grip_transform(right, 1.0, true), Visibility::Hidden)).with_children(|it| build_item(it, &kit, kind, 1.0));
+                    }
+                    if !right {
+                        f.spawn((
+                            HeldBeam,
+                            SpotLight { intensity: 400_000.0, range: 14.0, outer_angle: 0.42, inner_angle: 0.25, shadow_maps_enabled: false, color: Color::srgb(1.0, 0.95, 0.85), ..default() },
+                            Transform::from_xyz(0.0, 0.03, -0.25),
+                            Visibility::Hidden,
+                        ));
+                    }
+                });
             });
-        });
-    }
-    if !model.items {
-        return;
-    }
-    // Items and the flashlight beam ride on the hands, laid out in the body's frame.
-    let kit = BodyKit::new(&mut mats, &mut meshes, skin.shirt_color());
-    for (hand, side, hand_rot) in hands {
-        let right = side == 0;
-        let frame = Transform::from_rotation(hand_rot.inverse() * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)).with_translation(hand_rot.inverse() * Vec3::new(0.0, -0.07, 0.0));
-        commands.entity(hand).with_children(|h| {
-            h.spawn((frame, Visibility::default())).with_children(|f| {
-                for kind in ItemKind::ALL {
-                    f.spawn((HeldItem { kind, right }, grip_transform(right, 1.0, true), Visibility::Hidden)).with_children(|it| build_item(it, &kit, kind, 1.0));
-                }
-                if !right {
-                    f.spawn((
-                        HeldBeam,
-                        SpotLight { intensity: 400_000.0, range: 14.0, outer_angle: 0.42, inner_angle: 0.25, shadow_maps_enabled: false, color: Color::srgb(1.0, 0.95, 0.85), ..default() },
-                        Transform::from_xyz(0.0, 0.03, -0.25),
-                        Visibility::Hidden,
-                    ));
-                }
-            });
-        });
-    }
-}
-
-struct FaceKit {
-    ball: Handle<Mesh>,
-    white: Handle<StandardMaterial>,
-    dark: Handle<StandardMaterial>,
-}
-
-impl FaceKit {
-    fn new(meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> Self {
-        Self {
-            ball: meshes.add(Sphere::new(1.0).mesh().uv(12, 8)),
-            white: mats.add(StandardMaterial { base_color: Color::srgb(0.93, 0.92, 0.9), perceptual_roughness: 0.3, ..default() }),
-            dark: mats.add(StandardMaterial { base_color: Color::srgb(0.06, 0.05, 0.05), perceptual_roughness: 0.4, ..default() }),
         }
     }
 }
 
-fn paint(commands: &mut Commands, e: Entity, material: &str, skin: Skin, skins: &mut SkinMaterials, mats: &mut Assets<StandardMaterial>) {
-    let key: &'static str = match material {
-        "Shirt" => "Shirt",
-        "Pants" => "Pants",
-        "Boots" => "Boots",
-        "Skin" => "Skin",
-        "Hat" => "Hat",
-        _ => return,
-    };
-    if key == "Hat" {
-        commands.entity(e).insert(if skin.hat == 0 { Visibility::Hidden } else { Visibility::Inherited });
-    }
-    let Some(color) = skin.color_for(key) else { return };
-    let handle = skins
-        .0
-        .entry((skin, key))
-        .or_insert_with(|| mats.add(StandardMaterial { base_color: color, perceptual_roughness: if key == "Skin" { 0.6 } else { 0.9 }, ..default() }))
-        .clone();
-    commands.entity(e).insert(MeshMaterial3d(handle));
-}
+/// The mouth's open height (body units) when talking at full volume.
+pub const MOUTH_OPEN: f32 = 0.09;
 
-/// Turns each body's [`BodyPose`] into bone transforms, and applies skin changes.
+/// Turns each body's [`BodyPose`] into joint transforms and opens talking mouths.
 #[allow(clippy::type_complexity)]
 fn apply_poses(
-    mut commands: Commands,
-    poses: Query<(Entity, &BodyPose, &Children, Option<&Reskin>)>,
+    poses: Query<(&BodyPose, &Children, Option<&Talking>)>,
     children: Query<&Children>,
-    mut bones: Query<(&Bone, &mut Transform)>,
-    mat_names: Query<&GltfMaterialName>,
-    mut skins: ResMut<SkinMaterials>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut bones: Query<(&Bone, &mut Transform), Without<Mouth>>,
+    mut mouths: Query<(&mut Transform, &mut Visibility), With<Mouth>>,
 ) {
     // QA: HALLWAYS_POSE_TEST=rest shows bodies in their rest pose; =<part>
-    // (thigh, calf, arm, forearm, lean, head) raises just that part.
+    // (thigh, arm, lean, head, roll, talk) raises just that part.
     let test = std::env::var("HALLWAYS_POSE_TEST").ok();
-    for (root, pose, kids, reskin) in &poses {
+    for (pose, kids, talking) in &poses {
         let pose = &match test.as_deref() {
-            Some("rest") => BodyPose::default(),
+            Some("rest") | Some("talk") => BodyPose::default(),
             Some("thigh") => BodyPose { thigh: [0.8, 0.0], ..default() },
-            Some("calf") => BodyPose { calf: [0.8, 0.0], ..default() },
             Some("arm") => BodyPose { arm: [0.8, 0.0], ..default() },
-            Some("forearm") => BodyPose { forearm: [0.8, 0.0], ..default() },
+            Some("roll") => BodyPose { arm_roll: [0.8, 0.0], ..default() },
             Some("lean") => BodyPose { lean: 0.5, ..default() },
             Some("head") => BodyPose { head: 0.5, ..default() },
             _ => *pose,
         };
+        let open = if test.as_deref() == Some("talk") { 1.0 } else { talking.map(|t| t.0).unwrap_or(0.0).clamp(0.0, 1.0) };
         let mut stack: Vec<Entity> = kids.iter().collect();
         while let Some(e) = stack.pop() {
             if let Ok(k) = children.get(e) {
                 stack.extend(k.iter());
             }
-            if let Some(Reskin(skin)) = reskin
-                && let Ok(m) = mat_names.get(e)
-            {
-                paint(&mut commands, e, &m.0, *skin, &mut skins, &mut mats);
+            if let Ok((mut tf, mut vis)) = mouths.get_mut(e) {
+                tf.scale.y = MOUTH_OPEN * open;
+                *vis = if open > 0.05 { Visibility::Inherited } else { Visibility::Hidden };
+                continue;
             }
             let Ok((b, mut tf)) = bones.get_mut(e) else { continue };
-            let turn = |pitch: f32, yaw: f32, roll: f32| Quat::from_axis_angle(b.x, pitch) * Quat::from_axis_angle(b.y, yaw) * Quat::from_axis_angle(b.z, roll) * b.rest;
+            let turn = |pitch: f32, yaw: f32, roll: f32| Quat::from_rotation_x(pitch) * Quat::from_rotation_y(yaw) * Quat::from_rotation_z(roll);
             match b.part {
                 Part::Hips => {
-                    tf.translation = b.rest_pos - b.y * pose.drop;
-                    tf.rotation = b.rest;
+                    tf.translation = b.rest_pos - Vec3::Y * pose.drop / BODY_SCALE;
+                    tf.rotation = Quat::IDENTITY;
                 }
                 Part::Spine => tf.rotation = turn(-pose.lean, 0.0, 0.0),
                 Part::Head => tf.rotation = turn(-pose.head, pose.head_yaw, 0.0),
-                Part::Thigh(s) => tf.rotation = turn(pose.thigh[s], 0.0, 0.0),
-                Part::Calf(s) => tf.rotation = turn(-pose.calf[s], 0.0, 0.0),
-                Part::Bicep(s) => tf.rotation = turn(pose.arm[s], 0.0, pose.arm_roll[s]),
-                Part::Forearm(s) => tf.rotation = turn(pose.forearm[s], 0.0, 0.0),
-                Part::Hand(_) => {}
+                // No knees on a chibi: a bent calf just bends the thigh a little less.
+                Part::Thigh(s) => tf.rotation = turn(pose.thigh[s] - pose.calf[s] * 0.35, 0.0, 0.0),
+                // Positive roll lifts the arm out to the side.
+                Part::Bicep(s) => tf.rotation = turn(pose.arm[s] + pose.forearm[s] * 0.3, 0.0, if s == 0 { pose.arm_roll[s] } else { -pose.arm_roll[s] }),
             }
-        }
-        if reskin.is_some() {
-            commands.entity(root).remove::<Reskin>();
         }
     }
 }
@@ -499,27 +437,43 @@ mod tests {
             let before = s.get(part);
             s.step(part, n);
             assert_eq!(s.get(part), before, "{part:?} wraps");
-            s.step(part, -1);
+            s.step(part, 1);
             assert_ne!(s.get(part), before);
-        }
-        assert_eq!(SkinPart::Hat.len(), HATS.len());
-        assert_eq!(HATS[0].0, "None");
-    }
-
-    #[test]
-    fn every_model_part_has_a_colour() {
-        let s = Skin::for_id(3);
-        for m in ["Shirt", "Pants", "Boots", "Skin", "Hat"] {
-            assert!(s.color_for(m).is_some(), "{m}");
         }
         assert_ne!(Skin::for_id(1), Skin::for_id(2));
     }
 
     #[test]
-    fn bones_map_to_parts() {
-        assert_eq!(part_for("Thigh.R"), Some(Part::Thigh(0)));
-        assert_eq!(part_for("Bicep.L"), Some(Part::Bicep(1)));
-        assert_eq!(part_for("Finger1.L"), None);
-        assert!(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/models/player/player.glb")).exists());
+    fn every_hero_part_is_shipped() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/models/chibi/");
+        for (h, _, _) in HEROES {
+            for p in PART_FILES {
+                assert!(std::path::Path::new(&format!("{dir}{h}__{p}.glb")).exists(), "{h}__{p}");
+            }
+        }
+        for f in ["crown", "adventurer_backpack", "LICENSE"] {
+            let ext = if f == "LICENSE" { "txt" } else { "glb" };
+            assert!(std::path::Path::new(&format!("{dir}{f}.{ext}")).exists(), "{f}");
+        }
+    }
+
+    #[test]
+    fn bodies_fit_inside_their_reach() {
+        // Widest head (20 voxels) and the outside of the arms (shoulder 0.65 + 0.25).
+        assert!(2.0 * 0.5 * BODY_SCALE * HEAD_SCALE <= BODY_REACH);
+        assert!((SHOULDER.x + 0.25) * BODY_SCALE <= BODY_REACH + 0.01);
+        // ...and still fit through a door, the tallest hat included (the wizard's
+        // head is 25 voxels tall above the neck).
+        assert!(BODY_REACH * 2.0 < crate::floor::plan::DOOR_W);
+        let tallest = (HIPS.y + NECK.y) * BODY_SCALE + 2.5 * BODY_SCALE * HEAD_SCALE;
+        assert!(tallest < crate::world::DOOR_H - 0.1, "{tallest}");
+    }
+
+    #[test]
+    fn feet_stand_on_the_floor() {
+        // Legs hang 0.6 m below the hips (at 0.6 m), so the soles are at 0.
+        for h in HERO_PARTS {
+            assert!((HIPS.y + LEG.y + h[4][1]).abs() < 0.01);
+        }
     }
 }
