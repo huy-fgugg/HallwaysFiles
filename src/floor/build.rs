@@ -42,6 +42,9 @@ pub struct PropMaterials {
     pub glass: Handle<StandardMaterial>,
     pub rock_mesh: Handle<Mesh>,
     pub pyramid: Handle<Mesh>,
+    pub canvas: Handle<StandardMaterial>,
+    pub terracotta: Handle<StandardMaterial>,
+    pub shade: Handle<StandardMaterial>,
 }
 
 /// Small tileable noise textures for the outdoor area (no image files needed).
@@ -112,6 +115,9 @@ impl PropMaterials {
             glass: mats.add(StandardMaterial { base_color: Color::srgba(1.0, 0.85, 0.55, 0.5), emissive: LinearRgba::rgb(5.0, 3.2, 1.4), alpha_mode: AlphaMode::Blend, ..default() }),
             rock_mesh: meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap()),
             pyramid: meshes.add(Cone { radius: 0.5, height: 1.0 }.mesh().resolution(4)),
+            canvas: mats.add(StandardMaterial { base_color: Color::srgb(0.78, 0.74, 0.64), perceptual_roughness: 0.95, cull_mode: None, double_sided: true, ..default() }),
+            terracotta: mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.27, 0.16), perceptual_roughness: 0.85, ..default() }),
+            shade: mats.add(StandardMaterial { base_color: Color::srgb(0.95, 0.8, 0.55), emissive: LinearRgba::rgb(2.2, 1.4, 0.6), cull_mode: None, double_sided: true, ..default() }),
         }
     }
 }
@@ -331,12 +337,18 @@ pub fn spawn_room(
         b.tag(e);
     }
 
+    // ---- Scenery (sheds, windmills, benches, barrels, clutter) ----
+    let scenery = {
+        let mut srng = GameRng::new(r.seed ^ 0x5CE7_E21E);
+        let lamps: Vec<Zone> = if r.area.outdoors() { lamp_points.iter().map(|p| (Vec2::new(post_x(p.x), p.y) - Vec2::splat(0.7), Vec2::new(post_x(p.x), p.y) + Vec2::splat(0.7))).collect() } else { vec![] };
+        super::scenery::dress_room(b, props, r, &lamps, &mut srng)
+    };
     // ---- Area architecture ----
     match r.area {
         Area::QuarryLift => quarry_architecture(b, props, r),
         Area::ServiceTunnels => tunnel_architecture(b, props, r),
         Area::Atrium => atrium_architecture(b, props, r),
-        Area::Grounds => grounds_architecture(b, props, r, &mut rng),
+        Area::Grounds => grounds_architecture(b, props, r, &scenery, &mut rng),
         _ => {}
     }
     if r.area == Area::Atrium || (r.area == Area::GuestWing && r.kind != RoomKind::Hall && rng.next_f32() < 0.5) {
@@ -347,7 +359,7 @@ pub fn spawn_room(
     }
 
     // ---- Stairs, landings and lofts ----
-    let mut blocked: Vec<(Vec2, Vec2)> = vec![];
+    let mut blocked: Vec<(Vec2, Vec2)> = scenery.clone();
     let stair_mat = match r.area {
         Area::ServiceTunnels | Area::QuarryLift => b.mats.metal_plate.clone(),
         Area::Atrium => b.mats.marble.clone(),
@@ -499,7 +511,7 @@ pub fn spawn_room(
         });
     }
     // Decor in the remaining slots.
-    for s in slots.into_iter().take(4) {
+    for s in slots.into_iter().take(6) {
         match r.area {
             Area::Archive => bookshelf(b, props, s, &mut rng),
             Area::QuarryLift | Area::ServiceTunnels => crate_stack(b, s, &mut rng),
@@ -511,7 +523,9 @@ pub fn spawn_room(
                 let pick = rng.below(3);
                 let name = ["ArmChair_01", "ClassicNightstand_01", "GothicCommode_01"][pick as usize];
                 if pick == 2 {
-                    continue; // keep commodes as lootable containers only
+                    // Commodes stay lootable containers only: a plant or a lamp instead.
+                    super::scenery::wall_decor(b, props, s.x, s.inward, s.z, &mut rng);
+                    continue;
                 }
                 let tf = Transform::from_xyz(s.x + s.inward * 0.45, 0.0, s.z).with_rotation(Quat::from_rotation_y(s.yaw));
                 let col = if pick == 0 { world_aabb(Vec3::new(-0.42, 0.0, -0.42), Vec3::new(0.42, 1.0, 0.36), &tf) } else { world_aabb(Vec3::new(-0.28, 0.0, -0.21), Vec3::new(0.28, 0.7, 0.21), &tf) };
@@ -1053,7 +1067,7 @@ fn reading_table(b: &mut Builder, props: &PropMaterials, at: Vec3, lit: bool) {
 /// pillars, a gravel path from door to door, red and orange trees, dark pines
 /// beyond the walls, bramble patches, rock piles, a tiered fountain, and a
 /// cool moonlit fill light.
-fn grounds_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, rng: &mut GameRng) {
+fn grounds_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, taken: &[Zone], rng: &mut GameRng) {
     let h = r.height;
     let stone = props.stone.clone();
     // Capstones along the tops of the walls.
@@ -1094,8 +1108,12 @@ fn grounds_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, rn
         b.block(Vec3::new(r.exit_x - w, 0.0, r.min.y), Vec3::new(r.exit_x + w, y + 0.001, mid + w), mat, 1.2, false);
         b.block(Vec3::new(x0 - w, 0.0, mid - w), Vec3::new(x1 + w, y - 0.001, mid + w), mat, 1.2, false);
     }
+    // "On the path" also covers the sheds, windmills and benches already placed.
     let on_path = |x: f32, z: f32, m: f32| {
-        ((x - r.entry_x).abs() < m && z > mid - m) || ((x - r.exit_x).abs() < m && z < mid + m) || ((z - mid).abs() < m && x > x0 - m && x < x1 + m)
+        ((x - r.entry_x).abs() < m && z > mid - m)
+            || ((x - r.exit_x).abs() < m && z < mid + m)
+            || ((z - mid).abs() < m && x > x0 - m && x < x1 + m)
+            || taken.iter().any(|(lo, hi)| x + m * 0.6 > lo.x && x - m * 0.6 < hi.x && z + m * 0.6 > lo.y && z - m * 0.6 < hi.y)
     };
     let inner = |x: f32, z: f32| x > r.min.x + 1.6 && x < r.max.x - 1.6 && z > r.min.y + 1.6 && z < r.max.y - 1.4;
     // Autumn trees.
@@ -1246,14 +1264,15 @@ fn autumn_pine(b: &mut Builder, props: &PropMaterials, at: Vec3, k: f32, rng: &m
     let leaves = [props.leaves_red.clone(), props.leaves_orange.clone()];
     let first = rng.below(2) as usize;
     b.commands.entity(root).with_children(|t| {
-        t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(bark.clone()), Transform::from_xyz(0.0, 1.0 * k, 0.0).with_scale(Vec3::new(0.32, 2.0 * k, 0.32))));
+        // The lowest branches start above head height so you never walk into them.
+        t.spawn((Mesh3d(cyl.clone()), MeshMaterial3d(bark.clone()), Transform::from_xyz(0.0, 1.4 * k, 0.0).with_scale(Vec3::new(0.32, 2.8 * k, 0.32))));
         for i in 0..5 {
             let f = i as f32;
             let w = (2.6 - f * 0.45) * k;
             t.spawn((
                 Mesh3d(cone.clone()),
                 MeshMaterial3d(leaves[(first + i) % 2].clone()),
-                Transform::from_xyz(0.0, (1.6 + f * 0.85) * k, 0.0).with_rotation(Quat::from_rotation_y(f * 0.7)).with_scale(Vec3::new(w, 1.3 * k, w)),
+                Transform::from_xyz(0.0, (2.75 + f * 0.8) * k, 0.0).with_rotation(Quat::from_rotation_y(f * 0.7)).with_scale(Vec3::new(w, 1.3 * k, w)),
             ));
         }
     });

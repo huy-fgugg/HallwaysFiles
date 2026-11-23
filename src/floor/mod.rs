@@ -7,6 +7,7 @@
 
 pub mod build;
 pub mod plan;
+pub mod scenery;
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -87,7 +88,7 @@ impl Plugin for FloorPlugin {
             .add_systems(OnEnter(AppState::Playing), setup_floor)
             .add_systems(
                 Update,
-                (custom_quick_start, stream_rooms, fix_open_doors, announce_areas, finish_floor).run_if(in_state(AppState::Playing)),
+                (custom_quick_start, stream_rooms, fix_open_doors, announce_areas, finish_floor, scenery::spin_props).run_if(in_state(AppState::Playing)),
             );
     }
 }
