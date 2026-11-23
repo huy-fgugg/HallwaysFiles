@@ -602,7 +602,7 @@ pub fn synth_hollow_cue() -> Vec<f32> {
 }
 
 /// Ending cue (27 s): the lift's hum and a hopeful pad 0–9 s, a slow climb
-/// 9–12.5 s, dread 12.5–15.4 s, a crashing hit at 16.8 s, then silence.
+/// 9–17.6 s, dread 17.5–20.4 s, a crashing hit at 21.8 s, then silence.
 pub fn synth_ending_cue() -> Vec<f32> {
     let len = (27.0 * SR) as usize;
     let mut buf = vec![0.0; len];
