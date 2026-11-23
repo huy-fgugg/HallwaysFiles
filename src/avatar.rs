@@ -156,7 +156,7 @@ fn apply_peer_events(
             PeerMsg::Notice { text } => {
                 subs.write(crate::run::Subtitle::info(format!("{}: {}", session.name_of(ev.from), text)));
             }
-            PeerMsg::State(_) | PeerMsg::Admin { .. } => {}
+            PeerMsg::State(_) | PeerMsg::Admin { .. } | PeerMsg::Voice { .. } => {}
         }
     }
 }
@@ -292,6 +292,7 @@ fn animate_avatars(
     children: Query<&Children>,
     colliders: Query<&crate::physics::Collider>,
     mut solid: ResMut<PeerBodies>,
+    voices: Res<crate::voice::Voices>,
 ) {
     let dt = time.delta_secs();
     let k = (dt * 12.0).min(1.0);
@@ -329,6 +330,9 @@ fn animate_avatars(
             continue;
         }
         *pose = pose_for(st.speed, av.phase, av.crouch, av.pitch, st.right.is_some(), st.left.is_some(), st.gesture, st.gesture.envelope(st.gt));
+        // Their mouth opens with how loud they're talking (voice chat).
+        let level = voices.0.get(&av.id).map_or(0.0, |v| v.level());
+        commands.entity(ent).insert(crate::body::Talking((level * 9.0).clamp(0.0, 1.0)));
         // A teammate who changed their look.
         if let Some(skin) = st.skin
             && skin != av.skin

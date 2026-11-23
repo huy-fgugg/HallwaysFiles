@@ -72,6 +72,8 @@ pub enum PeerMsg {
     Notice { text: String },
     /// Admin panel action aimed at one player.
     Admin { target: u8, action: crate::admin::AdminAction },
+    /// 100 ms of voice (ADPCM, base64; see `voice`).
+    Voice { seq: u32, data: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -219,8 +221,16 @@ fn auto_online(
                 step.1 = 0.0;
             }
         }
+        // Both step into the lift car (players start in the boarding hall).
+        2 if step.1 > 1.5 => {
+            if let Ok((_, mut tf)) = player.single_mut() {
+                tf.translation = crate::world::elevator::CAR_START + Vec3::X * if mode == "host" { -0.4 } else { 0.4 };
+                step.0 = 5;
+                step.1 = 0.0;
+            }
+        }
         // Host starts once the guest is in.
-        2 if mode == "host" && session.players.len() >= 2 && step.1 > 2.0 => {
+        5 if mode == "host" && session.players.len() >= 2 && step.1 > 3.0 => {
             if lobby.as_mut().is_some_and(|l| l.waiting) {
                 start.write(RequestStart);
             }
@@ -284,6 +294,7 @@ fn pump(
     mut started: MessageWriter<DescentStarted>,
     mut events: MessageWriter<PeerEvent>,
     mut subs: MessageWriter<crate::run::Subtitle>,
+    mut voice: MessageWriter<crate::voice::VoiceIn>,
 ) {
     let Some(link) = link else { return };
     let Ok(inc) = link.inc.lock() else { return };
@@ -313,6 +324,10 @@ fn pump(
                 }
                 ServerMsg::Relay { from, data } => {
                     if let Ok(msg) = serde_json::from_value::<PeerMsg>(data) {
+                        if let PeerMsg::Voice { data, .. } = msg {
+                            voice.write(crate::voice::VoiceIn { from, data });
+                            continue;
+                        }
                         if let PeerMsg::State(s) = &msg {
                             peers.0.insert(from, *s);
                         }

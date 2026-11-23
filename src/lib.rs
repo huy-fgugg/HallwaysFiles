@@ -29,6 +29,7 @@ pub mod pursuit;
 pub mod qa;
 pub mod body;
 pub mod mapfile;
+pub mod voice;
 pub mod achievements;
 pub mod hazards;
 pub mod tap;
@@ -70,6 +71,6 @@ impl Plugin for HallwaysPlugin {
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
         app.init_resource::<presets::ActivePreset>();
         app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin, touch::TouchPlugin, ending::EndingPlugin, theater::TheaterPlugin, trailer::TrailerPlugin));
-        app.add_plugins((pursuit::PursuitPlugin, guide::GuidePlugin, qa::QaPlugin, tap::TapPlugin, hazards::HazardPlugin, achievements::AchievementsPlugin, body::BodyPlugin));
+        app.add_plugins((pursuit::PursuitPlugin, guide::GuidePlugin, qa::QaPlugin, tap::TapPlugin, hazards::HazardPlugin, achievements::AchievementsPlugin, body::BodyPlugin, voice::VoicePlugin));
     }
 }

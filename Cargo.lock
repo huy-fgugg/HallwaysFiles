@@ -3089,6 +3089,9 @@ name = "hallways"
 version = "1.0.9"
 dependencies = [
  "bevy",
+ "cpal",
+ "jni 0.21.1",
+ "ndk-context",
  "rand 0.10.3",
  "rand_chacha 0.10.0",
  "ron",

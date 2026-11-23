@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.20.1", features = ["wav", "jpeg", "mp3"] }
+# Microphone capture for voice chat (same version Bevy's audio already uses).
+cpal = "0.17"
 rand = "0.10.3"
 rand_chacha = "0.10.0"
 ron = "0.12.3"
@@ -27,3 +29,8 @@ debug = false
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+# Android: asking for the microphone at runtime (voice chat).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

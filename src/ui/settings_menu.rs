@@ -22,16 +22,20 @@ pub enum SettingField {
     LimitLoudSounds,
     Fullscreen,
     Graphics,
+    VoiceChat,
+    VoiceVolume,
 }
 
 impl SettingField {
-    pub const ALL: [SettingField; 11] = [
+    pub const ALL: [SettingField; 13] = [
         SettingField::Graphics,
         SettingField::MouseSensitivity,
         SettingField::InvertY,
         SettingField::MasterVolume,
         SettingField::SfxVolume,
         SettingField::MusicVolume,
+        SettingField::VoiceChat,
+        SettingField::VoiceVolume,
         SettingField::SpookyIntensity,
         SettingField::Subtitles,
         SettingField::ReduceFlashing,
@@ -52,6 +56,8 @@ impl SettingField {
             SettingField::LimitLoudSounds => "Limit loud sounds",
             SettingField::Fullscreen => "Display mode",
             SettingField::Graphics => "Graphics quality",
+            SettingField::VoiceChat => "Voice chat",
+            SettingField::VoiceVolume => "Voice volume",
         }
     }
 
@@ -71,6 +77,8 @@ impl SettingField {
             SettingField::LimitLoudSounds => on_off(s.limit_loud_sounds),
             SettingField::Fullscreen => if s.fullscreen { "FULLSCREEN".into() } else { "WINDOWED".into() },
             SettingField::Graphics => s.graphics.label().into(),
+            SettingField::VoiceChat => s.voice.label().into(),
+            SettingField::VoiceVolume => format!("{}%", s.voice_volume),
         }
     }
 
@@ -103,6 +111,8 @@ impl SettingField {
             SettingField::LimitLoudSounds => s.limit_loud_sounds = !s.limit_loud_sounds,
             SettingField::Fullscreen => s.fullscreen = !s.fullscreen,
             SettingField::Graphics => s.graphics = s.graphics.step(delta),
+            SettingField::VoiceChat => s.voice = s.voice.step(delta),
+            SettingField::VoiceVolume => step_pct(&mut s.voice_volume, delta),
         }
     }
 }

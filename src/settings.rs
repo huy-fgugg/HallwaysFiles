@@ -76,6 +76,10 @@ pub struct Settings {
     pub limit_loud_sounds: bool,
     pub fullscreen: bool,
     pub graphics: Graphics,
+    /// Voice chat in online rooms.
+    pub voice: crate::voice::VoiceMode,
+    /// 0 ..= 100
+    pub voice_volume: u32,
 }
 
 impl Default for Settings {
@@ -93,6 +97,8 @@ impl Default for Settings {
             limit_loud_sounds: false,
             fullscreen: false,
             graphics: Graphics::default(),
+            voice: crate::voice::VoiceMode::default(),
+            voice_volume: 90,
         }
     }
 }
@@ -108,6 +114,7 @@ impl Settings {
         self.mouse_sensitivity = self.mouse_sensitivity.clamp(0.1, 3.0);
         self.master_volume = self.master_volume.min(100);
         self.sfx_volume = self.sfx_volume.min(100);
+        self.voice_volume = self.voice_volume.min(100);
         self.music_volume = self.music_volume.min(100);
         self.spooky_intensity = self.spooky_intensity.min(100);
         self
