@@ -231,6 +231,60 @@ pub enum Feature {
     Zigzag,
     /// The Reading Hall (see [`READING_HALL`]): rows of tall shelves.
     ReadingHall,
+    /// A forest of thick pillars to weave between (see [`pillars`]).
+    PillarHall,
+    /// Gardens: a stream across the room at `z`, crossed by a footbridge
+    /// (see [`stream_bridge`]).
+    Stream { z: f32 },
+}
+
+/// Radius of a pillar in a pillar hall.
+pub const PILLAR_R: f32 = 0.35;
+/// Half the width of a stream's footbridge, and half the stream's width.
+pub const BRIDGE_HALF: f32 = 0.9;
+pub const STREAM_HALF: f32 = 1.05;
+
+/// Distance from `p` to the segment `a`–`b`.
+fn dist_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let t = if ab.length_squared() > 1e-6 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+    p.distance(a + ab * t)
+}
+
+/// Pillar positions in a pillar hall: a grid, minus anything near the walls,
+/// the doors or the straight way from the entry to the exit.
+pub fn pillars(r: &RoomPlan) -> Vec<Vec2> {
+    if r.feature != Some(Feature::PillarHall) {
+        return vec![];
+    }
+    let route = r.route();
+    let doors = door_zones(r);
+    let mut out = vec![];
+    let mut z = r.max.y - 2.2;
+    let mut row = 0;
+    while z > r.min.y + 1.8 {
+        let mut x = r.min.x + 1.5 + if row % 2 == 1 { 1.2 } else { 0.0 };
+        while x < r.max.x - 1.5 {
+            let p = Vec2::new(x, z);
+            let foot = (p - Vec2::splat(PILLAR_R + 0.4), p + Vec2::splat(PILLAR_R + 0.4));
+            let near_path = route.windows(2).any(|w| dist_to_segment(p, w[0], w[1]) < 1.25);
+            if !near_path && !doors.iter().any(|d| zones_overlap(&foot, d)) {
+                out.push(p);
+            }
+            x += 2.4;
+        }
+        z -= 2.4;
+        row += 1;
+    }
+    out
+}
+
+/// A stream room's footbridge: (stream z, bridge x).
+pub fn stream_bridge(r: &RoomPlan) -> Option<(f32, f32)> {
+    let Some(Feature::Stream { z }) = r.feature else { return None };
+    // On the garden path, which runs straight in from the entry door.
+    let x = r.entry_x.clamp(r.min.x + BRIDGE_HALF + 0.4, r.max.x - BRIDGE_HALF - 0.4);
+    Some((z, x))
 }
 
 /// A line across the room (constant z) that is solid except for an opening.
@@ -345,6 +399,11 @@ impl RoomPlan {
             let gx = (d.gap.0 + d.gap.1) / 2.0;
             pts.push(Vec2::new(gx, d.z + 0.9));
             pts.push(Vec2::new(gx, d.z - 0.9));
+        }
+        // Straight over a stream's footbridge.
+        if let Some((z, x)) = stream_bridge(self) {
+            pts.push(Vec2::new(x, z + STREAM_HALF + 0.7));
+            pts.push(Vec2::new(x, z - STREAM_HALF - 0.7));
         }
         // A raised exit is reached up its stairs: line up at their foot first.
         if let Some(Feature::RaisedExit { height }) = self.feature {
@@ -644,6 +703,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         // ---- Weird architecture ----
         let feature_roll = rng.next_f32();
         let zig_roll = rng.next_f32();
+        let structure_roll = rng.next_f32();
         let feature = if pursuit {
             None
         } else if reading_hall {
@@ -670,6 +730,24 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             && zig_roll < 0.16 * opt.stairs.clamp(0.0, 4.0)
         {
             Some(Feature::Zigzag)
+        } else if index >= 6
+            && entry_height == 0.0
+            && area == Area::Grounds
+            && matches!(kind, RoomKind::Loot | RoomKind::Dark | RoomKind::Hall)
+            && depth >= 14.0
+            && structure_roll < 0.4
+        {
+            Some(Feature::Stream { z: ((max.y - depth * 0.3) * 10.0).round() / 10.0 })
+        } else if index >= 6
+            && entry_height == 0.0
+            && matches!(area, Area::GuestWing | Area::Archive | Area::Atrium | Area::QuarryLift)
+            && matches!(kind, RoomKind::Loot | RoomKind::Dark)
+            && encounter.is_none_or(|e| e != Encounter::Listener)
+            && width >= 8.5
+            && depth >= 10.0
+            && structure_roll < 0.25 * opt.stairs.clamp(0.0, 4.0)
+        {
+            Some(Feature::PillarHall)
         } else {
             None
         };
@@ -886,6 +964,37 @@ mod tests {
     const DOOR_W_HALF: f32 = 0.5;
 
     #[test]
+    fn new_structures_appear_and_keep_the_way_open() {
+        let (mut halls, mut streams) = (0, 0);
+        for seed in 0..120u64 {
+            let plan = generate(seed);
+            for r in &plan.rooms {
+                let ps = pillars(r);
+                if r.feature == Some(Feature::PillarHall) {
+                    halls += 1;
+                    assert!(!ps.is_empty(), "seed {seed} room {}: a pillar hall with no pillars", r.index);
+                }
+                let route = r.route();
+                for p in &ps {
+                    for w in route.windows(2) {
+                        assert!(dist_to_segment(*p, w[0], w[1]) >= 1.2, "seed {seed} room {}: pillar on the way", r.index);
+                    }
+                    assert!(p.x - PILLAR_R > r.min.x && p.x + PILLAR_R < r.max.x && p.y - PILLAR_R > r.min.y && p.y + PILLAR_R < r.max.y);
+                }
+                if let Some((z, x)) = stream_bridge(r) {
+                    streams += 1;
+                    assert!(z - STREAM_HALF > r.min.y + 2.0 && z + STREAM_HALF < r.max.y - 2.0, "seed {seed} room {}: stream too close to a door", r.index);
+                    assert!(x - BRIDGE_HALF > r.min.x && x + BRIDGE_HALF < r.max.x);
+                    // The route crosses on the bridge.
+                    assert!(route.iter().any(|p| (p.x - x).abs() < 0.01 && p.y > z + STREAM_HALF));
+                    assert!(route.iter().any(|p| (p.x - x).abs() < 0.01 && p.y < z - STREAM_HALF));
+                }
+            }
+        }
+        assert!(halls > 20 && streams > 20, "pillar halls {halls}, streams {streams}");
+    }
+
+    #[test]
     fn door_margin_matches_the_formula() {
         assert!(DOOR_MARGIN + 1e-4 >= door_margin(), "margin {DOOR_MARGIN} < formula {}", door_margin());
         // The open leaf's overshoot stays inside the casing allowance.
@@ -1090,7 +1199,7 @@ mod tests {
                         lofts += 1;
                         assert_eq!(r.kind, RoomKind::KeyPuzzle);
                     }
-                    Some(Feature::Zigzag | Feature::ReadingHall) | None => {}
+                    Some(Feature::Zigzag | Feature::ReadingHall | Feature::PillarHall | Feature::Stream { .. }) | None => {}
                 }
                 if i == 0 {
                     assert_eq!(r.entry_height, 0.0);
@@ -1229,7 +1338,8 @@ mod tests {
                 }
                 let route = r.route();
                 let raised = usize::from(matches!(r.feature, Some(Feature::RaisedExit { .. })));
-                assert_eq!(route.len(), 2 + 2 * ds.len() + raised);
+                let bridge: usize = if stream_bridge(&r).is_some() { 2 } else { 0 };
+                assert_eq!(route.len(), 2 + 2 * ds.len() + raised + bridge);
             }
         }
         assert!(zig > 10, "zigzag rooms should turn up: {zig}");

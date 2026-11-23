@@ -129,7 +129,8 @@ fn detect(
     // Past a Listener's garden and still alive.
     if let Some(f) = floor.as_ref() {
         let prev = run.current_room.saturating_sub(1);
-        if run.vitality > 0.0 && f.0.room(prev).is_some_and(|r| r.encounter == Some(Encounter::Listener)) {
+        let met = rt.as_ref().is_some_and(|rt| rt.encounters_done.contains(&prev));
+        if run.vitality > 0.0 && met && f.0.room(prev).is_some_and(|r| r.encounter == Some(Encounter::Listener)) {
             out.write(Unlock("tiptoe"));
         }
         // Chases survived this run (reset when a new floor starts).

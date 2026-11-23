@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use super::plan::{door_zones, passage_zones, zones_overlap, Zone, steps_for, Area, Feature, LightState, RoomKind, RoomPlan, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
+use super::plan::{door_zones, passage_zones, pillars, stream_bridge, zones_overlap, BRIDGE_HALF, PILLAR_R, STREAM_HALF, Zone, steps_for, Area, Feature, LightState, RoomKind, RoomPlan, LANDING_DEPTH, LOFT_HEIGHT, STEP_RUN, WALL_T};
 use super::{FloorRuntime, RoomMember};
 use crate::interaction::{AnimatedPart, Door, Drawer, HidingSpot, InteractKind, Interactable, PartMotion};
 use crate::physics::{Aabb, Collider, Ground};
@@ -415,6 +415,33 @@ pub fn spawn_room(
     }
 
     // ---- Furniture ----
+    // ---- Pillar halls and garden streams ----
+    let pillar_mat = match r.area {
+        Area::Atrium => b.mats.marble.clone(),
+        Area::QuarryLift => b.mats.door_wood.clone(),
+        Area::Archive => b.mats.panel_wood.clone(),
+        _ => b.mats.trim_wood.clone(),
+    };
+    for p in pillars(r) {
+        let e = b
+            .commands
+            .spawn((
+                Mesh3d(props.unit_cyl.clone()),
+                MeshMaterial3d(pillar_mat.clone()),
+                Transform::from_xyz(p.x, h / 2.0, p.y).with_scale(Vec3::new(PILLAR_R * 2.0, h, PILLAR_R * 2.0)),
+                Collider(Aabb { min: Vec3::new(p.x - PILLAR_R, 0.0, p.y - PILLAR_R), max: Vec3::new(p.x + PILLAR_R, h, p.y + PILLAR_R) }),
+            ))
+            .id();
+        b.tag(e);
+        let base = PILLAR_R + 0.1;
+        b.block(Vec3::new(p.x - base, 0.0, p.y - base), Vec3::new(p.x + base, 0.22, p.y + base), &pillar_mat, 1.0, false);
+        b.block(Vec3::new(p.x - base, h - 0.25, p.y - base), Vec3::new(p.x + base, h, p.y + base), &pillar_mat, 1.0, false);
+        blocked.push((Vec2::new(p.x - base - 0.2, p.y - base - 0.2), Vec2::new(p.x + base + 0.2, p.y + base + 0.2)));
+    }
+    if let Some((z, bx)) = stream_bridge(r) {
+        garden_stream(b, props, r, z, bx);
+        blocked.push((Vec2::new(r.min.x, z - STREAM_HALF - 0.5), Vec2::new(r.max.x, z + STREAM_HALF + 0.5)));
+    }
     // Doors must swing and be reached freely, and the openings in dividers stay clear.
     blocked.extend(door_zones(r));
     blocked.extend(passage_zones(r));
@@ -1387,14 +1414,49 @@ fn tunnel_architecture(b: &mut Builder, props: &PropMaterials, r: &RoomPlan) {
     let _ = PI;
 }
 
+/// A stream across a garden: dark water between stone banks too high to step
+/// over, crossed by a railed wooden footbridge on the path.
+fn garden_stream(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, z: f32, bx: f32) {
+    let stone = props.stone.clone();
+    let wood = b.mats.door_wood.clone();
+    let rail = b.mats.trim_wood.clone();
+    let (z0, z1) = (z - STREAM_HALF, z + STREAM_HALF);
+    // Water, a touch below the grass, and the stream bed.
+    b.block(Vec3::new(r.min.x, -0.06, z0), Vec3::new(r.max.x, 0.012, z1), &props.water, 1.0, false);
+    // Banks on both sides, open only where the bridge lands.
+    for zb in [z0 - 0.1, z1 + 0.1] {
+        for (x0, x1) in [(r.min.x, bx - BRIDGE_HALF - 0.05), (bx + BRIDGE_HALF + 0.05, r.max.x)] {
+            if x1 - x0 > 0.05 {
+                b.block(Vec3::new(x0, 0.0, zb - 0.1), Vec3::new(x1, 0.62, zb + 0.1), &stone, 1.0, true);
+            }
+        }
+    }
+    // The footbridge: a deck with posts and handrails along both sides.
+    b.block(Vec3::new(bx - BRIDGE_HALF, 0.0, z0 - 0.25), Vec3::new(bx + BRIDGE_HALF, 0.06, z1 + 0.25), &wood, 1.0, false);
+    for x in [bx - BRIDGE_HALF, bx + BRIDGE_HALF] {
+        b.block(Vec3::new(x - 0.04, 0.0, z0 - 0.2), Vec3::new(x + 0.04, 1.0, z1 + 0.2), &rail, 1.0, true);
+        for zp in [z0 - 0.2, z, z1 + 0.2] {
+            b.block(Vec3::new(x - 0.06, 0.0, zp - 0.06), Vec3::new(x + 0.06, 1.05, zp + 0.06), &wood, 1.0, false);
+        }
+        b.block(Vec3::new(x - 0.05, 0.98, z0 - 0.25), Vec3::new(x + 0.05, 1.06, z1 + 0.25), &wood, 1.0, false);
+    }
+}
+
 /// Marble columns along both sides.
 /// Floor areas taken by stairs, landings and lofts (x/z rectangles, with a
 /// little clearance), so decorative columns never block them.
 pub fn stair_zones(r: &RoomPlan) -> Vec<(Vec2, Vec2)> {
     let run = |h: f32| h / super::plan::STEP_RISE * STEP_RUN;
-    // Door swings, the space in front of doors and divider openings count too.
+    // Door swings, the space in front of doors, divider openings, pillars and
+    // streams count too.
     let mut z = door_zones(r);
     z.extend(passage_zones(r));
+    for p in pillars(r) {
+        z.push((p - Vec2::splat(PILLAR_R + 0.5), p + Vec2::splat(PILLAR_R + 0.5)));
+    }
+    if let Some((sz, _)) = stream_bridge(r) {
+        z.push((Vec2::new(r.min.x, sz - STREAM_HALF - 0.6), Vec2::new(r.max.x, sz + STREAM_HALF + 0.6)));
+    }
     if let Some(Feature::RaisedExit { height }) = r.feature {
         z.push((Vec2::new(r.exit_x - 1.3, r.min.y), Vec2::new(r.exit_x + 1.3, r.min.y + LANDING_DEPTH + run(height) + 0.8)));
     }
