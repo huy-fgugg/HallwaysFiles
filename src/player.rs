@@ -109,6 +109,7 @@ fn movement(
     player_q: Single<(&mut Player, &mut Transform)>,
     mut sfx: MessageWriter<PlaySfx>,
     boost: Res<crate::items::SpeedBoost>,
+    grabbed: Res<crate::hazards::Grabbed>,
 ) {
     let (mut player, mut transform) = player_q.into_inner();
     let dt = time.delta_secs();
@@ -151,6 +152,8 @@ fn movement(
         WALK_SPEED
     };
     let speed = if boost.0 > 0.0 { speed * 1.35 } else { speed };
+    // Grabbed by the chase's wall hands: slowed for a moment.
+    let speed = if grabbed.0 > 0.0 { speed * 0.5 } else { speed };
     let vel = planar_velocity(input, player.yaw, speed);
 
     let boxes: Vec<_> = colliders.iter().map(|c| c.0).collect();

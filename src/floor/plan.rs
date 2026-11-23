@@ -53,6 +53,12 @@ pub fn zones_overlap(a: &Zone, b: &Zone) -> bool {
     a.0.x < b.1.x && a.1.x > b.0.x && a.0.y < b.1.y && a.1.y > b.0.y
 }
 
+/// The way through each divider (barricade, shelf row or zigzag wall): its
+/// opening plus 1.6 m either side, which nothing may stand in.
+pub fn passage_zones(r: &RoomPlan) -> Vec<Zone> {
+    r.dividers().iter().map(|d| (Vec2::new(d.gap.0 - 0.3, d.z - 1.6), Vec2::new(d.gap.1 + 0.3, d.z + 1.6))).collect()
+}
+
 /// Floor areas around this room's doors that furniture, columns, posts and
 /// hazards must never touch:
 ///
