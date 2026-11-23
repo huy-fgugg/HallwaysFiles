@@ -503,6 +503,44 @@ fn spawn_test_level(
     }
     b.block(Vec3::new(-1.2, 2.42, 4.965), Vec3::new(1.2, 2.45, 5.0), &mats.brass, 1.0, false);
     b.block(Vec3::new(-1.0, -0.1, 5.0), Vec3::new(1.0, 0.01, 5.2), &mats.brass, 1.0, false);
+    // ---- The boarding hall behind the lift: everyone gathers here and steps
+    // into the car through its rear gate before the descent. ----------------
+    let hall = RoomStyle { wall: mats.wallpaper.clone(), wall_tile: 1.6, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: true, sky: false };
+    b.room(
+        elevator::HALL_MIN,
+        elevator::HALL_MAX,
+        3.0,
+        &hall,
+        &[Opening { side: Side::North, center: 0.0, width: 2.0, height: 2.25, bottom: 0.0 }],
+        &[],
+    );
+    let (hz0, hz1) = (elevator::HALL_MIN.y, elevator::HALL_MAX.y);
+    // Brass surround on the hall side of the rear gate, and a "going down" arrow.
+    for (min, max) in [
+        (Vec3::new(-1.12, 0.0, hz0), Vec3::new(-1.0, 2.37, hz0 + 0.03)),
+        (Vec3::new(1.0, 0.0, hz0), Vec3::new(1.12, 2.37, hz0 + 0.03)),
+        (Vec3::new(-1.18, 2.25, hz0), Vec3::new(1.18, 2.42, hz0 + 0.04)),
+    ] {
+        b.block(min, max, &mats.trim_wood, 0.8, false);
+    }
+    b.block(Vec3::new(-0.05, 2.55, hz0), Vec3::new(0.05, 2.8, hz0 + 0.03), &mats.brass, 1.0, false);
+    b.block(Vec3::new(-0.16, 2.5, hz0), Vec3::new(0.16, 2.56, hz0 + 0.03), &mats.brass, 1.0, false);
+    // Benches along both walls, and lamps.
+    for x in [elevator::HALL_MIN.x + 0.35, elevator::HALL_MAX.x - 0.35] {
+        for z in [hz0 + 2.2, hz0 + 5.2] {
+            b.block(Vec3::new(x - 0.25, 0.42, z - 0.9), Vec3::new(x + 0.25, 0.48, z + 0.9), &mats.trim_wood, 1.0, true);
+            for dz in [-0.8f32, 0.8] {
+                b.block(Vec3::new(x - 0.2, 0.0, z + dz - 0.04), Vec3::new(x + 0.2, 0.42, z + dz + 0.04), &mats.trim_wood, 1.0, false);
+            }
+        }
+    }
+    for z in [hz0 + 2.0, hz1 - 2.0] {
+        let e = b
+            .commands
+            .spawn((PointLight { color: Color::srgb(1.0, 0.78, 0.5), intensity: 90_000.0, range: 9.0, shadow_maps_enabled: false, ..default() }, Flicker { base: 90_000.0, seed: z, depth: 0.04 }, Transform::from_xyz(0.0, 2.7, z)))
+            .id();
+        b.tag(e);
+    }
     // ---- Room 001: a narrow, neglected corridor ---------------------------
     let corridor = RoomStyle { wall: mats.peeling_wall.clone(), wall_tile: 2.0, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: false, sky: false };
     let c_min = Vec2::new(-1.4, -14.0);

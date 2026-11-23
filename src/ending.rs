@@ -160,8 +160,8 @@ fn run_cues(
                 let mut ids: Vec<u8> = vec![if session.online() { session.my_id } else { 0 }];
                 ids.extend(peers.0.keys().copied());
                 ids.sort();
-                let n = ids.len().min(4);
-                for (i, id) in ids.into_iter().take(4).enumerate() {
+                let n = ids.len().min(5);
+                for (i, id) in ids.into_iter().take(5).enumerate() {
                     let lane = (i as f32 - (n as f32 - 1.0) / 2.0) * 0.6;
                     let from = anchor.0 + Vec3::new(lane, 0.0, 1.6 + i as f32 * 0.5);
                     let to = anchor.0 + CAR + Vec3::new(lane, 0.0, -0.3 + (i % 2) as f32 * 0.25);

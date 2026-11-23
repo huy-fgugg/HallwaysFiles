@@ -146,7 +146,7 @@ fn spawn_play(mut commands: Commands, theme: Res<UiTheme>, profile: Res<Profile>
                     // First visit (default name): the name box gets the cursor instead.
                     spawn_button(p, &t, "Solo Run", MenuAction::PlaySolo, 2, profile.name != "Player");
                     spawn_button(p, &t, "Custom Floors", MenuAction::OpenCustom, 3, false);
-                    p.spawn((Text::new("ONLINE (UP TO 4 PLAYERS)"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
+                    p.spawn((Text::new("ONLINE (UP TO 5 PLAYERS)"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
                     spawn_button(p, &t, "Host Room", MenuAction::HostRoom, 4, false);
                     field_row(p, &t, FieldKind::Code, "", 5);
                     spawn_button(p, &t, "Join Room", MenuAction::JoinRoom, 6, false);

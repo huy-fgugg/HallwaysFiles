@@ -257,7 +257,7 @@ fn record(
             }
             match shot {
                 Shot::Cutscene { id, .. } if id == INTRO => {
-                    tf.translation = crate::world::elevator::PLAYER_START;
+                    tf.translation = crate::world::elevator::CAR_START;
                     p.yaw = 0.0;
                     play.write(PlayCutscene(INTRO.into()));
                 }

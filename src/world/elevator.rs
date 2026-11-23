@@ -14,10 +14,22 @@ use crate::state::AppState;
 
 /// Car interior bounds (world space).
 pub const CAR_MIN: Vec3 = Vec3::new(-1.0, 0.0, 5.2);
-pub const CAR_MAX: Vec3 = Vec3::new(1.0, 2.5, 7.4);
+pub const CAR_MAX: Vec3 = Vec3::new(1.0, 2.5, 8.2);
 pub const GATE_Z: f32 = 5.32;
-/// Where the player stands at the start of a run.
-pub const PLAYER_START: Vec3 = Vec3::new(0.0, 0.0, 6.55);
+/// The rear gate, between the car and the boarding hall behind it.
+pub const REAR_GATE_Z: f32 = CAR_MAX.z - 0.12;
+/// Where a run starts when there's no boarding (retry, solo custom floor).
+pub const CAR_START: Vec3 = Vec3::new(0.0, 0.0, 6.9);
+/// The boarding hall behind the lift (x, z bounds).
+pub const HALL_MIN: Vec2 = Vec2::new(-3.6, CAR_MAX.z + 0.08);
+pub const HALL_MAX: Vec2 = Vec2::new(3.6, CAR_MAX.z + 8.5);
+/// Where the player stands at the start of a run: in the boarding hall.
+pub const PLAYER_START: Vec3 = Vec3::new(0.0, 0.0, CAR_MAX.z + 5.0);
+
+/// True when a point (feet) is inside the lift car, past both gates.
+pub fn in_car(p: Vec3) -> bool {
+    p.x > CAR_MIN.x + 0.1 && p.x < CAR_MAX.x - 0.1 && p.z > GATE_Z + 0.15 && p.z < REAR_GATE_Z - 0.15 && p.y < 1.0
+}
 const GATE_BARS: usize = 11;
 
 #[derive(Message, Debug, Clone, Deserialize)]
@@ -26,6 +38,8 @@ pub enum ElevatorCommand {
     Needle { to: f32, seconds: f32 },
     /// Open the gate over `seconds` (0 = instantly).
     OpenGate { seconds: f32 },
+    /// Close the rear (boarding) gate over `seconds` (0 = instantly).
+    CloseRear { seconds: f32 },
 }
 
 impl ElevatorCommand {
@@ -33,6 +47,7 @@ impl ElevatorCommand {
         match self {
             ElevatorCommand::Needle { to, .. } => ElevatorCommand::Needle { to: *to, seconds: 0.0 },
             ElevatorCommand::OpenGate { .. } => ElevatorCommand::OpenGate { seconds: 0.0 },
+            ElevatorCommand::CloseRear { .. } => ElevatorCommand::CloseRear { seconds: 0.0 },
         }
     }
 }
@@ -47,13 +62,21 @@ pub struct ElevatorState {
     needle_t: f32,
     needle_secs: f32,
     gate_blocker: Option<Entity>,
+    /// Rear gate: 1 = open (boarding), 0 = closed.
+    pub rear: f32,
+    rear_rate: f32,
 }
 
 #[derive(Component)]
 struct GateBar {
     closed_x: f32,
     open_x: f32,
+    rear: bool,
 }
+
+/// Collider for the rear gate, added when it closes.
+#[derive(Component)]
+struct RearBlocker;
 
 #[derive(Component)]
 struct Needle;
@@ -68,7 +91,13 @@ impl Plugin for ElevatorPlugin {
     }
 }
 
-fn handle_commands(mut commands: Commands, mut reader: MessageReader<ElevatorCommand>, mut state: ResMut<ElevatorState>, mut sfx: MessageWriter<PlaySfx>) {
+fn handle_commands(
+    mut commands: Commands,
+    mut reader: MessageReader<ElevatorCommand>,
+    mut state: ResMut<ElevatorState>,
+    mut sfx: MessageWriter<PlaySfx>,
+    rear: Query<Entity, With<RearBlocker>>,
+) {
     for cmd in reader.read() {
         match cmd {
             ElevatorCommand::Needle { to, seconds } => {
@@ -92,6 +121,18 @@ fn handle_commands(mut commands: Commands, mut reader: MessageReader<ElevatorCom
                     commands.entity(b).remove::<Collider>();
                 }
             }
+            ElevatorCommand::CloseRear { seconds } => {
+                if *seconds <= 0.0 {
+                    state.rear = 0.0;
+                    state.rear_rate = 0.0;
+                } else {
+                    state.rear_rate = -1.0 / seconds;
+                    sfx.write(PlaySfx(Sfx::GateRattle));
+                }
+                for e in &rear {
+                    commands.entity(e).insert(Collider(Aabb { min: Vec3::new(CAR_MIN.x, 0.0, REAR_GATE_Z - 0.05), max: Vec3::new(CAR_MAX.x, 2.2, REAR_GATE_Z + 0.05) }));
+                }
+            }
         }
     }
 }
@@ -99,6 +140,7 @@ fn handle_commands(mut commands: Commands, mut reader: MessageReader<ElevatorCom
 fn animate(time: Res<Time>, mut state: ResMut<ElevatorState>, mut bars: Query<(&GateBar, &mut Transform), Without<Needle>>, mut needle: Query<&mut Transform, With<Needle>>) {
     let dt = time.delta_secs();
     state.gate = (state.gate + state.gate_rate * dt).min(1.0);
+    state.rear = (state.rear + state.rear_rate * dt).clamp(0.0, 1.0);
     if state.needle_secs > 0.0 && state.needle_t < state.needle_secs {
         state.needle_t = (state.needle_t + dt).min(state.needle_secs);
         let k = state.needle_t / state.needle_secs;
@@ -106,10 +148,11 @@ fn animate(time: Res<Time>, mut state: ResMut<ElevatorState>, mut bars: Query<(&
         state.needle = state.needle_from + (state.needle_to - state.needle_from) * k;
     }
     // Ease-out with a slight jitter, like an old mechanism catching.
-    let g = 1.0 - (1.0 - state.gate).powi(3);
-    let jitter = if state.gate > 0.0 && state.gate < 1.0 { (time.elapsed_secs() * 40.0).sin() * 0.004 } else { 0.0 };
+    let ease = |v: f32| 1.0 - (1.0 - v).powi(3);
+    let jitter = |v: f32| if v > 0.0 && v < 1.0 { (time.elapsed_secs() * 40.0).sin() * 0.004 } else { 0.0 };
     for (bar, mut tf) in &mut bars {
-        tf.translation.x = bar.closed_x + (bar.open_x - bar.closed_x) * g + jitter;
+        let v = if bar.rear { state.rear } else { state.gate };
+        tf.translation.x = bar.closed_x + (bar.open_x - bar.closed_x) * ease(v) + jitter(v);
     }
     for mut tf in &mut needle {
         // Needle sweeps from right (+70°) to left (-70°) as the car descends.
@@ -135,13 +178,14 @@ pub fn spawn_elevator(commands: &mut Commands, meshes: &mut Assets<Mesh>, std_ma
     // Shell: floor, ceiling, back and side walls.
     solid(commands, meshes, Vec3::new(x0 - t, -0.1, z0), Vec3::new(x1 + t, 0.0, z1 + t), &mats.door_wood, 0.9, false);
     solid(commands, meshes, Vec3::new(x0 - t, h, z0), Vec3::new(x1 + t, h + 0.1, z1 + t), &mats.panel_wood, 1.0, false);
-    solid(commands, meshes, Vec3::new(x0 - t, 0.0, z1), Vec3::new(x1 + t, h, z1 + t), &mats.panel_wood, 0.9, true);
+    // The back is open: a rear gate to the boarding hall, with a header above it.
+    solid(commands, meshes, Vec3::new(x0 - t, 2.25, z1), Vec3::new(x1 + t, h, z1 + t), &mats.panel_wood, 0.9, false);
     solid(commands, meshes, Vec3::new(x0 - t, 0.0, z0), Vec3::new(x0, h, z1), &mats.panel_wood, 0.9, true);
     solid(commands, meshes, Vec3::new(x1, 0.0, z0), Vec3::new(x1 + t, h, z1), &mats.panel_wood, 0.9, true);
 
     // Raised panels with brass beading on the three inner walls.
     let bead = 0.012;
-    for (axis_x, fixed, dir) in [(true, z1, -1.0f32), (false, x0, 1.0), (false, x1, -1.0)] {
+    for (axis_x, fixed, dir) in [(false, x0, 1.0f32), (false, x1, -1.0)] {
         let (a0, a1) = if axis_x { (x0, x1) } else { (z0 + 0.15, z1) };
         let n = 2;
         let w = (a1 - a0) / n as f32;
@@ -167,11 +211,10 @@ pub fn spawn_elevator(commands: &mut Commands, meshes: &mut Assets<Mesh>, std_ma
             }
         }
     }
-    // Handrail on the back wall with brackets.
-    let rail = meshes.add(Cylinder::new(0.022, x1 - x0 - 0.2));
-    commands.spawn((Mesh3d(rail), MeshMaterial3d(mats.brass.clone()), Transform::from_xyz(0.0, 0.95, z1 - 0.09).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)), scope.clone()));
-    for x in [-0.7f32, 0.0, 0.7] {
-        solid(commands, meshes, Vec3::new(x - 0.012, 0.93, z1 - 0.09), Vec3::new(x + 0.012, 0.97, z1), &mats.brass, 1.0, false);
+    // Handrails along both side walls.
+    let rail = meshes.add(Cylinder::new(0.022, z1 - z0 - 0.6));
+    for x in [x0 + 0.09, x1 - 0.09] {
+        commands.spawn((Mesh3d(rail.clone()), MeshMaterial3d(mats.brass.clone()), Transform::from_xyz(x, 0.95, (z0 + z1) / 2.0 + 0.15).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), scope.clone()));
     }
     // Button panel on the right wall: brass plate, round buttons, one lit.
     solid(commands, meshes, Vec3::new(x1 - 0.015, 1.0, z0 + 0.35), Vec3::new(x1, 1.6, z0 + 0.6), &mats.brass, 1.0, false);
@@ -224,12 +267,14 @@ pub fn spawn_elevator(commands: &mut Commands, meshes: &mut Assets<Mesh>, std_ma
         scope.clone(),
     ));
 
-    // Folding lattice gate: top and bottom tracks plus bars that bunch to the sides.
-    solid(commands, meshes, Vec3::new(x0, 2.18, GATE_Z - 0.03), Vec3::new(x1, 2.25, GATE_Z + 0.03), &dark_metal, 1.0, false);
-    solid(commands, meshes, Vec3::new(x0, 0.0, GATE_Z - 0.03), Vec3::new(x1, 0.02, GATE_Z + 0.03), &dark_metal, 1.0, false);
+    // Folding lattice gates (front to the floor, rear to the boarding hall):
+    // top and bottom tracks plus bars that bunch to the sides.
     let bar_mesh = meshes.add(Cuboid::new(0.018, 2.16, 0.018));
     let strap = meshes.add(Cuboid::new(0.09, 0.012, 0.008));
     let span = x1 - x0 - 0.08;
+    for (rear, gz) in [(false, GATE_Z), (true, REAR_GATE_Z)] {
+    solid(commands, meshes, Vec3::new(x0, 2.18, gz - 0.03), Vec3::new(x1, 2.25, gz + 0.03), &dark_metal, 1.0, false);
+    solid(commands, meshes, Vec3::new(x0, 0.0, gz - 0.03), Vec3::new(x1, 0.02, gz + 0.03), &dark_metal, 1.0, false);
     for i in 0..GATE_BARS {
         let f = i as f32 / (GATE_BARS - 1) as f32;
         let closed_x = x0 + 0.04 + span * f;
@@ -239,8 +284,8 @@ pub fn spawn_elevator(commands: &mut Commands, meshes: &mut Assets<Mesh>, std_ma
             .spawn((
                 Mesh3d(bar_mesh.clone()),
                 MeshMaterial3d(mats.brass.clone()),
-                Transform::from_xyz(closed_x, 1.09, GATE_Z),
-                GateBar { closed_x, open_x },
+                Transform::from_xyz(if rear { open_x } else { closed_x }, 1.09, gz),
+                GateBar { closed_x, open_x, rear },
                 scope.clone(),
             ))
             .with_children(|c| {
@@ -252,12 +297,15 @@ pub fn spawn_elevator(commands: &mut Commands, meshes: &mut Assets<Mesh>, std_ma
                 }
             });
     }
+    }
+    // The rear gate starts open; its collider is added when it closes.
+    commands.spawn((Transform::default(), RearBlocker, scope.clone()));
     // Collider for the closed gate; removed when it opens.
     commands.spawn((Transform::default(), Collider(Aabb { min: Vec3::new(x0, 0.0, GATE_Z - 0.05), max: Vec3::new(x1, 2.2, GATE_Z + 0.05) }), scope)).id()
 }
 
 pub fn reset_state(blocker: Entity) -> ElevatorState {
-    ElevatorState { gate_blocker: Some(blocker), ..default() }
+    ElevatorState { gate_blocker: Some(blocker), rear: 1.0, ..default() }
 }
 
 #[cfg(test)]
@@ -271,9 +319,14 @@ mod tests {
     }
 
     #[test]
-    fn player_starts_inside_the_car() {
-        let car = Aabb { min: CAR_MIN, max: CAR_MAX };
-        assert!(car.contains(PLAYER_START + Vec3::Y));
-        assert!(PLAYER_START.z > GATE_Z + 0.3);
+    fn players_board_from_the_hall() {
+        // A run starts in the boarding hall, outside the car; a retry starts inside it.
+        assert!(!in_car(PLAYER_START));
+        assert!(PLAYER_START.z > HALL_MIN.y && PLAYER_START.z < HALL_MAX.y);
+        assert!(in_car(CAR_START));
+        // Five players fit (about 0.5 m² each).
+        let floor = (CAR_MAX.x - CAR_MIN.x) * (REAR_GATE_Z - GATE_Z);
+        assert!(floor / 5.0 >= 0.5, "{floor}");
+        let _ = Aabb { min: CAR_MIN, max: CAR_MAX };
     }
 }

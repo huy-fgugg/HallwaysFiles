@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump when messages change incompatibly; the server rejects mismatches.
 pub const PROTOCOL_VERSION: u32 = 1;
-pub const MAX_PLAYERS: u8 = 4;
+pub const MAX_PLAYERS: u8 = 5;
 pub const CODE_LEN: usize = 5;
 /// No 0/O or 1/I so codes are easy to read out loud.
 pub const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

@@ -105,7 +105,7 @@ impl Rooms {
             return Err("That group has already left the lift.".into());
         }
         if room.players.len() >= MAX_PLAYERS as usize {
-            return Err("That room is full (4 players).".into());
+            return Err(format!("That room is full ({MAX_PLAYERS} players)."));
         }
         let id = room.next_id;
         room.next_id = room.next_id.wrapping_add(1).max(1);
