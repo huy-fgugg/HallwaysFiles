@@ -161,6 +161,11 @@ pub struct PlayerModel {
 }
 
 impl PlayerModel {
+    /// A hero's right or left arm model (first-person view).
+    pub fn arm(&self, skin: Skin, right: bool) -> Handle<WorldAsset> {
+        self.parts[skin.hero_index()][if right { 2 } else { 3 }].clone()
+    }
+
     fn load(assets: &AssetServer, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> Self {
         let scene = |name: &str| assets.load(GltfAssetLabel::Scene(0).from_asset(format!("models/chibi/{name}.glb")));
         Self {

@@ -49,6 +49,8 @@ pub struct FloorRuntime {
     /// Item tuning (copied in at run start) used when building drawers.
     pub items: crate::data::ItemConfig,
     pub encounters_done: HashSet<u32>,
+    /// Players in the run (rooms that need hiding get a spot for every two).
+    pub players: u8,
 }
 
 impl Default for FloorRuntime {
@@ -64,6 +66,7 @@ impl Default for FloorRuntime {
             items: crate::data::ItemConfig::default(),
             encounters_done: HashSet::new(),
             light_scale: 1.0,
+            players: 1,
         }
     }
 }
@@ -104,6 +107,7 @@ fn setup_floor(
     mut std_mats: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
+    peers: Res<crate::net::Peers>,
 ) {
     use crate::profile::Modifier;
     let mut cfg = cfg.clone();
@@ -124,7 +128,8 @@ fn setup_floor(
     commands.insert_resource(Floor(plan::generate_custom(seed.0, &cfg, &opts)));
     let custom_light = preset.0.as_ref().map_or(1.0, |p| p.light_scale());
     let light_scale = custom_light * if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
-    commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, ..default() });
+    let players = (peers.0.len() + 1).min(crate::net::proto::MAX_PLAYERS as usize) as u8;
+    commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, players, ..default() });
     commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes, &mut images));
 }
 

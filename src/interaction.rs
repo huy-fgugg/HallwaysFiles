@@ -120,6 +120,22 @@ pub struct HideState {
     pub spot: Option<Entity>,
     pub cooldown: f32,
     warned: bool,
+    /// Which place inside the spot (0 = middle, 1 = beside a teammate).
+    pub place: usize,
+}
+
+/// How many players fit in one wardrobe or locker.
+pub const SPOT_CAPACITY: usize = 2;
+
+/// Teammates already hiding in the spot whose inside point is `inside`.
+pub fn spot_occupants(inside: Vec3, peers: impl Iterator<Item = (Vec3, bool)>) -> usize {
+    peers.filter(|(p, hiding)| *hiding && p.distance(inside) < 0.7).count()
+}
+
+/// Where a player stands inside a spot: the middle, or shuffled to one side
+/// when a teammate is already in there.
+pub fn place_inside(inside: Vec3, yaw: f32, place: usize) -> Vec3 {
+    inside + Quat::from_rotation_y(yaw) * Vec3::X * (0.26 * place as f32)
 }
 
 impl HideState {
@@ -265,7 +281,7 @@ fn interact(
     mut runtime: Option<ResMut<crate::floor::FloorRuntime>>,
     mimics: Query<&crate::floor::build::MimicOf>,
     (mut shake, mut death, mut next_overlay): (ResMut<CameraShake>, ResMut<crate::hollow::DeathCause>, ResMut<NextState<crate::state::Overlay>>),
-    (mut inv, item_cfg, mut arms): (ResMut<crate::items::Inventory>, Res<crate::data::ItemConfig>, MessageWriter<crate::viewmodel::ArmAnim>),
+    (mut inv, item_cfg, mut arms, peers): (ResMut<crate::items::Inventory>, Res<crate::data::ItemConfig>, MessageWriter<crate::viewmodel::ArmAnim>, Res<crate::net::Peers>),
 ) {
     if !interact_pressed(&keys, &pads) {
         return;
@@ -404,9 +420,16 @@ fn interact(
             }
         }
         InteractKind::HidingSpot => {
-            if hide.cooldown > 0.0 || spots.get(e).is_err() {
+            let Ok(spot) = spots.get(e) else { return };
+            if hide.cooldown > 0.0 {
                 return;
             }
+            let inside = spot_occupants(spot.inside, peers.0.values().map(|p| (Vec3::from_array(p.p), p.hiding)));
+            if inside >= SPOT_CAPACITY {
+                subs.write(Subtitle::info("[No room - two of you are already in there]"));
+                return;
+            }
+            hide.place = inside;
             hide.phase = HidePhase::Entering(0.0);
             hide.spot = Some(e);
             hide.warned = false;
@@ -445,7 +468,7 @@ fn update_hiding(
             let t = t + dt;
             spot.doors_target = 1.0;
             if t >= HIDE_TRANSITION {
-                tf.translation = spot.inside;
+                tf.translation = place_inside(spot.inside, spot.inside_yaw, hide.place);
                 p.yaw = spot.inside_yaw;
                 p.pitch = 0.0;
                 p.eye = CROUCH_EYE + 0.25;
@@ -544,6 +567,11 @@ mod tests {
     #[test]
     fn hidden_fraction_reports_progress() {
         let h = HideState { phase: HidePhase::Hidden(HIDE_LIMIT / 2.0), ..default() };
+        // Two fit in a spot; the second stands beside the first.
+        let inside = Vec3::new(1.0, 0.0, 2.0);
+        assert_eq!(spot_occupants(inside, [(inside, true), (inside + Vec3::X * 0.26, true), (inside, false), (Vec3::ZERO, true)].into_iter()), 2);
+        assert!(place_inside(inside, 0.3, 1).distance(inside) > 0.2);
+        assert_eq!(place_inside(inside, 0.3, 0), inside);
         assert!((h.hidden_fraction().unwrap() - 0.5).abs() < 1e-6);
         assert!(HideState::default().hidden_fraction().is_none());
     }

@@ -105,7 +105,7 @@ impl Plugin for ViewModelPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ArmAnim>()
             .init_resource::<PlayerGesture>()
-            .add_systems(Update, (spawn_arms, (trigger_gestures, animate_arms, pose_hands, tag_view_layers, fill_light).chain().after(crate::player::CameraSet)));
+            .add_systems(Update, (spawn_arms, sync_view_arms.after(spawn_arms), (trigger_gestures, animate_arms, pose_hands, tag_view_layers, fill_light).chain().after(crate::player::CameraSet)));
     }
 }
 
@@ -311,20 +311,53 @@ fn spawn_arms(
             commands
                 .spawn((ViewArm { right, base }, Transform::from_translation(base), Visibility::default(), ChildOf(root)))
                 .with_children(|arm| {
-                    // Forearm sleeve reaching back past the screen edge, cuff, then the hand.
-                    let along = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
-                    arm.spawn((Mesh3d(kit.capsule.clone()), MeshMaterial3d(kit.sleeve.clone()), Transform::from_xyz(0.0, -0.012, 0.22).with_rotation(along).with_scale(Vec3::new(0.075, 0.17, 0.075)), NotShadowCaster));
-                    arm.spawn((Mesh3d(kit.cyl.clone()), MeshMaterial3d(kit.cuff.clone()), Transform::from_xyz(0.0, -0.008, 0.06).with_rotation(along).with_scale(Vec3::new(0.08, 0.035, 0.08)), NotShadowCaster));
-                    // Wrist.
-                    arm.spawn((Mesh3d(kit.capsule.clone()), MeshMaterial3d(kit.skin.clone()), Transform::from_xyz(0.0, -0.004, 0.03).with_rotation(along).with_scale(Vec3::new(0.05, 0.03, 0.045)), NotShadowCaster));
+                    // The arm itself is your character's voxel arm (see `sync_view_arms`);
+                    // the hand node carries the held items.
                     arm.spawn((HandNode { right }, Transform::from_xyz(0.0, 0.0, -0.02), Visibility::default())).with_children(|hand| {
-                        build_hand(hand, &kit, right, 1.0);
                         for kind in ItemKind::ALL {
                             hand.spawn((HeldItem { kind, right }, grip_transform(right, 1.0, false), Visibility::Hidden)).with_children(|it| build_item(it, &kit, kind, 1.0));
                         }
                     });
                 });
         }
+    }
+}
+
+/// Your character's voxel arm in first person.
+#[derive(Component)]
+struct VoxelArm;
+
+/// Gives the first-person arms your character's voxel arms, and swaps them
+/// when you change your look.
+fn sync_view_arms(
+    mut commands: Commands,
+    profile: Res<crate::profile::Profile>,
+    model: Option<Res<crate::body::PlayerModel>>,
+    arms: Query<(Entity, &ViewArm)>,
+    old: Query<Entity, With<VoxelArm>>,
+    mut last: Local<Option<(crate::body::Skin, usize)>>,
+) {
+    let Some(model) = model else { return };
+    let n = arms.iter().count();
+    if n == 0 || *last == Some((profile.skin, n)) {
+        return;
+    }
+    *last = Some((profile.skin, n));
+    for e in &old {
+        commands.entity(e).try_despawn();
+    }
+    for (e, arm) in &arms {
+        // The arm model's origin is its hand end; it runs back toward you,
+        // stretched a little so it reaches past the bottom of the screen.
+        let rot = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_y(std::f32::consts::PI);
+        commands.entity(e).with_children(|a| {
+            a.spawn((
+                bevy::world_serialization::WorldAssetRoot(model.arm(profile.skin, arm.right)),
+                Transform::from_xyz(if arm.right { 0.01 } else { -0.01 }, 0.035, 0.0).with_rotation(rot).with_scale(Vec3::new(0.26, 0.62, 0.26)),
+                Visibility::default(),
+                VoxelArm,
+            ));
+        });
     }
 }
 

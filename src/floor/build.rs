@@ -464,7 +464,8 @@ pub fn spawn_room(
     let mut drawer_id: u8 = 0;
     let mut all_drawers: Vec<Entity> = vec![];
     if r.hiding {
-        let n = if r.kind == RoomKind::Hall || r.depth() > 10.0 { 2 } else { 1 };
+        // Two players fit in each spot: make sure the whole party can hide.
+        let n = hiding_spots_needed(r.kind == RoomKind::Hall || r.depth() > 10.0, rt.players);
         for _ in 0..n {
             if let Some(s) = slots.pop() {
                 if r.area == Area::Grounds {
@@ -552,6 +553,12 @@ pub fn spawn_room(
     b.member = None;
 }
 
+/// Hiding spots a room that needs them gets: 1 (2 in long rooms), and at
+/// least one for every two players.
+pub fn hiding_spots_needed(long: bool, players: u8) -> usize {
+    (if long { 2 } else { 1 }).max((players as usize).div_ceil(crate::interaction::SPOT_CAPACITY))
+}
+
 /// A room's south side is the previous room's north wall. Where this room is
 /// wider or taller than that wall, fill the gap so you never see out into the
 /// void when you look back.
@@ -627,6 +634,15 @@ pub struct OpenOnSpawn;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_player_can_hide() {
+        for players in 1..=4u8 {
+            for long in [false, true] {
+                assert!(super::hiding_spots_needed(long, players) * crate::interaction::SPOT_CAPACITY >= players as usize);
+            }
+        }
+    }
 
     #[test]
     fn furniture_never_stands_in_a_door_swing() {
