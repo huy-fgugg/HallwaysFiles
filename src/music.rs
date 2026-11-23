@@ -601,7 +601,7 @@ pub fn synth_hollow_cue() -> Vec<f32> {
     normalize(reverb(&buf, 0.35, 2.5), 0.9)
 }
 
-/// Ending cue (22 s): the lift's hum and a hopeful pad 0–9 s, a slow climb
+/// Ending cue (27 s): the lift's hum and a hopeful pad 0–9 s, a slow climb
 /// 9–12.5 s, dread 12.5–15.4 s, a crashing hit at 16.8 s, then silence.
 pub fn synth_ending_cue() -> Vec<f32> {
     let len = (27.0 * SR) as usize;
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn ending_and_victory_music() {
         let e = synth_ending_cue();
-        assert_eq!(e.len(), (22.0 * SR) as usize);
+        assert_eq!(e.len(), (27.0 * SR) as usize);
         let v = synth_victory_theme();
         assert_eq!(v.len(), (16.0 * SR) as usize);
         assert!(v.iter().all(|x| x.abs() <= 1.0));
