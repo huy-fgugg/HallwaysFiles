@@ -56,6 +56,9 @@ pub struct PeerState {
     pub hiding: bool,
     pub alive: bool,
     pub room: u32,
+    /// The player's look (older clients don't send one).
+    #[serde(default)]
+    pub skin: Option<crate::body::Skin>,
 }
 
 /// Gameplay messages carried inside `Relay` frames.

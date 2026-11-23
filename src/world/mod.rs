@@ -785,7 +785,9 @@ fn spawn_test_level(
                 crate::graphics::QualityCamera { bloom: 0.12 },
                 DistanceFog {
                     color: Color::srgb(0.02, 0.025, 0.035),
-                    falloff: FogFalloff::Exponential { density: 0.07 },
+                    // Light enough that the far walls of the big rooms stay visible
+                    // (dense fog the colour of the void looked like missing walls).
+                    falloff: FogFalloff::Exponential { density: 0.03 },
                     ..default()
                 },
             ));

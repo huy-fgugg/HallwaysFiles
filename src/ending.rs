@@ -13,7 +13,6 @@ use crate::cutscene::{ActiveCutscene, CutsceneEnded, EndAction, PlayCutscene, EN
 use crate::floor::{Floor, FloorRuntime};
 use crate::net::{NetSession, Peers};
 use crate::state::{AppState, Overlay};
-use crate::viewmodel::BodyKit;
 
 /// World position of the ending set (far side of the final door, floor level).
 #[derive(Resource, Debug, Default, Clone, Copy)]
@@ -91,7 +90,6 @@ struct Actor {
     riding: bool,
 }
 
-use crate::avatar::Limb;
 
 /// Lift car position relative to the anchor.
 const CAR: Vec3 = Vec3::new(0.0, 0.0, -4.4);
@@ -114,14 +112,6 @@ pub fn start_ending(anchor: &mut CutsceneAnchor, play: &mut MessageWriter<PlayCu
     play.write(PlayCutscene(ENDING.into()));
 }
 
-const SHIRTS: [Color; 6] = [
-    Color::srgb(0.14, 0.38, 0.58),
-    Color::srgb(0.62, 0.16, 0.14),
-    Color::srgb(0.2, 0.46, 0.22),
-    Color::srgb(0.58, 0.46, 0.12),
-    Color::srgb(0.42, 0.2, 0.52),
-    Color::srgb(0.12, 0.48, 0.48),
-];
 
 #[allow(clippy::too_many_arguments)]
 fn run_cues(
@@ -139,6 +129,8 @@ fn run_cues(
     mut actors: Query<&mut Actor>,
     sets: Query<Entity, With<EndingSet>>,
     stand_in: Query<Entity, With<crate::floor::build::FinalVestibule>>,
+    (floor, mut doors): (Option<Res<Floor>>, Query<&mut crate::interaction::Door>),
+    (model, profile): (Option<Res<crate::body::PlayerModel>>, Res<crate::profile::Profile>),
 ) {
     let mut queue = std::mem::take(&mut active.ending).into_iter();
     while let Some((cue, instant)) = queue.next() {
@@ -147,9 +139,25 @@ fn run_cues(
                 for e in sets.iter().chain(stand_in.iter()) {
                     commands.entity(e).try_despawn();
                 }
+                // The final door swings open (it may still be shut when the
+                // ending is played from the Cutscenes menu).
+                if let Some(f) = floor.as_ref() {
+                    let last = f.0.final_door();
+                    for mut d in &mut doors {
+                        if d.number == last && !d.mimic && !d.open {
+                            d.locked = false;
+                            d.key_room = None;
+                            d.open = true;
+                            if d.blocker != Entity::PLACEHOLDER {
+                                commands.entity(d.blocker).try_remove::<crate::physics::Collider>();
+                            }
+                        }
+                    }
+                }
                 build_set(&mut commands, &mut meshes, &mut mats, anchor.0);
                 // You plus everyone else in the room.
-                let mut ids: Vec<u8> = vec![if session.online() { session.my_id } else { 0 }];
+                let my_id = if session.online() { session.my_id } else { 0 };
+                let mut ids: Vec<u8> = vec![my_id];
                 ids.extend(peers.0.keys().copied());
                 ids.sort();
                 let n = ids.len().min(5);
@@ -157,7 +165,10 @@ fn run_cues(
                     let lane = (i as f32 - (n as f32 - 1.0) / 2.0) * 0.6;
                     let from = anchor.0 + Vec3::new(lane, 0.0, 1.6 + i as f32 * 0.5);
                     let to = anchor.0 + CAR + Vec3::new(lane, 0.0, -0.3 + (i % 2) as f32 * 0.25);
-                    spawn_actor(&mut commands, &mut meshes, &mut mats, id, SHIRTS[id as usize % SHIRTS.len()], from, to);
+                    if let Some(model) = model.as_ref() {
+                        let skin = if id == my_id { profile.skin } else { peers.0.get(&id).and_then(|p| p.skin).unwrap_or_else(|| crate::body::Skin::for_id(id)) };
+                        spawn_actor(&mut commands, model, skin, from, to);
+                    }
                 }
                 // The set only exists next frame: later cues (walk, gate...)
                 // must wait for it, even when a slow frame fires several at once.
@@ -357,20 +368,19 @@ fn build_set(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Asse
 
 /// A character in a coloured shirt with jointed arms and legs (same build
 /// as online teammates).
-fn spawn_actor(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, id: u8, shirt: Color, from: Vec3, to: Vec3) {
-    // The same body as players in game (see avatar::build_body).
-    let kit = BodyKit::new(mats, meshes, shirt);
-    let bm = crate::avatar::BodyMats::new(mats, id);
+fn spawn_actor(commands: &mut Commands, model: &crate::body::PlayerModel, skin: crate::body::Skin, from: Vec3, to: Vec3) {
+    // The same body as players in game (see body.rs).
     let dir = to - from;
     commands
         .spawn((
             EndingSet,
             Actor { from, to, walk: None, panic: false, phase: 0.0, riding: false },
+            crate::body::BodyPose::default(),
             Transform::from_translation(from).with_rotation(Quat::from_rotation_y((-dir.x).atan2(-dir.z))),
             Visibility::default(),
             DespawnOnExit(AppState::Playing),
         ))
-        .with_children(|root| crate::avatar::build_body(root, &kit, &bm));
+        .with_children(|root| crate::body::spawn_body(root, model, skin, false));
 }
 
 /// Where the cable is cut: above the car roof (world space).
@@ -504,10 +514,10 @@ fn animate_set(
     }
 }
 
-fn animate_actors(time: Res<Time>, mut actors: Query<(&mut Actor, &mut Transform, &Children)>, children: Query<&Children>, mut limbs: Query<(&Limb, &mut Transform), Without<Actor>>) {
+fn animate_actors(time: Res<Time>, mut actors: Query<(&mut Actor, &mut Transform, &mut crate::body::BodyPose)>) {
     let dt = time.delta_secs();
     let t = time.elapsed_secs();
-    for (mut a, mut tf, kids) in &mut actors {
+    for (mut a, mut tf, mut pose) in &mut actors {
         let mut walking = false;
         if let Some((wt, secs)) = a.walk {
             let nt = (wt + dt).min(secs);
@@ -519,40 +529,26 @@ fn animate_actors(time: Res<Time>, mut actors: Query<(&mut Actor, &mut Transform
             walking = k < 1.0;
             if !walking {
                 // Inside: turn to face the gate.
-                tf.rotation = tf.rotation.slerp(Quat::IDENTITY * Quat::from_rotation_y(std::f32::consts::PI), 1.0);
+                tf.rotation = Quat::from_rotation_y(std::f32::consts::PI);
             }
         }
         if walking {
             a.phase += dt * 7.0;
         }
-        let swing = if walking { a.phase.sin() * 0.6 } else { 0.0 };
-        let mut stack: Vec<Entity> = kids.iter().collect();
-        while let Some(e) = stack.pop() {
-            if let Ok(ch) = children.get(e) {
-                stack.extend(ch.iter());
+        // The same walk as players in game.
+        let speed = if walking { crate::player::WALK_SPEED } else { 0.0 };
+        *pose = crate::avatar::pose_for(speed, a.phase * 2.0, 0.0, 0.0, false, false, crate::viewmodel::Gesture::None, 0.0);
+        if a.panic {
+            // Arms thrown up over the head, flailing; looking up at the roof.
+            for (i, off) in [(0usize, 0.0f32), (1, 1.7)] {
+                pose.arm[i] = 2.6 + (t * 14.0 + off).sin() * 0.35;
+                pose.forearm[i] = 0.4;
             }
-            let Ok((limb, mut lt)) = limbs.get_mut(e) else { continue };
-            lt.rotation = match *limb {
-                Limb::Hips => Quat::IDENTITY,
-                Limb::Thigh(r) => Quat::from_rotation_x(if r { swing } else { -swing }),
-                Limb::Shin(r) => Quat::from_rotation_x(if walking { ((if r { a.phase } else { -a.phase }).sin()).max(0.0) * 0.7 } else { 0.0 }),
-                Limb::Arm(r) => {
-                    if a.panic {
-                        // Arms thrown up, flailing.
-                        Quat::from_rotation_x(-2.6 + (t * 14.0 + if r { 0.0 } else { 1.7 }).sin() * 0.35) * Quat::from_rotation_z(if r { 0.35 } else { -0.35 })
-                    } else {
-                        Quat::from_rotation_x(if r { -swing } else { swing } * 0.8) * Quat::from_rotation_z(if r { 0.08 } else { -0.08 })
-                    }
-                }
-                Limb::Forearm(_) => Quat::from_rotation_x(if a.panic { -0.4 } else { -0.2 }),
-                Limb::Head => {
-                    if a.panic {
-                        Quat::from_rotation_x(-0.6 + (t * 9.0).sin() * 0.1)
-                    } else {
-                        Quat::from_rotation_y((t * 0.8 + a.from.x).sin() * 0.25)
-                    }
-                }
-            };
+            pose.arm_roll = [0.35, -0.35];
+            pose.head = -0.6 + (t * 9.0).sin() * 0.1;
+        } else if !walking {
+            let idle = crate::body::idle_pose(t + a.from.x);
+            pose.head_yaw = idle.head_yaw;
         }
     }
 }

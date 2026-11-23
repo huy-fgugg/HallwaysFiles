@@ -82,11 +82,13 @@ pub struct Profile {
     pub seed_text: String,
     /// Unlocked achievement ids (see `achievements::ALL`).
     pub achievements: Vec<String>,
+    /// Your character's look.
+    pub skin: crate::body::Skin,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { version: PROFILE_VERSION, name: "Player".into(), lumens: 0, runs: 0, wins: 0, best_room: 0, loadout: vec![], modifiers: vec![], seed_text: String::new(), achievements: vec![] }
+        Self { version: PROFILE_VERSION, name: "Player".into(), lumens: 0, runs: 0, wins: 0, best_room: 0, loadout: vec![], modifiers: vec![], seed_text: String::new(), achievements: vec![], skin: crate::body::Skin::default() }
     }
 }
 

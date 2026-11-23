@@ -1,0 +1,4 @@
+Player model: "Low Poly Dude" from OpenGameArt.org
+https://opengameart.org/content/low-poly-dude
+License: CC0 1.0 (public domain) - https://creativecommons.org/publicdomain/zero/1.0/
+Converted to glTF (IK helper bones removed); posed and animated in code by HALLWAYS.

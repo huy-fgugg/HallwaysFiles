@@ -325,7 +325,8 @@ fn play_actions(
                 profile.name = crate::profile::clean_name(&profile.name);
                 save_profile(&profile);
                 *seed = RunSeed(chosen_seed(&profile));
-                preset.0 = None;
+                // QA: HALLWAYS_PRESET=<name> plays a built-in custom floor from Solo Run.
+                preset.0 = std::env::var("HALLWAYS_PRESET").ok().and_then(|n| crate::presets::builtin().into_iter().find(|p| p.name.replace(' ', "_").eq_ignore_ascii_case(&n.replace(' ', "_"))));
                 next_overlay.set(Overlay::None);
                 next_app.set(AppState::Playing);
             }

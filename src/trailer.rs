@@ -564,6 +564,7 @@ fn record(
                                 hiding: false,
                                 alive: true,
                                 room: rec.room,
+                                skin: None,
                             },
                         );
                     }

@@ -217,7 +217,10 @@ fn run_surge(
                     shake.add(0.5);
                     sfx.write(PlaySfx(Sfx::Whoosh));
                 }
-                if d < SURGE_KILL_RADIUS && !hide.is_hiding() {
+                // It fills the room wall to wall as it tears through: standing
+                // off to the side doesn't save you, only hiding does.
+                let bounds = floor.0.room_at_z(np.z).and_then(|i| floor.0.room(i)).map(|r| (r.min.x, r.max.x));
+                if caught(p.translation, np, bounds) && !hide.is_hiding() {
                     shake.add(1.0);
                     sfx.write(PlaySfx(Sfx::Stinger));
                     *death = if *undertow {
@@ -269,6 +272,19 @@ fn run_surge(
                 state.0 = SurgePhase::Idle;
             }
         }
+    }
+}
+
+/// Pure rule: the Surge catches you if you're close to it, or anywhere across
+/// the room's width where its front is passing (within 1.4 m along the room).
+pub fn caught(player: Vec3, surge: Vec3, room_x: Option<(f32, f32)>) -> bool {
+    let d = Vec2::new(player.x - surge.x, player.z - surge.z).length();
+    if d < SURGE_KILL_RADIUS {
+        return true;
+    }
+    match room_x {
+        Some((x0, x1)) => (player.z - surge.z).abs() < 1.4 && player.x > x0 - 0.3 && player.x < x1 + 0.3,
+        None => false,
     }
 }
 
@@ -374,6 +390,18 @@ fn animate_shards(time: Res<Time>, mut shards: Query<(&Shard, &mut Transform)>) 
 mod tests {
     use super::*;
     use crate::floor::plan::generate;
+
+    #[test]
+    fn standing_to_the_side_does_not_save_you() {
+        let room = Some((-6.0, 6.0));
+        let surge = Vec3::new(0.0, 1.4, -20.0);
+        // Far to the side of its path, in the same stretch of the room.
+        assert!(caught(Vec3::new(5.5, 0.0, -20.5), surge, room));
+        // Well ahead or behind it: not yet.
+        assert!(!caught(Vec3::new(5.5, 0.0, -26.0), surge, room));
+        // In the next room over (outside the walls): no.
+        assert!(!caught(Vec3::new(9.0, 0.0, -20.0), surge, room));
+    }
 
     #[test]
     fn cue_window_is_learnable() {
