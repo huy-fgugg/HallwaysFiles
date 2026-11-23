@@ -6,7 +6,6 @@
 //! Everything is anchored to the far side of the final door, which moves
 //! with every seed; camera shots use `CamPoint::Anchor`.
 
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use serde::Deserialize;
 
@@ -14,7 +13,7 @@ use crate::cutscene::{ActiveCutscene, CutsceneEnded, EndAction, PlayCutscene, EN
 use crate::floor::{Floor, FloorRuntime};
 use crate::net::{NetSession, Peers};
 use crate::state::{AppState, Overlay};
-use crate::viewmodel::{build_hand, BodyKit};
+use crate::viewmodel::BodyKit;
 
 /// World position of the ending set (far side of the final door, floor level).
 #[derive(Resource, Debug, Default, Clone, Copy)]
@@ -92,14 +91,7 @@ struct Actor {
     riding: bool,
 }
 
-#[derive(Component, Clone, Copy, PartialEq)]
-enum Limb {
-    Thigh(bool),
-    Shin(bool),
-    Arm(bool),
-    Forearm(bool),
-    Head,
-}
+use crate::avatar::Limb;
 
 /// Lift car position relative to the anchor.
 const CAR: Vec3 = Vec3::new(0.0, 0.0, -4.4);
@@ -165,7 +157,7 @@ fn run_cues(
                     let lane = (i as f32 - (n as f32 - 1.0) / 2.0) * 0.6;
                     let from = anchor.0 + Vec3::new(lane, 0.0, 1.6 + i as f32 * 0.5);
                     let to = anchor.0 + CAR + Vec3::new(lane, 0.0, -0.3 + (i % 2) as f32 * 0.25);
-                    spawn_actor(&mut commands, &mut meshes, &mut mats, SHIRTS[id as usize % SHIRTS.len()], from, to);
+                    spawn_actor(&mut commands, &mut meshes, &mut mats, id, SHIRTS[id as usize % SHIRTS.len()], from, to);
                 }
                 // The set only exists next frame: later cues (walk, gate...)
                 // must wait for it, even when a slow frame fires several at once.
@@ -365,15 +357,10 @@ fn build_set(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Asse
 
 /// A character in a coloured shirt with jointed arms and legs (same build
 /// as online teammates).
-fn spawn_actor(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, shirt: Color, from: Vec3, to: Vec3) {
+fn spawn_actor(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, id: u8, shirt: Color, from: Vec3, to: Vec3) {
+    // The same body as players in game (see avatar::build_body).
     let kit = BodyKit::new(mats, meshes, shirt);
-    let pants = mats.add(StandardMaterial { base_color: Color::srgb(0.12, 0.12, 0.16), perceptual_roughness: 0.9, ..default() });
-    let shoe = mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.04, 0.04), ..default() });
-    let hair = mats.add(StandardMaterial { base_color: Color::srgb(0.12, 0.08, 0.06), perceptual_roughness: 0.9, ..default() });
-    let eye = mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.05, 0.05), ..default() });
-    let piece = |c: &mut ChildSpawnerCommands, mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, at: Vec3, size: Vec3| {
-        c.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(at).with_scale(size), NotShadowCaster));
-    };
+    let bm = crate::avatar::BodyMats::new(mats, id);
     let dir = to - from;
     commands
         .spawn((
@@ -383,39 +370,7 @@ fn spawn_actor(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut As
             Visibility::default(),
             DespawnOnExit(AppState::Playing),
         ))
-        .with_children(|root| {
-            for right in [true, false] {
-                let x = if right { 0.1 } else { -0.1 };
-                root.spawn((Limb::Thigh(right), Transform::from_xyz(x, 0.9, 0.0), Visibility::default())).with_children(|t| {
-                    piece(t, &kit.capsule, &pants, Vec3::new(0.0, -0.22, 0.0), Vec3::new(0.15, 0.2, 0.15));
-                    t.spawn((Limb::Shin(right), Transform::from_xyz(0.0, -0.44, 0.0), Visibility::default())).with_children(|s| {
-                        piece(s, &kit.capsule, &pants, Vec3::new(0.0, -0.2, 0.0), Vec3::new(0.12, 0.19, 0.12));
-                        piece(s, &kit.cube, &shoe, Vec3::new(0.0, -0.43, -0.05), Vec3::new(0.11, 0.08, 0.26));
-                    });
-                });
-            }
-            root.spawn((Transform::from_xyz(0.0, 0.9, 0.0), Visibility::default())).with_children(|h| {
-                piece(h, &kit.cube, &pants, Vec3::new(0.0, 0.02, 0.0), Vec3::new(0.34, 0.14, 0.2));
-                piece(h, &kit.capsule, &kit.sleeve, Vec3::new(0.0, 0.33, 0.0), Vec3::new(0.42, 0.26, 0.24));
-                h.spawn((Limb::Head, Transform::from_xyz(0.0, 0.66, 0.0), Visibility::default())).with_children(|hd| {
-                    piece(hd, &kit.sphere, &kit.skin, Vec3::new(0.0, 0.11, 0.0), Vec3::new(0.21, 0.25, 0.23));
-                    piece(hd, &kit.sphere, &hair, Vec3::new(0.0, 0.17, 0.02), Vec3::new(0.225, 0.17, 0.235));
-                    for x in [-0.045f32, 0.045] {
-                        piece(hd, &kit.sphere, &eye, Vec3::new(x, 0.12, -0.105), Vec3::splat(0.03));
-                    }
-                });
-                for right in [true, false] {
-                    let x = if right { 0.25 } else { -0.25 };
-                    h.spawn((Limb::Arm(right), Transform::from_xyz(x, 0.52, 0.0), Visibility::default())).with_children(|a| {
-                        piece(a, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.15, 0.0), Vec3::new(0.11, 0.14, 0.11));
-                        a.spawn((Limb::Forearm(right), Transform::from_xyz(0.0, -0.3, 0.0), Visibility::default())).with_children(|f| {
-                            piece(f, &kit.capsule, &kit.sleeve, Vec3::new(0.0, -0.13, 0.0), Vec3::new(0.095, 0.12, 0.095));
-                            f.spawn((Transform::from_xyz(0.0, -0.29, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), Visibility::default())).with_children(|hand| build_hand(hand, &kit, right, 1.3));
-                        });
-                    });
-                }
-            });
-        });
+        .with_children(|root| crate::avatar::build_body(root, &kit, &bm));
 }
 
 /// Where the cable is cut: above the car roof (world space).
@@ -578,6 +533,7 @@ fn animate_actors(time: Res<Time>, mut actors: Query<(&mut Actor, &mut Transform
             }
             let Ok((limb, mut lt)) = limbs.get_mut(e) else { continue };
             lt.rotation = match *limb {
+                Limb::Hips => Quat::IDENTITY,
                 Limb::Thigh(r) => Quat::from_rotation_x(if r { swing } else { -swing }),
                 Limb::Shin(r) => Quat::from_rotation_x(if walking { ((if r { a.phase } else { -a.phase }).sin()).max(0.0) * 0.7 } else { 0.0 }),
                 Limb::Arm(r) => {

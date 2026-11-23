@@ -81,6 +81,9 @@ pub struct CameraShot {
     pub fov: f32,
     #[serde(default)]
     pub ease: Ease,
+    /// Only for this many players (min, max), e.g. (1, 1) solo or (2, 5) groups.
+    #[serde(default)]
+    pub players: Option<(u8, u8)>,
 }
 
 fn default_fov() -> f32 {
@@ -92,6 +95,40 @@ pub struct CueEvent {
     pub at: f32,
     #[serde(rename = "do")]
     pub action: CueAction,
+    /// Only for this many players (min, max).
+    #[serde(default)]
+    pub players: Option<(u8, u8)>,
+}
+
+/// Wording for captions: `{n}` becomes the number of players, `{N}` the
+/// number in words, and `{party}` "you" (solo) or "the N of you".
+pub fn party_text(text: &str, players: u8) -> String {
+    let words = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE"];
+    let small = ["zero", "one", "two", "three", "four", "five"];
+    let n = players.clamp(1, 5) as usize;
+    let party = if n == 1 { "you".to_string() } else { format!("the {} of you", small[n]) };
+    text.replace("{n}", &n.to_string()).replace("{N}", words[n]).replace("{party}", &party)
+}
+
+impl CutsceneDef {
+    /// The version of this cutscene for `players` players: shots and events
+    /// meant for other group sizes are dropped and captions are filled in.
+    pub fn for_players(mut self, players: u8) -> Self {
+        let fits = |r: Option<(u8, u8)>| r.is_none_or(|(lo, hi)| (lo..=hi).contains(&players));
+        self.shots.retain(|s| fits(s.players));
+        self.events.retain(|e| fits(e.players));
+        for e in &mut self.events {
+            match &mut e.action {
+                CueAction::Subtitle { text, .. } => *text = party_text(text, players),
+                CueAction::Title { text, sub, .. } => {
+                    *text = party_text(text, players);
+                    *sub = party_text(sub, players);
+                }
+                _ => {}
+            }
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -230,9 +267,16 @@ fn reset(mut active: ResMut<ActiveCutscene>) {
     *active = ActiveCutscene::default();
 }
 
-fn start_cutscenes(mut reader: MessageReader<PlayCutscene>, mut active: ResMut<ActiveCutscene>, mut seen: ResMut<SeenCutscenes>) {
+fn start_cutscenes(
+    mut reader: MessageReader<PlayCutscene>,
+    mut active: ResMut<ActiveCutscene>,
+    mut seen: ResMut<SeenCutscenes>,
+    peers: Option<Res<crate::net::Peers>>,
+) {
     for PlayCutscene(id) in reader.read() {
-        match load_def(id) {
+        // You plus everyone else in the room.
+        let players = 1 + peers.as_ref().map_or(0, |p| p.0.values().filter(|s| s.alive).count()) as u8;
+        match load_def(id).map(|d| d.for_players(players.min(5))) {
             Some(def) => {
                 info!("cutscene: {id} ({:.1}s)", def.duration);
                 *active = ActiveCutscene { id: id.clone(), def: Some(def), ..default() };
@@ -591,6 +635,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cutscenes_adapt_to_the_number_of_players() {
+        assert_eq!(party_text("behind {party}", 1), "behind you");
+        assert_eq!(party_text("behind {party}", 3), "behind the three of you");
+        assert_eq!(party_text("{N} OF YOU ({n})", 5), "FIVE OF YOU (5)");
+        for id in [INTRO, ENDING] {
+            let solo = load_def(id).unwrap().for_players(1);
+            let group = load_def(id).unwrap().for_players(4);
+            let subs = |d: &CutsceneDef| d.events.iter().filter_map(|e| if let CueAction::Subtitle { text, .. } = &e.action { Some(text.clone()) } else { None }).collect::<Vec<_>>();
+            assert_ne!(subs(&solo), subs(&group), "{id}: solo and group play the same");
+            assert!(subs(&group).iter().all(|t| !t.contains('{')), "{id}: unfilled placeholder");
+            // Every moment still has a camera shot.
+            for d in [&solo, &group] {
+                for w in d.shots.windows(2) {
+                    assert!(w[1].start <= w[0].end + 1e-3, "{id}: gap in shots");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn bundled_cutscenes_parse() {
         for id in [INTRO, THE_HOLLOW] {
             let def = parse(embedded(id).unwrap()).unwrap_or_else(|e| panic!("{id}: {e}"));
@@ -615,6 +679,7 @@ mod tests {
             to: CamPoint::At { pos: (2.0, 0.0, 0.0), look: (2.0, 0.0, -1.0) },
             fov: 50.0,
             ease: Ease::Linear,
+            players: None,
         }];
         let (p, _, fov) = sample_shots(&shots, 1.0, (Vec3::ZERO, 0.0, 0.0, 1.6)).unwrap();
         assert!((p.x - 1.0).abs() < 1e-5);

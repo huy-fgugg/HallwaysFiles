@@ -77,8 +77,11 @@ impl Plugin for AchievementsPlugin {
         app.add_message::<Unlock>()
             .add_message::<Toast>()
             .add_systems(Startup, spawn_stack)
-            .add_systems(Update, (detect.run_if(in_state(AppState::Playing)), join_toasts, apply_unlocks, show_toasts, animate_toasts).chain())
-            .add_systems(OnEnter(Overlay::Summary), |run: Res<RunState>, mut out: MessageWriter<Unlock>| {
+            .add_systems(Update, (detect.run_if(in_state(AppState::Playing)).run_if(real_run), join_toasts, apply_unlocks, show_toasts, animate_toasts).chain())
+            .add_systems(OnEnter(Overlay::Summary), |run: Res<RunState>, theater: Res<crate::theater::Theater>, mut out: MessageWriter<Unlock>| {
+                if theater.active() {
+                    return;
+                }
                 out.write(Unlock("checkout"));
                 if run.damage_taken <= 0.0 {
                     out.write(Unlock("untouchable"));
@@ -87,6 +90,12 @@ impl Plugin for AchievementsPlugin {
             .add_systems(OnEnter(Screen::Achievements), spawn_screen)
             .add_systems(Update, screen_actions.run_if(in_state(Screen::Achievements)));
     }
+}
+
+/// Achievements only count in real runs, not in the cutscene viewer, the
+/// trailer recorder or scripted QA warps.
+fn real_run(theater: Res<crate::theater::Theater>) -> bool {
+    !theater.active() && std::env::var_os("HALLWAYS_TRAILER").is_none() && std::env::var_os("HALLWAYS_WARP").is_none() && std::env::var_os("HALLWAYS_CAPTURE").is_none()
 }
 
 /// Watches the run for achievement moments.
