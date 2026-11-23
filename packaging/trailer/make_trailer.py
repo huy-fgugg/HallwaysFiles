@@ -34,6 +34,7 @@ for line in (frames_dir / "segments.txt").read_text().split("\n"):
 # (kind, payload): clips refer to segments; cards are (title, subtitle, seconds);
 # "montage" is a list of segments cut together fast.
 TIMELINE = [
+    ("studio", ("CREATED BY DONUT STUDIOS!", "", 3.6)),
     ("card", ("THE LIFT ONLY GOES DOWN.", "", 2.0)),
     ("clip", "arrival"),
     ("clip", "guest_wing"),
@@ -55,6 +56,7 @@ TIMELINE = [
     ("run", ("RUN.", "", 0.9)),
     ("clip", "chase"),
     ("clip", "slam"),
+    ("card", ("NO TWO CHASES ARE THE SAME.", "HANDS IN THE WALLS  -  FIRE  -  FALLING CEILINGS", 2.2)),
     ("card", ("MULTIPLAYER SUPPORTED", "CROSSPLAY  -  WINDOWS  -  LINUX  -  ANDROID", 2.4)),
     ("clip", "squad"),
     ("montage", ["chase", "surge", "gallery", "reading_hall", "listener", "fake_doors", "slam"]),
@@ -113,6 +115,29 @@ def card_frame(title, sub, alpha, final=False, t=0.0, red=False):
         centered(d, y, title, big, col)
         if sub:
             centered(d, y + 95, sub, small, tuple(int(c * a) for c in TEAL))
+    return img
+
+
+LOGO = Image.open(Path(__file__).resolve().parents[2] / "assets" / "branding" / "donut_studios.png").convert("RGBA")
+PINK = (255, 115, 217)
+
+
+def studio_frame(alpha, t):
+    """Opening card: CREATED BY DONUT STUDIOS! over the studio logo, with a slow push-in."""
+    img = Image.new("RGB", (W, H), (8, 5, 12))
+    a = max(0.0, min(1.0, alpha))
+    h = int(500 * (1.0 + 0.04 * t / 3.6))
+    w = int(LOGO.width * h / LOGO.height)
+    logo = LOGO.resize((w, h), Image.LANCZOS)
+    if a < 1.0:
+        logo.putalpha(logo.getchannel("A").point(lambda v: int(v * a)))
+    img.paste(logo, ((W - w) // 2, 170 + (500 - h) // 2), logo)
+    d = ImageDraw.Draw(img)
+    left, right = "CREATED BY ", "DONUT STUDIOS!"
+    wl, wr = d.textlength(left, font=big), d.textlength(right, font=big)
+    x = (W - wl - wr) / 2
+    d.text((x, 70), left, font=big, fill=tuple(int(c * a) for c in TEXT))
+    d.text((x + wl, 70), right, font=big, fill=tuple(int(c * a) for c in PINK))
     return img
 
 
@@ -190,6 +215,11 @@ with tempfile.TemporaryDirectory() as tmp:
                 marks.append(("cut", name, n_out / FPS - MONTAGE_FRAMES / FPS, MONTAGE_FRAMES / FPS))
             marks.append(("montage", "montage", start, n_out / FPS - start))
             continue
+        elif kind == "studio":
+            title, sub, secs = payload
+            n = int(secs * FPS)
+            for i in range(n):
+                emit(studio_frame(fade(i, n, 12), i / FPS))
         else:
             title, sub, secs = payload
             n = int(secs * FPS)
@@ -215,7 +245,9 @@ with tempfile.TemporaryDirectory() as tmp:
     run_at = at("RUN.", default=total * 0.6)
     end_clip = next(((s, d) for k, n, s, d in marks if n == "ending"), (total - 9, 5))
     final_at = at("HALLWAYS", "final", total - 4.8)
-    place(mix, menu, 0.0, 0.55, length_s=listen_at + 0.4, loop=True)
+    studio_end = next((s + d for k, n, s, d in marks if k == "studio"), 0.0)
+    place(mix, stinger, 0.3, 0.45)
+    place(mix, menu, studio_end, 0.55, length_s=listen_at + 0.4 - studio_end, loop=True)
     place(mix, rumble, listen_at, 0.45, length_s=run_at - listen_at, loop=True)
     place(mix, chase, run_at, 0.65, length_s=end_clip[0] - run_at + 0.3, loop=True)
     place(mix, stinger, run_at, 0.9)
