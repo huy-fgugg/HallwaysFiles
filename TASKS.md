@@ -131,6 +131,21 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.0
+- [x] New player characters: chunky voxel heroes (Knight, Wizard, Cleric, Ranger; "Voxel Chibi Adventurers" free pack by zaddy99999, CC0) with walking, crouching, reaching, panicking and falling animations
+- [x] Customise screen (main menu button, and a Skin table with a floating figure in the boarding hall): pick your character, a crown and a backpack; drag the 3D preview to turn it; your look shows online; your first-person arms match your character
+- [x] Voice chat online: push to talk (V, or TALK on phones) or open mic; voices fade with distance; your character's mouth moves when you talk
+- [x] Teammates are solid (you bump into them) and their bodies never poke through walls; characters are sized to fit through doors
+- [x] Two players fit in each wardrobe, and rooms get enough hiding spots for the whole party
+- [x] Map Builder: build a floor room by room (area, size, type, lights, monster, structure), see it from above, play-test or host it, and save/export `.hallwaysmap` files; drop one on the game window (or Import from Downloads) on another computer to play or edit it
+- [x] Scenery: garden sheds, turning windmills (and tall ones beyond the walls), benches, planters, floor lamps, barrels and floor clutter in every area
+- [x] Every mode has a proper opening: custom floors and maps get their own start cutscene, retries get a "Try Again" cutscene
+- [x] Death animation: you fall, the screen washes red, then the death screen
+- [x] The Rusher (Surge) fills the whole room: only hiding saves you
+- [x] Fix: the door in the ending cutscene opens
+- [x] Lighter fog so big rooms don't look like missing walls
+- [x] Back to up to 4 players online
+
 ## 1.0.9
 - [x] No missing walls: the oldest loaded room gets a back wall with the closed door while the room behind it is unloaded, and a corridor stands behind Door 100 (checked with a magenta-void QA mode, including looking back through doors)
 - [x] Much harder: monsters spawn far more often (Surge 32%, Undertow 22%, Gallery and Hush 25%, Whisperer 75%, Listener 65%) and hit harder with less time to react; faster Hollow; stronger chase hazards; less loot
