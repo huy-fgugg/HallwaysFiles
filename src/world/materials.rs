@@ -52,7 +52,7 @@ fn load_tex(asset_server: &AssetServer, path: String, srgb: bool) -> Handle<Imag
 }
 
 /// Builds a material from `textures/<name>/<name>_{diff,nor,arm}.jpg`.
-fn pbr_set(asset_server: &AssetServer, name: &str, tint: Color) -> StandardMaterial {
+pub(crate) fn pbr_set(asset_server: &AssetServer, name: &str, tint: Color) -> StandardMaterial {
     let p = |suffix: &str| format!("textures/{name}/{name}_{suffix}.jpg");
     let arm = load_tex(asset_server, p("arm"), false);
     StandardMaterial {

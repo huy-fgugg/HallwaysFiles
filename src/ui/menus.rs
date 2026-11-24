@@ -343,6 +343,19 @@ pub const CREDITS: &[(&str, &[&str])] = &[
             "Drawer Cabinet, Industrial Wall Sconce: Ulan Cabanilla",
             "Picture Frames, Modern Ceiling Lamp, Potted Plant: James Ray Cock",
             "Mantel Clock: Yann Kervran, Rico Cilliers",
+            "Shrub 04, Boulder 01, Potted Plants 01 & 02: Rico Cilliers     Tree Stump 01, Dead Tree Trunk: Rob Tuytel",
+            "Painted Wooden Bench: Kirill Sannikov     Street Lamp 01: Josh Dean     Gothic Statue: Benny Weimer",
+            "Vintage Grandfather Clock 01: Yann Kervran, James Ray Cock     Barrel 01: Jorge Camacho",
+            "Wooden Crates 01 & 02, Wooden Bucket 01: James Ray Cock, Jurita Burger",
+        ],
+    ),
+    (
+        "MORE 3D MODELS",
+        &[
+            "Player characters: Voxel Chibi Adventurers (free pack) by zaddy99999, CC0",
+            "Trees: Low Poly Forest Pack by Ajay Karat, Devil's Work.shop (free to use)",
+            "Garden shed: Medieval Shack by AnyRPG, CC0 (OpenGameArt)",
+            "Windmill: Old Windmill by yd, CC0 (OpenGameArt), retextured with Poly Haven textures",
         ],
     ),
     (
@@ -356,6 +369,8 @@ pub const CREDITS: &[(&str, &[&str])] = &[
             "Marble 01, Rusty Metal 02, Metal Plate: Rob Tuytel     Rock Wall 08: Amal Kumar",
             "Dirt Floor: eye-candy.xyz     Dark Brick Wall: Dario Barresi, Dimitrios Savva",
             "Corrugated Iron 02: Jenelle van Heerden, Sergej Majboroda",
+            "Gravel: Dimitrios Savva     Mossy Stone Wall: Amal Kumar",
+            "Lawn: Grass 004 from ambientCG (CC0)",
         ],
     ),
     ("FONT", &["IBM Plex Mono by IBM (SIL Open Font License 1.1)"]),

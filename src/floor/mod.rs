@@ -92,6 +92,8 @@ impl Plugin for FloorPlugin {
             .add_systems(
                 Update,
                 (custom_quick_start, stream_rooms, fix_open_doors, announce_areas, finish_floor, scenery::spin_props).run_if(in_state(AppState::Playing)),
+            )
+            .add_observer(scenery::start_sails
             );
     }
 }
@@ -108,6 +110,7 @@ fn setup_floor(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     peers: Res<crate::net::Peers>,
+    asset_server: Res<AssetServer>,
 ) {
     use crate::profile::Modifier;
     let mut cfg = cfg.clone();
@@ -135,7 +138,7 @@ fn setup_floor(
     let light_scale = custom_light * if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
     let players = (peers.0.len() + 1).min(crate::net::proto::MAX_PLAYERS as usize) as u8;
     commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, players, ..default() });
-    commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes, &mut images));
+    commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes, &mut images, &asset_server));
 }
 
 #[allow(clippy::too_many_arguments)]

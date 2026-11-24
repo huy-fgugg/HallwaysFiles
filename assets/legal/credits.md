@@ -7,6 +7,23 @@
 | Drawer Cabinet, Industrial Wall Sconce | Ulan Cabanilla |
 | Hanging Picture Frame 01 & 02, Modern Ceiling Lamp 01, Potted Plant 04 | James Ray Cock |
 | Mantel Clock 01 | Yann Kervran, Rico Cilliers |
+| Shrub 04, Boulder 01, Potted Plant 01, Potted Plant 02 | Rico Cilliers |
+| Tree Stump 01, Dead Tree Trunk | Rob Tuytel |
+| Painted Wooden Bench | Kirill Sannikov |
+| Street Lamp 01 | Josh Dean |
+| Gothic Statue | Benny Weimer |
+| Vintage Grandfather Clock 01 | Yann Kervran, James Ray Cock |
+| Barrel 01 | Jorge Camacho |
+| Wooden Crate 01, Wooden Bucket 01 | James Ray Cock |
+| Wooden Crate 02 | James Ray Cock, Jurita Burger |
+
+## More 3D models
+| Asset | Source | Licence |
+|---|---|---|
+| Player characters (Knight, Wizard, Cleric, Ranger, Crown, Adventurer Backpack) | "Voxel Chibi Adventurers" free tier by zaddy99999 | CC0 1.0 |
+| Trees | "Low Poly Forest Pack" by Ajay Karat, Devil's Work.shop (https://opengameart.org/content/low-poly-forest-pack) | Free to use, commercial included |
+| Garden shed | "Medieval Shack" by AnyRPG (https://opengameart.org/content/medieval-shack) | CC0 1.0 |
+| Windmill | "Old Windmill" by yd (https://opengameart.org/content/old-windmill), retextured with Poly Haven textures | CC0 1.0 |
 
 ## Textures (Poly Haven, CC0 1.0)
 | Asset | Author(s) |
@@ -24,6 +41,13 @@
 | Corrugated Iron 02 | Jenelle van Heerden, Sergej Majboroda |
 | Dark Brick Wall | Dario Barresi, Dimitrios Savva |
 | Rock Wall 08 | Amal Kumar |
+| Gravel | Dimitrios Savva |
+| Mossy Stone Wall | Amal Kumar |
+
+## Textures (ambientCG, CC0 1.0)
+| Asset | Source |
+|---|---|
+| Grass 004 (lawns) | https://ambientcg.com |
 
 Source: https://polyhaven.com (CC0: no attribution required; credited anyway).
 
