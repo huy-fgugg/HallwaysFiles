@@ -13,3 +13,6 @@ android/.gradle/
 android/build/
 android/app/build/
 *.mp4
+
+# Graphify code map (generated; rebuild with: graphify extract . --code-only)
+graphify-out/
