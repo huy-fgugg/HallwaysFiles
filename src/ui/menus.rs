@@ -357,6 +357,7 @@ pub const CREDITS: &[(&str, &[&str])] = &[
             "Trees: Low Poly Forest Pack by Ajay Karat, Devil's Work.shop (free to use)",
             "Garden shed: Medieval Shack by AnyRPG, CC0 (OpenGameArt)",
             "Windmill: Old Windmill by yd, CC0 (OpenGameArt), retextured with Poly Haven textures",
+            "Chase hands: Low Poly Arms (rigged) by DevMop, CC0 (OpenGameArt), posed and dyed",
         ],
     ),
     (

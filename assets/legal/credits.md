@@ -23,6 +23,7 @@
 | Player characters (Knight, Wizard, Cleric, Ranger, Crown, Adventurer Backpack) | "Voxel Chibi Adventurers" free tier by zaddy99999 | CC0 1.0 |
 | Trees | "Low Poly Forest Pack" by Ajay Karat, Devil's Work.shop (https://opengameart.org/content/low-poly-forest-pack) | Free to use, commercial included |
 | Garden shed | "Medieval Shack" by AnyRPG (https://opengameart.org/content/medieval-shack) | CC0 1.0 |
+| Chase hands | "Low Poly Arms (rigged)" by DevMop (https://opengameart.org/content/low-poly-arms-rigged), posed into a claw and dyed black | CC0 1.0 |
 | Windmill | "Old Windmill" by yd (https://opengameart.org/content/old-windmill), retextured with Poly Haven textures | CC0 1.0 |
 
 ## Textures (Poly Haven, CC0 1.0)

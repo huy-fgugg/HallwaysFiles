@@ -9,6 +9,14 @@
 //! * **Falling ceiling**: as you run in, a chunk of ceiling cracks above where
 //!   you are; a shadow marks the spot just before it lands.
 //!
+//! * **The hand hall**: the last room of each chase is a straight hall whose
+//!   walls are lined with huge hands reaching out in waves, right up to the
+//!   edges of a lit lane down the middle. Step out of the lane while they
+//!   reach and they drag you into the wall.
+//!
+//! Every hand is a posed arm model ("Low Poly Arms (rigged)" by DevMop,
+//! CC0, OpenGameArt), dyed inky black.
+//!
 //! Rule: hands and fire never span the whole room. There is always a free lane
 //! at least [`LANE`] wide beside them, so the way through stays open and you
 //! can choose to dodge or to time it. None of them have colliders.
@@ -16,7 +24,7 @@
 use bevy::prelude::*;
 
 use crate::audio::{PlaySfx, Sfx};
-use crate::floor::plan::{chases, door_zones, zones_overlap, FloorPlan, RoomPlan, Zone, LANDING_DEPTH, STEP_RISE, STEP_RUN};
+use crate::floor::plan::{chases, door_zones, zones_overlap, Feature, FloorPlan, RoomPlan, Zone, LANDING_DEPTH, STEP_RISE, STEP_RUN};
 use crate::floor::{Floor, FloorRuntime, RoomMember};
 use crate::hollow::DeathCause;
 use crate::player::Player;
@@ -43,7 +51,15 @@ pub enum HazardKind {
     Fire { east: bool, len: f32 },
     /// Ceiling collapse aimed at the player.
     Debris,
+    /// The hand hall: arms from both walls reaching `west` / `east` metres in,
+    /// leaving the lane down the middle free.
+    HandHall { west: f32, east: f32 },
 }
+
+/// Length of the arm model, shoulder to fingertips (metres).
+const ARM_LEN: f32 = 2.6;
+/// Seconds per wave of the hand hall.
+const HALL_PERIOD: f32 = 2.4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Hazard {
@@ -64,7 +80,7 @@ impl Hazard {
             HazardKind::Hands { east, reach } | HazardKind::Fire { east, len: reach } => {
                 if east { (r.max.x - reach, r.max.x) } else { (r.min.x, r.min.x + reach) }
             }
-            HazardKind::Debris => (r.min.x, r.max.x),
+            HazardKind::Debris | HazardKind::HandHall { .. } => (r.min.x, r.max.x),
         };
         (Vec2::new(lo, self.z - self.half), Vec2::new(hi, self.z + self.half))
     }
@@ -85,6 +101,13 @@ fn stretches(r: &RoomPlan) -> Vec<(f32, f32)> {
 pub fn room_hazards(seed: u64, r: &RoomPlan) -> Vec<Hazard> {
     if !r.pursuit {
         return vec![];
+    }
+    if r.feature == Some(Feature::HandHall) {
+        // The lane runs straight between the doors (both at entry_x).
+        let west = (r.entry_x - LANE / 2.0 - r.min.x).max(0.0);
+        let east = (r.max.x - r.entry_x - LANE / 2.0).max(0.0);
+        let half = (r.depth() / 2.0 - 2.2).max(1.0);
+        return vec![Hazard { room: r.index, kind: HazardKind::HandHall { west, east }, z: (r.min.y + r.max.y) / 2.0, half, phase: 0.0 }];
     }
     let mut rng = GameRng::fork(seed ^ 0xC4A5_E0B5, u64::from(r.index));
     let width = r.width();
@@ -176,13 +199,37 @@ struct HazardBody {
     cooldown: f32,
 }
 
+/// One reaching arm (the arm model slides out of the wall).
 #[derive(Component)]
 struct Arm {
     wall: f32,
     dir: f32,
     reach: f32,
-    /// The hand (moves to the tip) rather than the forearm (stretches).
-    hand: bool,
+    /// Thickness scale (the hands are big).
+    thick: f32,
+    /// Hand hall: this arm's place in the travelling wave (seconds).
+    wave: Option<f32>,
+    z: f32,
+    tilt: f32,
+}
+
+/// How far a hand-hall arm is out (0..1) and whether it's trembling just
+/// before it lunges.
+pub fn hall_out(t: f32, wave: f32) -> (f32, bool) {
+    let k = ((t + wave) / HALL_PERIOD).rem_euclid(1.0);
+    if k < 0.3 {
+        (0.0, false)
+    } else if k < 0.42 {
+        (0.06, true)
+    } else if k < 0.52 {
+        ((k - 0.42) / 0.1, false)
+    } else if k < 0.78 {
+        (1.0, false)
+    } else if k < 0.92 {
+        (1.0 - (k - 0.78) / 0.14, false)
+    } else {
+        (0.0, false)
+    }
 }
 
 #[derive(Component)]
@@ -232,8 +279,10 @@ fn spawn_hazards(
     mut built: ResMut<Built>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    assets: Res<AssetServer>,
 ) {
     let (Some(floor), Some(rt)) = (floor, rt) else { return };
+    let claw = crate::floor::scenery::prop(&assets, "claw_arm");
     built.0.retain(|i| rt.loaded.contains(i));
     let rooms: Vec<u32> = chases(floor.0.last_room).flat_map(|(a, b)| a..=b).collect();
     for i in rooms {
@@ -243,7 +292,6 @@ fn spawn_hazards(
         let Some(r) = floor.0.room(i) else { continue };
         built.0.push(i);
         let ink = mats.add(StandardMaterial { base_color: Color::srgb(0.04, 0.02, 0.05), perceptual_roughness: 0.35, ..default() });
-        let ink_glow = mats.add(StandardMaterial { base_color: Color::srgb(0.25, 0.05, 0.3), emissive: LinearRgba::rgb(0.5, 0.05, 0.6), ..default() });
         let grate = mats.add(StandardMaterial { base_color: Color::srgb(0.12, 0.11, 0.1), metallic: 0.8, perceptual_roughness: 0.5, ..default() });
         let flame_mat = mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.42, 0.08), emissive: LinearRgba::rgb(7.0, 2.0, 0.3), unlit: true, alpha_mode: AlphaMode::Add, ..default() });
         let core_mat = mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.9, 0.45), emissive: LinearRgba::rgb(12.0, 9.0, 3.0), unlit: true, alpha_mode: AlphaMode::Add, ..default() });
@@ -270,20 +318,38 @@ fn spawn_hazards(
                     root.with_children(|c| {
                         // Ink stain where the arms come through.
                         c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(ink.clone()), Transform::from_xyz(wall + dir * 0.01, 1.2, h.z).with_scale(Vec3::new(0.02, 2.0, h.half * 2.2))));
-                        for k in 0..5 {
-                            let z = h.z - h.half + (k as f32 + 0.5) * (h.half * 2.0 / 5.0);
-                            let y = 0.55 + rng.next_f32() * 1.3;
-                            let len = reach * rng.range_f32(0.8, 1.0);
-                            // Forearm (stretches out of the wall) and the clawed hand at its tip.
-                            c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(ink.clone()), Transform::from_xyz(wall, y, z).with_scale(Vec3::new(0.01, 0.1, 0.1)), Arm { wall, dir, reach: len, hand: false }));
-                            c.spawn((Transform::from_xyz(wall, y, z), Visibility::default(), Arm { wall, dir, reach: len, hand: true })).with_children(|a| {
-                                a.spawn((Mesh3d(cube.clone()), MeshMaterial3d(ink.clone()), Transform::from_xyz(0.07, 0.0, 0.0).with_scale(Vec3::new(0.16, 0.06, 0.15))));
-                                for f in 0..4 {
-                                    let fz = -0.055 + f as f32 * 0.037;
-                                    a.spawn((Mesh3d(cube.clone()), MeshMaterial3d(ink_glow.clone()), Transform::from_xyz(0.22, -0.02, fz).with_rotation(Quat::from_rotation_z(-0.4)).with_scale(Vec3::new(0.16, 0.02, 0.02))));
+                        for k in 0..4 {
+                            let z = h.z - h.half + (k as f32 + 0.5) * (h.half * 2.0 / 4.0);
+                            let y = 0.6 + rng.next_f32() * 1.2;
+                            let len = reach * rng.range_f32(0.85, 1.0);
+                            c.spawn((claw.clone(), Transform::from_xyz(wall - dir * 0.6, y, z), Arm { wall, dir, reach: len, thick: 1.8, wave: None, z, tilt: rng.range_f32(-0.35, 0.35) }));
+                        }
+                    });
+                }
+                HazardKind::HandHall { west, east } => {
+                    let mut rng = GameRng::fork(r.seed, 78);
+                    let lane = mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.8, 0.4), emissive: LinearRgba::rgb(2.2, 1.5, 0.6), unlit: true, ..default() });
+                    root.with_children(|c| {
+                        // Glowing edges of the safe lane, door to door.
+                        for x in [r.entry_x - LANE / 2.0, r.entry_x + LANE / 2.0] {
+                            c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(lane.clone()), Transform::from_xyz(x, 0.012, h.z).with_scale(Vec3::new(0.06, 0.01, h.half * 2.0 + 1.6))));
+                        }
+                        for (wall, dir, reach) in [(r.min.x, 1.0f32, west), (r.max.x, -1.0, east)] {
+                            // Ink streaming down the walls.
+                            c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(ink.clone()), Transform::from_xyz(wall + dir * 0.01, r.height / 2.0, h.z).with_scale(Vec3::new(0.02, r.height, h.half * 2.0 + 1.0))));
+                            if reach < 0.3 {
+                                continue;
+                            }
+                            let mut z = h.z + h.half;
+                            while z > h.z - h.half {
+                                for y in [rng.range_f32(0.5, 1.0), rng.range_f32(1.3, 2.0)] {
+                                    let len = reach * rng.range_f32(0.92, 1.0);
+                                    // The wave rolls down the hall toward the exit.
+                                    let wave = -z * 0.45 + if dir > 0.0 { 0.0 } else { 0.6 } + rng.range_f32(0.0, 0.15);
+                                    c.spawn((claw.clone(), Transform::from_xyz(wall - dir * 0.6, y, z), Arm { wall, dir, reach: len, thick: 1.7, wave: Some(wave), z: z + rng.range_f32(-0.15, 0.15), tilt: rng.range_f32(-0.3, 0.3) }));
                                 }
-                                a.spawn((Mesh3d(cube.clone()), MeshMaterial3d(ink_glow.clone()), Transform::from_xyz(0.12, 0.02, 0.09).with_rotation(Quat::from_rotation_y(-0.7)).with_scale(Vec3::new(0.12, 0.02, 0.02))));
-                            });
+                                z -= 0.85;
+                            }
                         }
                     });
                 }
@@ -352,18 +418,7 @@ fn run_hazards(
                 let out = if active { hands_out(t, h.phase) } else { 0.0 };
                 for c in children.iter() {
                     if let Ok((arm, mut tf)) = arms.get_mut(c) {
-                        let len = (arm.reach * out).max(0.01);
-                        let wiggle = (t * 9.0 + tf.translation.z * 7.0).sin() * 0.05;
-                        let face = Quat::from_rotation_y(if arm.dir > 0.0 { 0.0 } else { std::f32::consts::PI });
-                        if arm.hand {
-                            tf.translation.x = arm.wall + arm.dir * len;
-                            tf.rotation = face * Quat::from_rotation_z(wiggle * 3.0);
-                            tf.scale = Vec3::splat(if out > 0.02 { 1.6 } else { 0.01 });
-                        } else {
-                            tf.translation.x = arm.wall + arm.dir * len / 2.0;
-                            tf.rotation = face * Quat::from_rotation_z(wiggle);
-                            tf.scale = Vec3::new(len, 0.1, 0.1);
-                        }
+                        place_arm(arm, &mut tf, out, false, t);
                     }
                 }
                 // Reach measured from the wall: the hands catch you within their extension.
@@ -378,7 +433,34 @@ fn run_hazards(
                     shake.add(0.5);
                     sfx.write(PlaySfx(Sfx::Whoosh));
                     subs.write(Subtitle::danger("[Hands burst from the wall and claw at you!]"));
-                    hurt = Some((22.0, "THE WALLS GRABBED YOU", "Hands reach out of the walls in waves during the chase. Keep to the far side, or slip past while they pull back."));
+                    hurt = Some((35.0, "THE WALLS GRABBED YOU", "Hands reach out of the walls in waves during the chase. Keep to the far side, or slip past while they pull back."));
+                }
+            }
+            HazardKind::HandHall { .. } => {
+                let mut caught = false;
+                let mut lunge_near = false;
+                for c in children.iter() {
+                    if let Ok((arm, mut tf)) = arms.get_mut(c) {
+                        let (out, tremble) = if active { hall_out(t, arm.wave.unwrap_or(0.0)) } else { (0.0, false) };
+                        place_arm(arm, &mut tf, out, tremble, t);
+                        // A hand that's out catches you if you're between it and the wall.
+                        if out > 0.45 && (arm.z - pp.y).abs() < 0.55 && p.translation.y < 1.6 {
+                            let tip = arm.wall + arm.dir * arm.reach * out;
+                            if (arm.dir > 0.0 && pp.x < tip - 0.1) || (arm.dir < 0.0 && pp.x > tip + 0.1) {
+                                caught = true;
+                            }
+                            lunge_near = true;
+                        }
+                    }
+                }
+                if lunge_near && body.cooldown <= 0.0 {
+                    body.cooldown = 1.2;
+                    sfx.write(PlaySfx(Sfx::Whoosh));
+                }
+                if caught && active {
+                    shake.add(0.9);
+                    subs.write(Subtitle::danger("[The hands seize you and drag you into the wall!]"));
+                    hurt = Some((1000.0, "THE HANDS TOOK YOU", "At the end of the chase, the walls are full of hands. Stay inside the glowing lane down the middle of the hall: they can't reach it."));
                 }
             }
             HazardKind::Fire { .. } => {
@@ -460,6 +542,22 @@ fn run_hazards(
     }
 }
 
+/// Slides an arm model out of its wall: `out` 0 = hidden, 1 = full reach.
+fn place_arm(arm: &Arm, tf: &mut Transform, out: f32, tremble: bool, t: f32) {
+    // The model is ARM_LEN long along +X; it's stretched so that fully out
+    // its fingertips reach `reach` from the wall, the rest hidden inside it.
+    let len = arm.reach + 0.6;
+    let sx = len / ARM_LEN;
+    let ext = arm.reach * out;
+    let shake = if tremble { (t * 47.0 + arm.z * 13.0).sin() * 0.04 } else { 0.0 };
+    let wiggle = (t * 6.0 + arm.z * 7.0).sin() * 0.06 * out;
+    tf.translation.x = arm.wall + arm.dir * (ext - len) + shake;
+    tf.translation.z = arm.z;
+    let face = Quat::from_rotation_y(if arm.dir > 0.0 { 0.0 } else { std::f32::consts::PI });
+    tf.rotation = face * Quat::from_rotation_z(arm.tilt * 0.4 + wiggle) * Quat::from_rotation_x(arm.tilt + wiggle * 2.0);
+    tf.scale = Vec3::new(sx, arm.thick, arm.thick);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +587,13 @@ mod tests {
                             kinds[if matches!(h.kind, HazardKind::Hands { .. }) { 0 } else { 1 }] += 1;
                         }
                         HazardKind::Debris => kinds[2] += 1,
+                        HazardKind::HandHall { west, east } => {
+                            // The lane between the hands is free and lines up with both doors.
+                            assert!(r.width() - west - east >= LANE - 1e-3, "seed {seed} room {i}: hand hall has no lane");
+                            assert!((r.entry_x - r.exit_x).abs() < 1e-4, "seed {seed} room {i}: hand hall isn't straight");
+                            assert!(west > 1.0 && east > 1.0, "seed {seed} room {i}: hands on both walls");
+                            continue;
+                        }
                     }
                     // Inside the room, clear of doors and barricade lines.
                     assert!(zone.0.y > r.min.y && zone.1.y < r.max.y, "seed {seed} room {i}: outside");
@@ -500,6 +605,22 @@ mod tests {
             }
         }
         assert!(kinds.iter().all(|&k| k > 100), "{kinds:?}");
+    }
+
+    #[test]
+    fn every_chase_ends_in_a_hand_hall() {
+        for seed in 0..60 {
+            let plan = generate(seed);
+            for (_, last) in chases(plan.last_room) {
+                let r = plan.room(last).unwrap();
+                assert_eq!(r.feature, Some(Feature::HandHall), "seed {seed}");
+                assert!(r.dividers().is_empty() && r.containers == 0 && !r.hiding, "seed {seed}: the hall is bare");
+                assert!(matches!(room_hazards(seed, r)[0].kind, HazardKind::HandHall { .. }));
+            }
+        }
+        // The hands tremble, lunge, hold and pull back.
+        let samples: Vec<(f32, bool)> = (0..48).map(|i| hall_out(i as f32 * HALL_PERIOD / 48.0, 0.0)).collect();
+        assert!(samples.iter().any(|s| s.1) && samples.iter().any(|s| s.0 >= 1.0) && samples.iter().any(|s| s.0 == 0.0));
     }
 
     #[test]

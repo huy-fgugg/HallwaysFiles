@@ -236,6 +236,10 @@ pub enum Feature {
     /// Gardens: a stream across the room at `z`, crossed by a footbridge
     /// (see [`stream_bridge`]).
     Stream { z: f32 },
+    /// The last room of a chase: a straight hall whose walls are lined with
+    /// huge reaching hands; only a lit lane down the middle (in line with
+    /// both doors) is safe. No barricades, no furniture.
+    HandHall,
 }
 
 /// Radius of a pillar in a pillar hall.
@@ -368,6 +372,7 @@ impl RoomPlan {
     /// zigzag rooms, barricades in the chase, shelf rows in the Reading Hall.
     pub fn dividers(&self) -> Vec<Divider> {
         let max_n = match self.feature {
+            Some(Feature::HandHall) => return vec![],
             Some(Feature::Zigzag) => 3,
             Some(Feature::ReadingHall) => 4,
             _ if self.pursuit => 4,
@@ -631,11 +636,17 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         let entry_height = std::mem::take(&mut pending_entry);
         let depth = if entry_height > 0.0 { depth.max(7.0) } else { depth };
 
+        // The last room of a chase is the hand hall: a straight hall centred on
+        // its entrance (hands on both walls, the lane down the middle).
+        let hand_hall = chase_of(index, last).is_some_and(|(_, b)| b == index);
         // Centre so the entry door fits with a margin; drift gently, pull back toward x = 0.
         let lo = entry_x + DOOR_MARGIN - width / 2.0;
         let hi = entry_x - DOOR_MARGIN + width / 2.0;
         let mut cx = rng.range_f32(lo, hi);
         cx = cx.clamp(lo.max(-6.0).min(hi), hi.min(6.0).max(lo));
+        if hand_hall {
+            cx = entry_x;
+        }
         let min = Vec2::new(cx - width / 2.0, south - depth);
         let max = Vec2::new(cx + width / 2.0, south);
 
@@ -645,6 +656,8 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             if lo.ceil() <= hi.floor() { (x * 10.0).round().clamp(lo.ceil(), hi.floor()) / 10.0 } else { (min.x + max.x) / 2.0 }
         };
         let exit_x = if kind == RoomKind::Final { cx } else { snap(rng.range_f32(min.x + DOOR_MARGIN, max.x - DOOR_MARGIN)) };
+        // ...and it runs straight: its exit lines up with its entrance.
+        let exit_x = if hand_hall { entry_x } else { exit_x };
 
         let light = match kind {
             _ if reading_hall => LightState::Dim,
@@ -698,13 +711,17 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             _ => 1 + rng.below(2) as u8,
         };
         let containers = if kind == RoomKind::KeyPuzzle { containers } else { ((containers as f32 * opt.loot.clamp(0.0, 3.0)).round() as u8).min(5) };
+        let containers = if hand_hall { 0 } else { containers };
         let hiding = surge || matches!(kind, RoomKind::Transition) || (kind != RoomKind::Final && rng.next_f32() < 0.45);
+        let hiding = hiding && !hand_hall;
 
         // ---- Weird architecture ----
         let feature_roll = rng.next_f32();
         let zig_roll = rng.next_f32();
         let structure_roll = rng.next_f32();
-        let feature = if pursuit {
+        let feature = if hand_hall {
+            Some(Feature::HandHall)
+        } else if pursuit {
             None
         } else if reading_hall {
             Some(Feature::ReadingHall)
@@ -1387,7 +1404,7 @@ mod tests {
                         lofts += 1;
                         assert_eq!(r.kind, RoomKind::KeyPuzzle);
                     }
-                    Some(Feature::Zigzag | Feature::ReadingHall | Feature::PillarHall | Feature::Stream { .. }) | None => {}
+                    Some(Feature::Zigzag | Feature::ReadingHall | Feature::PillarHall | Feature::Stream { .. } | Feature::HandHall) | None => {}
                 }
                 if i == 0 {
                     assert_eq!(r.entry_height, 0.0);
@@ -1463,9 +1480,9 @@ mod tests {
                 for i in a..=b {
                     let r = plan.room(i).unwrap();
                     assert!(r.pursuit);
-                    assert!(r.encounter.is_none() && r.feature.is_none());
+                    assert!(r.encounter.is_none() && (r.feature.is_none() || (i == b && r.feature == Some(Feature::HandHall))));
                     assert_eq!(r.mimics.len(), usize::from(CHASE_CHOICE_ROOMS.contains(&i)), "room {i}");
-                    assert!(r.dividers().len() >= 2, "chase rooms are big with obstacles");
+                    assert!(i == b || r.dividers().len() >= 2, "chase rooms are big with obstacles (the hand hall at the end is open)");
                     assert_ne!(r.kind, RoomKind::KeyPuzzle);
                 }
                 assert!(!plan.room(b + 1).unwrap().pursuit);

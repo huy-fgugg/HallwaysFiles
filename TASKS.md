@@ -136,6 +136,7 @@
 - [x] Nothing overlaps: every garden piece claims its footprint, tree crowns stay inside the walls, off the path and clear of lamps, and wall furniture keeps clear of them all
 - [x] Proper standing street lamps with glowing lanterns, spaced further apart
 - [x] Planned layouts instead of random scatter: tree avenues along the garden walls and one corner cluster (with a stump, boulder or fallen trunk), sheds in corners, windmills in a free corner facing the garden, pairs of benches facing the path, atrium benches in pairs along the carpet, plants flanking the exit door and in the far corners, drums stored together in a corner
+- [x] The chases end in a hand hall: huge black hands reach out of both walls in rolling waves, right up to a glowing lane down the middle; leave the lane while they reach and they drag you into the wall. The hands in the earlier chase rooms are big clawed arms too, and hit harder
 - [x] Credits list every model and texture source (and the player characters)
 
 ## 1.1.0
