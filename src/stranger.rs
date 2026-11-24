@@ -96,6 +96,7 @@ fn run_stranger(
             if !free || surge.0 != crate::surge::SurgePhase::Idle || chase.active || !rolls(m, room, r.seed) {
                 return;
             }
+            info!("custom monster {} coming in room {room}", m.name);
             st.phase = Phase::Cue { room, t: 0.0 };
             *mood = Mood { tint, amount: 0.4, scale: 1.0, flicker: 0.85 };
             sfx.write(PlaySfx(Sfx::SurgeRoar));
