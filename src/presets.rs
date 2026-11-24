@@ -75,6 +75,9 @@ pub struct Preset {
     pub reading_room: u32,
     /// The mode's own rushing monster.
     pub custom: CustomMonster,
+    /// Cutscenes made in the Cutscene Maker (not carried by share codes).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cutscenes: Vec<crate::cutmaker::ModeCutscene>,
 }
 
 /// A monster made in the Mode Creator: it rushes through the rooms like the
@@ -206,6 +209,7 @@ impl Default for Preset {
             structures: [2; 5],
             reading_room: crate::floor::plan::READING_HALL,
             custom: CustomMonster::default(),
+            cutscenes: Vec::new(),
         }
     }
 }
@@ -517,6 +521,8 @@ impl Preset {
         c.warning = c.warning.clamp(10, 100);
         c.chance = c.chance.clamp(1, 100);
         c.first_room = c.first_room.clamp(FIRST_ROOM + 1, 99);
+        self.cutscenes.truncate(crate::cutmaker::MAX_CUTSCENES);
+        self.cutscenes = std::mem::take(&mut self.cutscenes).into_iter().map(|c| c.sanitized()).collect();
         self.levels.truncate(ENTITY_NAMES.len());
         for l in &mut self.levels {
             *l = (*l).min(4);

@@ -294,12 +294,15 @@ fn start_cutscenes(
     mut seen: ResMut<SeenCutscenes>,
     peers: Option<Res<crate::net::Peers>>,
     vars: Option<Res<CutsceneVars>>,
+    mode: Option<Res<crate::presets::ActivePreset>>,
 ) {
     for PlayCutscene(id) in reader.read() {
         // You plus everyone else in the room.
         let players = 1 + peers.as_ref().map_or(0, |p| p.0.values().filter(|s| s.alive).count()) as u8;
         let vars = vars.as_deref().cloned().unwrap_or_default();
-        match load_def(id).map(|d| d.with_vars(players.min(5), &vars)) {
+        // A mode's own cutscene (Cutscene Maker) or one of the game's.
+        let def = mode.as_deref().and_then(|m| crate::cutmaker::mode_def(id, m)).or_else(|| load_def(id));
+        match def.map(|d| d.with_vars(players.min(5), &vars)) {
             Some(def) => {
                 info!("cutscene: {id} ({:.1}s)", def.duration);
                 *active = ActiveCutscene { id: id.clone(), def: Some(def), ..default() };

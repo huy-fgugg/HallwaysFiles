@@ -163,18 +163,20 @@ pub fn tabs() -> Vec<Tab> {
             subtitle: "What you find in drawers, and the Lumens you take home.",
             groups: vec![("Loot", vec![Supplies, Lumens]), ("Item pool", (0..5).map(Item).collect())],
         },
+        Tab { name: "Cutscenes", title: "Cutscene Maker", subtitle: "Make your own cutscenes: pick a camera move, how long, what it says and an effect for each shot.", groups: vec![] },
         Tab { name: "Help", title: "Help", subtitle: "How the Mode Creator works.", groups: vec![] },
     ]
 }
 
-pub const HELP: [&str; 7] = [
+pub const HELP: [&str; 8] = [
     "1.  Pick a tab at the top. Each row is one setting: tap the box on the right to change it (the < goes back).",
     "2.  Cream pills are ON, dark pills are OFF. Tap a group bar to fold it away.",
     "3.  The meter at the top shows how hard your mode is.",
     "4.  PLAY tries it alone. HOST ROOM opens an online room with your mode for up to 4 players.",
     "5.  SAVE keeps it in Custom Floors. The SHARE CODE carries every setting: send it to a friend and they type it in and press Use Code.",
     "6.  YOUR MONSTER: switch it on, give it a name and colour, then set how fast, how often and how hard it hits.",
-    "7.  BUILD ROOMS opens the Map Builder to lay out every room yourself. Player-made modes and maps always say so on screen.",
+    "7.  CUTSCENES: press New, then set each shot's camera, effect, seconds and caption. Pick when it plays (the start, or a door) and press Preview.",
+    "8.  BUILD ROOMS opens the Map Builder to lay out every room yourself. Player-made modes and maps always say so on screen.",
 ];
 
 /// Every setting in tab order (the index used by [`MenuAction::CreatorCard`]).
@@ -406,6 +408,8 @@ pub struct ModeEditor {
     pub tab: usize,
     /// Folded group bars ("Tab/Group").
     pub collapsed: Vec<String>,
+    /// Cutscene open in the Cutscene Maker.
+    pub cut: usize,
 }
 
 impl ModeEditor {
@@ -414,7 +418,7 @@ impl ModeEditor {
         let mut mode = Preset { name: "My Mode".into(), ..Preset::default() };
         mode.doors = 40;
         let tab = std::env::var("HALLWAYS_CREATOR_TAB").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-        Self { mode, list, index: 0, code: String::new(), status: "Pick a tab, tap a box to change it, then Play, Host or Save.".into(), version: 1, tab, collapsed: Vec::new() }
+        Self { mode, list, index: 0, code: String::new(), status: "Pick a tab, tap a box to change it, then Play, Host or Save.".into(), version: 1, tab, collapsed: Vec::new(), cut: 0 }
     }
 }
 
@@ -504,6 +508,80 @@ fn creator_actions(
                 }
             }
             MenuAction::CreatorTab(i) => ed.tab = (i as usize).min(tabs().len() - 1),
+            MenuAction::CutPick(d) => {
+                let n = ed.mode.cutscenes.len().max(1) as i32;
+                ed.cut = (ed.cut as i32 + d as i32).rem_euclid(n) as usize;
+            }
+            MenuAction::CutNew => {
+                if ed.mode.cutscenes.len() < crate::cutmaker::MAX_CUTSCENES {
+                    // The first one opens the mode; later ones wait at a door.
+                    let door = if ed.mode.cutscenes.iter().any(|c| c.door == 0) { 10 } else { 0 };
+                    ed.mode.cutscenes.push(crate::cutmaker::ModeCutscene { door, ..default() });
+                    ed.cut = ed.mode.cutscenes.len() - 1;
+                    ed.status = "New cutscene: change its shots, then press Preview.".into();
+                } else {
+                    ed.status = format!("A mode can have up to {} cutscenes.", crate::cutmaker::MAX_CUTSCENES);
+                }
+            }
+            MenuAction::CutDelete => {
+                let cut = ed.cut;
+                if cut < ed.mode.cutscenes.len() {
+                    ed.mode.cutscenes.remove(cut);
+                    ed.cut = ed.cut.saturating_sub(1);
+                }
+            }
+            MenuAction::CutDoor(d) => {
+                let cut = ed.cut;
+                if let Some(c) = ed.mode.cutscenes.get_mut(cut) {
+                    let doors = crate::cutmaker::DOORS;
+                    let i = doors.iter().position(|x| *x >= c.door).unwrap_or(0) as i32;
+                    c.door = doors[(i + d as i32).rem_euclid(doors.len() as i32) as usize];
+                }
+            }
+            MenuAction::ShotAdd => {
+                let cut = ed.cut;
+                if let Some(c) = ed.mode.cutscenes.get_mut(cut)
+                    && c.shots.len() < crate::cutmaker::MAX_SHOTS
+                {
+                    c.shots.push(crate::cutmaker::ModeShot::default());
+                }
+            }
+            MenuAction::ShotDel(k) => {
+                let cut = ed.cut;
+                if let Some(c) = ed.mode.cutscenes.get_mut(cut)
+                    && c.shots.len() > 1
+                    && (k as usize) < c.shots.len()
+                {
+                    c.shots.remove(k as usize);
+                }
+            }
+            MenuAction::ShotCam(k, d) | MenuAction::ShotFx(k, d) | MenuAction::ShotSecs(k, d) => {
+                let cut = ed.cut;
+                if let Some(s) = ed.mode.cutscenes.get_mut(cut).and_then(|c| c.shots.get_mut(k as usize)) {
+                    let wrap = |v: u8, n: usize| (v as i32 + d as i32).rem_euclid(n as i32) as u8;
+                    match *a {
+                        MenuAction::ShotCam(..) => s.camera = wrap(s.camera, crate::cutmaker::CAMERAS.len()),
+                        MenuAction::ShotFx(..) => s.effect = wrap(s.effect, crate::cutmaker::EFFECTS.len()),
+                        _ => s.seconds = (s.seconds as i32 - 1 + d as i32).rem_euclid(8) as u8 + 1,
+                    }
+                }
+            }
+            MenuAction::CutPreview => {
+                // Play the mode from this cutscene: from the start, or from its door.
+                let Some(c) = ed.mode.cutscenes.get(ed.cut).cloned() else {
+                    ed.status = "Make a cutscene first (press New).".into();
+                    continue;
+                };
+                let mut p = ed.mode.clone();
+                if c.door > 0 {
+                    p.doors = p.doors.max(c.door + 6);
+                    p.start_door = c.door - 1;
+                }
+                *seed = RunSeed(random_seed());
+                active.0 = Some(p.sanitized());
+                next_overlay.set(Overlay::None);
+                next_app.set(AppState::Playing);
+            }
             MenuAction::CreatorGroup(i) => {
                 if let Some(g) = groups.get(i as usize) {
                     if let Some(k) = ed.collapsed.iter().position(|c| c == g) {
@@ -706,7 +784,9 @@ fn redraw(mut commands: Commands, theme: Res<UiTheme>, ed: Res<ModeEditor>, root
                     h.spawn((Text::new(tab.title), t.font(true, t.size_body * 1.25), TextColor(pal::CREAM)));
                     h.spawn((Text::new(tab.subtitle), t.font(false, t.size_small), TextColor(pal::DIM)));
                 });
-                if tab.groups.is_empty() {
+                if tab.name == "Cutscenes" {
+                    cutscene_panel(panel, &t, &ed, keep);
+                } else if tab.groups.is_empty() {
                     for line in HELP {
                         panel.spawn((Text::new(line), t.font(false, t.size_small * 1.05), TextColor(pal::TEXT), Node { max_width: px(PANEL_W - 60.0), ..default() }));
                     }
@@ -780,6 +860,80 @@ fn redraw(mut commands: Commands, theme: Res<UiTheme>, ed: Res<ModeEditor>, root
                 }
             });
         });
+}
+
+/// A small "<" button next to a selector.
+fn back_btn(c: &mut ChildSpawnerCommands, t: &UiTheme, action: MenuAction, order: i32, keep: Option<i32>) {
+    let e = btn(c, t, "<", t.size_small, action, order, keep, 36.0, 38.0, dark_palette(), |_| {});
+    c.commands().entity(e).entry::<Node>().and_modify(|mut n| {
+        n.justify_content = JustifyContent::Center;
+        n.padding = UiRect::ZERO;
+    });
+}
+
+/// A dark selector box with a chevron.
+#[allow(clippy::too_many_arguments)]
+fn select_box(c: &mut ChildSpawnerCommands, t: &UiTheme, value: &str, back: MenuAction, next: MenuAction, order: i32, keep: Option<i32>, w: f32) {
+    back_btn(c, t, back, order - 1, keep);
+    let e = btn(c, t, value, t.size_small, next, order, keep, w, 38.0, dark_palette(), |b| {
+        b.spawn(Node { flex_grow: 1.0, ..default() });
+        chevron(b, pal::CREAM, true);
+    });
+    c.commands().entity(e).entry::<Node>().and_modify(|mut n| n.justify_content = JustifyContent::FlexStart);
+}
+
+/// The Cutscene Maker: pick a cutscene, when it plays, and its shots.
+fn cutscene_panel(panel: &mut ChildSpawnerCommands, t: &UiTheme, ed: &ModeEditor, keep: Option<i32>) {
+    use crate::cutmaker::{CAMERAS, EFFECTS};
+    let cuts = &ed.mode.cutscenes;
+    let cur = cuts.get(ed.cut);
+    // Top bar: which cutscene, new/delete, when it plays, add shot, preview.
+    panel.spawn((Node { width: px(PANEL_W - 40.0), height: px(56), align_items: AlignItems::Center, column_gap: px(8), padding: UiRect::axes(px(14), px(4)), border_radius: BorderRadius::all(px(10)), ..default() }, BackgroundColor(pal::ROW))).with_children(|row| {
+        row.spawn((Text::new("CUTSCENE"), t.font(true, t.size_small), TextColor(pal::TEXT), Node { width: px(100), ..default() }));
+        let name = match cur {
+            Some(_) => format!("Cutscene {} of {}", ed.cut + 1, cuts.len()),
+            None => "None yet".into(),
+        };
+        select_box(row, t, &name, MenuAction::CutPick(-1), MenuAction::CutPick(1), 41, keep, 220.0);
+        btn(row, t, "NEW", t.size_small, MenuAction::CutNew, 42, keep, 90.0, 38.0, cream_palette(), |_| {});
+        btn(row, t, "DELETE", t.size_small, MenuAction::CutDelete, 43, keep, 110.0, 38.0, dark_palette(), |_| {});
+        row.spawn((Text::new("PLAYS"), t.font(true, t.size_small), TextColor(pal::TEXT), Node { margin: UiRect::left(px(14)), ..default() }));
+        let when = cur.map_or("-".to_string(), |c| c.trigger_name());
+        select_box(row, t, &when, MenuAction::CutDoor(-1), MenuAction::CutDoor(1), 45, keep, 240.0);
+        row.spawn(Node { flex_grow: 1.0, ..default() });
+        btn(row, t, "+ SHOT", t.size_small, MenuAction::ShotAdd, 46, keep, 110.0, 38.0, dark_palette(), |_| {});
+        btn(row, t, "PREVIEW", t.size_small, MenuAction::CutPreview, 47, keep, 130.0, 38.0, cream_palette(), |_| {});
+    });
+    let Some(c) = cur else {
+        panel.spawn((Text::new("No cutscenes yet. Press NEW to make one: it plays when your mode starts, or when players walk through a door you pick."), t.font(false, t.size_small), TextColor(pal::DIM), Node { margin: UiRect::top(px(16)), ..default() }));
+        return;
+    };
+    // Column headings.
+    panel.spawn(Node { width: px(PANEL_W - 40.0), column_gap: px(8), padding: UiRect::horizontal(px(14)), ..default() }).with_children(|h| {
+        for (label, w) in [("SHOT", 70.0), ("CAMERA", 274.0), ("EFFECT", 254.0), ("TIME", 130.0), ("CAPTION", 440.0)] {
+            h.spawn((Text::new(label), t.font(true, t.size_small * 0.8), TextColor(pal::DIM), Node { width: px(w), ..default() }));
+        }
+    });
+    for (k, s) in c.shots.iter().enumerate() {
+        let o = 100 + k as i32 * 10;
+        let k8 = k as u8;
+        panel.spawn((Node { width: px(PANEL_W - 40.0), height: px(48), align_items: AlignItems::Center, column_gap: px(8), padding: UiRect::axes(px(14), px(4)), border_radius: BorderRadius::all(px(10)), ..default() }, BackgroundColor(pal::ROW))).with_children(|row| {
+            row.spawn((Text::new(format!("{}", k + 1)), t.font(true, t.size_body), TextColor(pal::CREAM), Node { width: px(70), ..default() }));
+            select_box(row, t, CAMERAS[s.camera as usize % CAMERAS.len()], MenuAction::ShotCam(k8, -1), MenuAction::ShotCam(k8, 1), o + 1, keep, 230.0);
+            select_box(row, t, EFFECTS[s.effect as usize % EFFECTS.len()], MenuAction::ShotFx(k8, -1), MenuAction::ShotFx(k8, 1), o + 3, keep, 210.0);
+            select_box(row, t, &format!("{} s", s.seconds), MenuAction::ShotSecs(k8, -1), MenuAction::ShotSecs(k8, 1), o + 5, keep, 86.0);
+            row.spawn(Node { width: px(440), ..default() }).with_children(|n| {
+                let f = field_row(n, t, FieldKind::ShotCaption(k8), &s.text, o + 6);
+                n.commands().entity(f).insert(dark_palette());
+            });
+            let e = btn(row, t, "X", t.size_small, MenuAction::ShotDel(k8), o + 7, keep, 40.0, 38.0, dark_palette(), |_| {});
+            row.commands().entity(e).entry::<Node>().and_modify(|mut n| {
+                n.justify_content = JustifyContent::Center;
+                n.padding = UiRect::ZERO;
+            });
+        });
+    }
+    panel.spawn((Text::new(format!("{:.1} seconds long. Captions can use {{party}} for \"you\" or \"the 3 of you\". Cutscenes are saved with the mode (Save), not in share codes.", c.duration())), t.font(false, t.size_small * 0.9), TextColor(pal::DIM)));
 }
 
 /// One setting: label and hint on the left, its control on the right.

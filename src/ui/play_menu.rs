@@ -26,6 +26,8 @@ pub enum FieldKind {
     ModeName,
     ShareCode,
     MonsterName,
+    /// Caption of shot N of the cutscene open in the Cutscene Maker.
+    ShotCaption(u8),
 }
 
 impl FieldKind {
@@ -41,6 +43,7 @@ impl FieldKind {
             FieldKind::ModeName => "MODE NAME",
             FieldKind::ShareCode => "ENTER A CODE",
             FieldKind::MonsterName => "NAME",
+            FieldKind::ShotCaption(_) => "SAYS",
         }
     }
 
@@ -56,6 +59,7 @@ impl FieldKind {
             FieldKind::ModeName => 24,
             FieldKind::ShareCode => 32,
             FieldKind::MonsterName => 16,
+            FieldKind::ShotCaption(_) => 60,
         }
     }
 
@@ -71,6 +75,8 @@ impl FieldKind {
             FieldKind::ModeName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::ShareCode => c.is_ascii_alphanumeric() || c == '-',
             FieldKind::MonsterName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-'),
+            FieldKind::ShotCaption(_) => c.is_ascii_graphic() || c == ' ',
+
         }
     }
 }
@@ -132,6 +138,7 @@ pub fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: Field
                 border: UiRect::all(px(theme.border)),
                 border_radius: BorderRadius::all(px(theme.radius)),
                 column_gap: px(10),
+                overflow: Overflow::clip_x(),
                 ..default()
             },
             BackgroundColor(theme.bg),
@@ -141,7 +148,7 @@ pub fn field_row(parent: &mut ChildSpawnerCommands, theme: &UiTheme, kind: Field
         ))
         .with_children(|r| {
             r.spawn((Text::new(kind.label()), theme.font(true, theme.size_small), TextColor(theme.text_dim)));
-            r.spawn((Text::new(value.to_string()), theme.font(true, theme.size_small), TextColor(theme.text), FieldText));
+            r.spawn((Text::new(value.to_string()), theme.font(true, theme.size_small), TextColor(theme.text), TextLayout::no_wrap(), FieldText));
         })
         .id()
 }
@@ -286,6 +293,14 @@ fn type_into_fields(
                         m.code = field.value.clone();
                     }
                 }
+                FieldKind::ShotCaption(k) => {
+                    if let Some(m) = mode_editor.as_mut() {
+                        let cut = m.cut;
+                        if let Some(s) = m.mode.cutscenes.get_mut(cut).and_then(|c| c.shots.get_mut(k as usize)) {
+                            s.text = field.value.clone();
+                        }
+                    }
+                }
                 FieldKind::MonsterName => {
                     if let Some(m) = mode_editor.as_mut() {
                         m.mode.custom.name = field.value.clone();
@@ -300,6 +315,7 @@ fn type_into_fields(
                 FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
                 FieldKind::PresetSeed => "random".to_string(),
                 FieldKind::Name | FieldKind::PresetName | FieldKind::MapName | FieldKind::ModeName | FieldKind::MonsterName => String::new(),
+                FieldKind::ShotCaption(_) => "(no caption)".to_string(),
                 FieldKind::ShareCode => "HW-...".to_string(),
             }
         } else {

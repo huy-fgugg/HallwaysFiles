@@ -251,7 +251,12 @@ fn custom_quick_start(
         // Player-made modes and maps say so on the title card.
         let area = if p.player_made() { format!("PLAYER-MADE  -  {}", r.area.name()) } else { r.area.name().to_string() };
         *vars = crate::cutscene::CutsceneVars { floor: p.name.clone(), area, doors: floor.0.final_door() };
-        play.write(crate::cutscene::PlayCutscene(crate::cutscene::CUSTOM_START.into()));
+        // A mode with its own opening (Cutscene Maker) plays that instead.
+        let id = match crate::cutmaker::start_cutscene(&preset) {
+            Some(i) => format!("{}{i}", crate::cutmaker::MODE_PREFIX),
+            None => crate::cutscene::CUSTOM_START.into(),
+        };
+        play.write(crate::cutscene::PlayCutscene(id));
     }
 }
 
