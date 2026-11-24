@@ -10,7 +10,6 @@ pub mod scroll;
 pub mod settings_menu;
 pub mod skin_menu;
 pub mod map_builder;
-pub mod mode_creator;
 pub mod splash;
 
 use bevy::prelude::*;
@@ -31,7 +30,6 @@ impl Plugin for UiPlugin {
             splash::SplashPlugin,
             skin_menu::SkinMenuPlugin,
             map_builder::MapBuilderPlugin,
-            mode_creator::ModeCreatorPlugin,
         ));
     }
 }

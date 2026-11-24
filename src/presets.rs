@@ -42,11 +42,11 @@ pub struct Preset {
     /// A hand-built map (Map Builder): its rooms in order. Empty = generated.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rooms: Vec<crate::mapfile::MapRoom>,
-    /// How often each monster comes (Mode Creator): 0 off, 1 rare, 2 normal,
+    /// How often each monster comes : 0 off, 1 rare, 2 normal,
     /// 3 often, 4 constant. Empty = from the on/off switches (on = normal).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub levels: Vec<u8>,
-    /// Mode Creator extras (all optional in files; defaults = the normal game).
+    /// Extra rules (all optional in files; defaults = the normal game).
     /// Door you start at (0 = the beginning).
     pub start_door: u32,
     /// The two Hollow chases happen.
@@ -73,59 +73,6 @@ pub struct Preset {
     pub structures: [u8; 5],
     /// Room the Reading Hall is at (0 = no Reading Hall).
     pub reading_room: u32,
-    /// The mode's own rushing monster.
-    pub custom: CustomMonster,
-    /// Cutscenes made in the Cutscene Maker (not carried by share codes).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub cutscenes: Vec<crate::cutmaker::ModeCutscene>,
-}
-
-/// A monster made in the Mode Creator: it rushes through the rooms like the
-/// Surge, in its own colour and with its own rules.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CustomMonster {
-    pub on: bool,
-    pub name: String,
-    /// Index into [`MONSTER_COLORS`].
-    pub color: u8,
-    /// Speed in m/s, slowest and fastest (each run picks in between).
-    pub speed_min: u8,
-    pub speed_max: u8,
-    /// Times it turns around and comes back.
-    pub passes: u8,
-    /// Damage when it catches you (100 = kills).
-    pub damage: u8,
-    /// Warning before it arrives, tenths of a second.
-    pub warning: u8,
-    /// Chance per room, percent.
-    pub chance: u8,
-    /// First room it can appear in.
-    pub first_room: u32,
-}
-
-impl Default for CustomMonster {
-    fn default() -> Self {
-        Self { on: false, name: "The Stranger".into(), color: 0, speed_min: 16, speed_max: 24, passes: 0, damage: 100, warning: 40, chance: 15, first_room: 10 }
-    }
-}
-
-pub const MONSTER_COLORS: [(&str, [f32; 3]); 8] = [
-    ("Red", [1.0, 0.2, 0.15]),
-    ("Orange", [1.0, 0.55, 0.15]),
-    ("Yellow", [1.0, 0.9, 0.3]),
-    ("Green", [0.35, 1.0, 0.4]),
-    ("Cyan", [0.3, 0.95, 1.0]),
-    ("Blue", [0.3, 0.45, 1.0]),
-    ("Purple", [0.75, 0.35, 1.0]),
-    ("White", [0.95, 0.95, 1.0]),
-];
-
-impl CustomMonster {
-    pub fn rgb(&self) -> Color {
-        let c = MONSTER_COLORS[(self.color as usize) % MONSTER_COLORS.len()].1;
-        Color::srgb(c[0], c[1], c[2])
-    }
 }
 
 pub const STRUCTURE_NAMES: [&str; 5] = ["Key lofts", "Stairs", "Zigzag walls", "Pillar halls", "Streams"];
@@ -167,7 +114,7 @@ impl ModeRules {
     }
 }
 
-/// Monster frequency names (Mode Creator).
+/// Monster frequency names.
 pub const LEVEL_NAMES: [&str; 5] = ["Off", "Rare", "Normal", "Often", "Constant"];
 const LEVEL_RATE: [f32; 5] = [0.0, 0.45, 1.0, 1.7, 3.0];
 
@@ -208,8 +155,6 @@ impl Default for Preset {
             items_off: 0,
             structures: [2; 5],
             reading_room: crate::floor::plan::READING_HALL,
-            custom: CustomMonster::default(),
-            cutscenes: Vec::new(),
         }
     }
 }
@@ -383,22 +328,7 @@ impl Preset {
         ]);
         bytes[0] = 3;
         let st = self.structures.iter().enumerate().fold(0u16, |m, (i, l)| m | (u16::from((*l).min(4)) << (i * 3)));
-        let c = &self.custom;
-        bytes.extend_from_slice(&[
-            self.revives.min(5) | (self.sprint as u8) << 3 | (c.on as u8) << 4,
-            self.items_off,
-            st as u8,
-            (st >> 8) as u8,
-            self.reading_room.min(255) as u8,
-            c.color,
-            c.speed_min,
-            c.speed_max,
-            c.passes,
-            c.damage,
-            c.warning,
-            c.chance,
-            c.first_room.min(255) as u8,
-        ]);
+        bytes.extend_from_slice(&[self.revives.min(5) | (self.sprint as u8) << 3, self.items_off, st as u8, (st >> 8) as u8, self.reading_room.min(255) as u8]);
         let sum = bytes.iter().fold(0u8, |a, b| a.wrapping_mul(31).wrapping_add(*b));
         bytes.push(sum);
         format!("HW-{}", base32(&bytes))
@@ -411,7 +341,9 @@ impl Preset {
         let n = match b.first() {
             Some(1) => 13,
             Some(2) => 20,
-            Some(3) => 33,
+            // 25 bytes; 33 in 1.1.2 codes, which also carried a custom monster.
+            Some(3) if b.len() >= 34 && b[..33].iter().fold(0u8, |a, x| a.wrapping_mul(31).wrapping_add(*x)) == b[33] => 33,
+            Some(3) => 25,
             _ => return None,
         };
         if b.len() < n + 1 {
@@ -438,19 +370,15 @@ impl Preset {
             p.hide_time = b[18] as u32 * 25;
             p.lumens = b[19] as u32 * 25;
         }
-        if n >= 33 {
+        if n >= 25 {
             p.revives = b[20] & 7;
             p.sprint = b[20] & 8 != 0;
-            p.custom.on = b[20] & 16 != 0;
             p.items_off = b[21];
             let st = u16::from_le_bytes([b[22], b[23]]);
             for i in 0..5 {
                 p.structures[i] = ((st >> (i * 3)) & 7) as u8;
             }
             p.reading_room = b[24] as u32;
-            let c = &mut p.custom;
-            (c.color, c.speed_min, c.speed_max, c.passes, c.damage, c.warning, c.chance) = (b[25], b[26], b[27], b[28], b[29], b[30], b[31]);
-            c.first_room = b[32] as u32;
         }
         Some(p.sanitized())
     }
@@ -508,21 +436,6 @@ impl Preset {
         if self.reading_room != 0 {
             self.reading_room = self.reading_room.clamp(FIRST_ROOM + 2, 98);
         }
-        let c = &mut self.custom;
-        c.name = clean_name(&c.name);
-        if c.name.is_empty() {
-            c.name = "The Stranger".into();
-        }
-        c.color %= MONSTER_COLORS.len() as u8;
-        c.speed_min = c.speed_min.clamp(6, 40);
-        c.speed_max = c.speed_max.clamp(c.speed_min, 40);
-        c.passes = c.passes.min(5);
-        c.damage = c.damage.clamp(10, 100);
-        c.warning = c.warning.clamp(10, 100);
-        c.chance = c.chance.clamp(1, 100);
-        c.first_room = c.first_room.clamp(FIRST_ROOM + 1, 99);
-        self.cutscenes.truncate(crate::cutmaker::MAX_CUTSCENES);
-        self.cutscenes = std::mem::take(&mut self.cutscenes).into_iter().map(|c| c.sanitized()).collect();
         self.levels.truncate(ENTITY_NAMES.len());
         for l in &mut self.levels {
             *l = (*l).min(4);
@@ -572,7 +485,7 @@ impl Preset {
         let k = self.entities as f32 / 100.0;
         let tunings = [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush, &mut cfg.listener];
         for (i, t) in tunings.into_iter().enumerate() {
-            // Overall rate times this monster's own level (Mode Creator).
+            // Overall rate times this monster's own level.
             let k = k * LEVEL_RATE[self.level(i) as usize];
             t.chance = if self.entity_on(i) && k > 0.0 { (t.chance * k).min(0.95) } else { 0.0 };
             if k > 1.0 {
@@ -766,10 +679,8 @@ mod tests {
         r.items_off = 0b10010;
         r.structures = [0, 1, 2, 3, 4];
         r.reading_room = 33;
-        r.custom = CustomMonster { on: true, color: 4, speed_min: 10, speed_max: 30, passes: 2, damage: 40, warning: 25, chance: 60, first_room: 12, ..CustomMonster::default() };
         let back = Preset::from_share_code(&r.share_code()).unwrap();
         assert_eq!((back.revives, back.sprint, back.items_off, back.structures, back.reading_room), (2, false, 0b10010, [0, 1, 2, 3, 4], 33));
-        assert_eq!(back.custom, r.custom);
         // A typo is caught by the checksum.
         let mut bad = code.clone();
         bad.replace_range(5..6, if &code[5..6] == "A" { "B" } else { "A" });

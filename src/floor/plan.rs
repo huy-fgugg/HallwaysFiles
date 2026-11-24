@@ -483,7 +483,7 @@ pub struct GenOptions {
     pub fake_doors: f32,
     pub stairs: f32,
     pub loot: f32,
-    /// The Hollow chases happen (Mode Creator can switch them off).
+    /// The Hollow chases happen.
     pub chases: bool,
     /// Custom area lists are shuffled per seed (false = in the listed order).
     pub shuffle: bool,

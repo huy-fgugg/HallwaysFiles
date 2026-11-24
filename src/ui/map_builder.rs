@@ -91,7 +91,10 @@ impl Plugin for MapBuilderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(Screen::MapBuilder), open_builder)
             .add_systems(Update, (builder_actions, redraw, super::play_menu::room_ready).chain().run_if(in_state(Screen::MapBuilder)))
-            .add_systems(Update, (open_from_menus, dropped_files).run_if(in_state(AppState::MainMenu)));
+            .add_systems(Update, (open_from_menus, dropped_files).run_if(in_state(AppState::MainMenu)))
+            // Player-made floors and maps say so on screen the whole run.
+            .add_systems(OnEnter(AppState::Playing), spawn_player_made_banner)
+            .add_systems(Update, show_player_made_banner.run_if(in_state(AppState::Playing)));
     }
 }
 
@@ -493,3 +496,34 @@ fn spawn_screen(commands: &mut Commands, t: &UiTheme, ed: &MapEditor, keep: Opti
             root.spawn((Text::new(ed.status.clone()), t.font(false, t.size_small), TextColor(t.text_dim), Node { max_width: px(1100), ..default() }));
         });
 }
+
+/// "PLAYER-MADE MODE" banner shown through the whole run of a player's mode or map.
+#[derive(Component)]
+struct PlayerMadeBanner;
+
+fn spawn_player_made_banner(mut commands: Commands, theme: Res<UiTheme>, active: Res<ActivePreset>) {
+    let Some(p) = active.0.as_ref().filter(|p| p.player_made()) else { return };
+    let kind = if p.rooms.is_empty() { "PLAYER-MADE MODE" } else { "PLAYER-MADE MAP" };
+    commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, top: px(10), left: percent(50), margin: UiRect::left(px(-210)), width: px(420), justify_content: JustifyContent::Center, padding: UiRect::axes(px(12), px(4)), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(6)), ..default() },
+            BackgroundColor(Color::srgba(0.35, 0.18, 0.02, 0.8)),
+            BorderColor::all(Color::srgb(1.0, 0.75, 0.25)),
+            GlobalZIndex(12),
+            Pickable::IGNORE,
+            PlayerMadeBanner,
+            DespawnOnExit(AppState::Playing),
+        ))
+        .with_child((Text::new(format!("{kind}:  {}", p.name.to_uppercase())), theme.font(true, theme.size_small), TextColor(Color::srgb(1.0, 0.85, 0.45)), Pickable::IGNORE));
+}
+
+fn show_player_made_banner(screen: Res<State<Screen>>, cutscene: Res<crate::cutscene::ActiveCutscene>, mut q: Query<&mut Visibility, With<PlayerMadeBanner>>) {
+    let show = matches!(screen.get(), Screen::Hud | Screen::Pause) && !cutscene.is_playing();
+    for mut v in &mut q {
+        let want = if show { Visibility::Inherited } else { Visibility::Hidden };
+        if *v != want {
+            *v = want;
+        }
+    }
+}
+

@@ -131,6 +131,10 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.3
+- [x] The Mode Creator is gone (with its Cutscene Maker and custom monster); the Map Builder is back under Extras
+- [x] Player-made floors and maps still say so on screen
+
 ## 1.1.2
 - [x] Mode Creator redesigned: a brown and cream screen with tabs (Floor, Areas, Monsters, Your Monster, Rooms, Lights, Player, Supplies, Cutscenes, Help), a row per setting with a selector box, ON/OFF pills and folding groups; nothing overlaps on PC or phone
 - [x] Every setting a mode can have: length, start door, room size, structures, locked doors, Hollow chases on/off, area order, each area, each monster's frequency, lights, dark rooms, fake doors, health, walk speed, sprinting, hiding time, revives (extra lives), starting items, supplies, Lumens earned and an item pool (switch items off)

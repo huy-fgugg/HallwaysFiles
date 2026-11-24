@@ -106,7 +106,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                 // Grouped: play first, then extras and options, quit apart at the bottom.
                 let groups: [(&str, &[(&str, MenuAction)]); 3] = [
                     ("", &[("Play", MenuAction::OpenPlay), ("Customise", MenuAction::OpenSkin)]),
-                    ("EXTRAS", &[("Mode Creator", MenuAction::OpenModeCreator), ("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
+                    ("EXTRAS", &[("Map Builder", MenuAction::OpenMapBuilder), ("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
                     ("", &[("Quit", MenuAction::Quit)]),
                 ];
                 let mut i = 0;
@@ -511,7 +511,7 @@ fn death_actions(
     for MenuActivated(a) in reader.read() {
         match a {
             MenuAction::Revive if run.revives_left > 0 => {
-                // Mode Creator revives: back up where you fell, with half health.
+                // Revives: back up where you fell, with half health.
                 run.revives_left -= 1;
                 run.vitality = 50.0;
                 *chase = crate::hollow::ChaseState::default();
