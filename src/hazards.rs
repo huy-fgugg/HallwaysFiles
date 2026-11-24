@@ -9,6 +9,12 @@
 //! * **Falling ceiling**: as you run in, a chunk of ceiling cracks above where
 //!   you are; a shadow marks the spot just before it lands.
 //!
+//! * **Fallen shelves**: a ceiling beam has come down wall to wall with a
+//!   toppled bookshelf on it and books spilled underneath. **Crouch** to get
+//!   under (standing, you can't pass).
+//! * **Burning chandelier**: a chandelier has crashed to the floor and is on
+//!   fire; weave around it (its flames hurt).
+//!
 //! * **The hand hall**: the last room of each chase is a straight hall whose
 //!   walls are lined with huge hands reaching out in waves, right up to the
 //!   edges of a lit lane down the middle. Step out of the lane while they
@@ -54,7 +60,17 @@ pub enum HazardKind {
     /// The hand hall: arms from both walls reaching `west` / `east` metres in,
     /// leaving the lane down the middle free.
     HandHall { west: f32, east: f32 },
+    /// A fallen beam and bookshelf wall to wall: crouch under it.
+    Fallen { tilt: f32 },
+    /// A burning chandelier on the floor at `x`.
+    Chandelier { x: f32 },
 }
+
+/// Underside of a fallen beam: crouching (head at ~1.1 m) gets under it.
+pub const BEAM_BOTTOM: f32 = 1.28;
+/// Burning chandelier: solid radius and how far its flames reach.
+pub const CHANDELIER_SOLID: f32 = 0.45;
+pub const CHANDELIER_BURN: f32 = 0.95;
 
 /// Length of the arm model, shoulder to fingertips (metres).
 const ARM_LEN: f32 = 2.6;
@@ -80,7 +96,8 @@ impl Hazard {
             HazardKind::Hands { east, reach } | HazardKind::Fire { east, len: reach } => {
                 if east { (r.max.x - reach, r.max.x) } else { (r.min.x, r.min.x + reach) }
             }
-            HazardKind::Debris | HazardKind::HandHall { .. } => (r.min.x, r.max.x),
+            HazardKind::Debris | HazardKind::HandHall { .. } | HazardKind::Fallen { .. } => (r.min.x, r.max.x),
+            HazardKind::Chandelier { x } => (x - CHANDELIER_BURN, x + CHANDELIER_BURN),
         };
         (Vec2::new(lo, self.z - self.half), Vec2::new(hi, self.z + self.half))
     }
@@ -125,11 +142,19 @@ pub fn room_hazards(seed: u64, r: &RoomPlan) -> Vec<Hazard> {
             Some(k) => k,
             None => roll,
         };
-        let kind = if roll < 0.4 && room_left >= 1.0 {
+        let kind = if roll < 0.3 && room_left >= 1.0 {
             HazardKind::Hands { east, reach: room_left.min(rng.range_f32(1.6, 3.2)) }
-        } else if roll < 0.75 && room_left >= 1.0 {
+        } else if roll < 0.52 && room_left >= 1.0 {
             HazardKind::Fire { east, len: room_left.min(rng.range_f32(2.0, 4.5)) }
-        } else if roll < 0.92 {
+        } else if roll < 0.7 {
+            HazardKind::Fallen { tilt: rng.range_f32(-0.05, 0.05) }
+        } else if roll < 0.82 && width >= 2.0 * CHANDELIER_BURN + LANE + 0.4 {
+            // Off to one side, leaving a lane on the other.
+            let side = width - 2.0 * CHANDELIER_BURN - LANE;
+            let off = rng.range_f32(0.2, side.max(0.2));
+            let x = if east { r.max.x - CHANDELIER_BURN - off.min(side) } else { r.min.x + CHANDELIER_BURN + off.min(side) };
+            HazardKind::Chandelier { x }
+        } else if roll < 0.95 {
             HazardKind::Debris
         } else {
             continue;
@@ -157,7 +182,9 @@ fn forced_kind(n: usize) -> Option<f32> {
     match *name {
         "hands" => Some(0.1),
         "fire" => Some(0.5),
-        "debris" => Some(0.8),
+        "debris" => Some(0.9),
+        "fallen" => Some(0.6),
+        "chandelier" => Some(0.75),
         _ => None,
     }
 }
@@ -283,6 +310,9 @@ fn spawn_hazards(
 ) {
     let (Some(floor), Some(rt)) = (floor, rt) else { return };
     let claw = crate::floor::scenery::prop(&assets, "claw_arm");
+    let shelf = crate::floor::scenery::prop(&assets, "bookshelf");
+    let books = crate::floor::scenery::prop(&assets, "books");
+    let chandelier = crate::floor::scenery::prop(&assets, "chandelier");
     built.0.retain(|i| rt.loaded.contains(i));
     let rooms: Vec<u32> = chases(floor.0.last_room).flat_map(|(a, b)| a..=b).collect();
     for i in rooms {
@@ -300,6 +330,9 @@ fn spawn_hazards(
         let blob = meshes.add(Sphere::new(0.5).mesh().uv(16, 10));
         let disc = meshes.add(Cylinder::new(1.0, 0.01));
         for h in room_hazards(floor.0.seed, r) {
+            if std::env::var_os("HALLWAYS_WARP").is_some() {
+                info!("QA hazard {:?} room {} z {:.1} x {:.1}..{:.1} entry_x {:.1}", h.kind, i, h.z, r.min.x, r.max.x, r.entry_x);
+            }
             // Each falling-stone shadow fades in on its own.
             let shadow_mat = mats.add(StandardMaterial { base_color: Color::srgba(0.0, 0.0, 0.0, 0.0), alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
             let mut root = commands.spawn((
@@ -368,6 +401,68 @@ fn spawn_hazards(
                             }
                         }
                         c.spawn((PointLight { color: Color::srgb(1.0, 0.5, 0.15), intensity: 0.0, range: 7.0, ..default() }, Transform::from_xyz((x0 + x1) / 2.0, 0.8, h.z), FireLight));
+                    });
+                }
+                HazardKind::Fallen { tilt } => {
+                    let wood = mats.add(crate::world::materials::pbr_set(&assets, "dark_wood", Color::srgb(0.75, 0.65, 0.55)));
+                    let paper = mats.add(StandardMaterial { base_color: Color::srgb(0.88, 0.85, 0.76), perceptual_roughness: 0.9, double_sided: true, cull_mode: None, ..default() });
+                    let mut rng = GameRng::fork(r.seed, 79);
+                    let w = r.width();
+                    let cx = (r.min.x + r.max.x) / 2.0;
+                    root.insert(crate::physics::Collider(crate::physics::Aabb {
+                        min: Vec3::new(r.min.x, BEAM_BOTTOM, h.z - 1.1),
+                        max: Vec3::new(r.max.x, r.height + 0.5, h.z + 0.95),
+                    }));
+                    root.with_children(|c| {
+                        // The beam, wedged wall to wall (never lower than BEAM_BOTTOM).
+                        let mid = BEAM_BOTTOM + 0.18 + tilt.abs() * w / 2.0;
+                        c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(wood.clone()), Transform::from_xyz(cx, mid, h.z).with_rotation(Quat::from_rotation_z(tilt)).with_scale(Vec3::new(w + 0.1, 0.34, 0.4))));
+                        // Toppled bookshelves lying across it, on their backs.
+                        let n = (w / 1.4).floor().clamp(1.0, 4.0) as usize;
+                        for k in 0..n {
+                            let x = r.min.x + (k as f32 + 0.5) * w / n as f32 + rng.range_f32(-0.15, 0.15);
+                            let yaw = rng.range_f32(-0.25, 0.25);
+                            c.spawn((shelf.clone(), Transform::from_xyz(x, mid + 0.17, h.z - 0.85).with_rotation(Quat::from_rotation_y(yaw) * Quat::from_rotation_x(1.4)).with_scale(Vec3::splat(0.95))));
+                        }
+                        // Books and papers spilled on the floor on both sides.
+                        for _ in 0..(3 + (w / 1.5) as usize) {
+                            let x = rng.range_f32(r.min.x + 0.4, r.max.x - 0.4);
+                            let z = h.z + rng.range_f32(-1.4, 1.4);
+                            c.spawn((books.clone(), Transform::from_xyz(x, 0.0, z).with_rotation(Quat::from_rotation_y(rng.range_f32(0.0, 6.28)) * Quat::from_rotation_z(if rng.next_f32() < 0.5 { 1.57 } else { 0.0 })).with_scale(Vec3::splat(0.8))));
+                        }
+                        for _ in 0..12 {
+                            let x = rng.range_f32(r.min.x + 0.3, r.max.x - 0.3);
+                            let z = h.z + rng.range_f32(-1.8, 1.8);
+                            c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(paper.clone()), Transform::from_xyz(x, 0.006, z).with_rotation(Quat::from_rotation_y(rng.range_f32(0.0, 6.28))).with_scale(Vec3::new(0.21, 0.002, 0.3))));
+                        }
+                        // Rubble piled at the walls where the beam came down.
+                        for x in [r.min.x + 0.3, r.max.x - 0.3] {
+                            for _ in 0..3 {
+                                c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(rock_mat.clone()), Transform::from_xyz(x + rng.range_f32(-0.2, 0.2), rng.range_f32(0.1, 0.3), h.z + rng.range_f32(-0.4, 0.4)).with_rotation(Quat::from_rotation_y(rng.range_f32(0.0, 3.0))).with_scale(Vec3::new(0.35, 0.25, 0.3))));
+                            }
+                        }
+                    });
+                }
+                HazardKind::Chandelier { x } => {
+                    root.insert(crate::physics::Collider(crate::physics::Aabb {
+                        min: Vec3::new(x - CHANDELIER_SOLID, 0.0, h.z - CHANDELIER_SOLID),
+                        max: Vec3::new(x + CHANDELIER_SOLID, 1.0, h.z + CHANDELIER_SOLID),
+                    }));
+                    let mut rng = GameRng::fork(r.seed, 80);
+                    root.with_children(|c| {
+                        // Crashed on its side, chain still hanging from the ceiling.
+                        c.spawn((chandelier.clone(), Transform::from_xyz(x, 0.0, h.z).with_rotation(Quat::from_rotation_y(rng.range_f32(0.0, 6.28)) * Quat::from_rotation_z(0.5))));
+                        c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(grate.clone()), Transform::from_xyz(x, r.height - 0.6, h.z).with_scale(Vec3::new(0.03, 1.2, 0.03))));
+                        for k in 0..10 {
+                            let a = k as f32 / 10.0 * std::f32::consts::TAU;
+                            let rad = rng.range_f32(0.3, CHANDELIER_BURN * 0.8);
+                            let seed = k as f32 * 2.3;
+                            let base = 0.6 + (k % 3) as f32 * 0.2;
+                            let (fx, fz) = (x + a.cos() * rad, h.z + a.sin() * rad);
+                            c.spawn((Mesh3d(blob.clone()), MeshMaterial3d(flame_mat.clone()), Transform::from_xyz(fx, 0.0, fz).with_scale(Vec3::new(0.28, 0.01, 0.28)), Flame { base, seed, core: false }));
+                            c.spawn((Mesh3d(blob.clone()), MeshMaterial3d(core_mat.clone()), Transform::from_xyz(fx, 0.0, fz).with_scale(Vec3::new(0.14, 0.01, 0.14)), Flame { base: base * 0.55, seed: seed + 2.0, core: true }));
+                        }
+                        c.spawn((PointLight { color: Color::srgb(1.0, 0.5, 0.15), intensity: 0.0, range: 7.0, ..default() }, Transform::from_xyz(x, 0.9, h.z), FireLight));
                     });
                 }
                 HazardKind::Debris => {
@@ -486,6 +581,33 @@ fn run_hazards(
                     hurt = Some((12.0, "BURNED IN THE CHASE", "Fire vents flare in bursts during the chase. Watch for the flicker, then run past while they're out, or take the clear lane beside them."));
                 }
             }
+            HazardKind::Fallen { .. } => {
+                // Tell anyone running at it standing up to crouch (once).
+                if !body.done && pp.y > h.z && pp.y - h.z < 3.5 && pp.x > r.min.x && pp.x < r.max.x {
+                    body.done = true;
+                    subs.write(Subtitle::danger("[A beam and a bookshelf have come down!] CROUCH (C / Ctrl) to get under!"));
+                }
+            }
+            HazardKind::Chandelier { x } => {
+                // Always burning (the light flickers with the flames).
+                for c in children.iter() {
+                    if let Ok((flame, mut tf)) = flames.get_mut(c) {
+                        let k = 0.75 + 0.25 * (t * 9.0 + flame.seed).sin() * (t * 5.3 + flame.seed * 2.0).cos();
+                        let hgt = flame.base * k;
+                        tf.scale = Vec3::new(if flame.core { 0.14 } else { 0.28 }, hgt, if flame.core { 0.14 } else { 0.28 });
+                        tf.translation.y = hgt / 2.0;
+                    }
+                    if let Ok(mut l) = lights.get_mut(c) {
+                        l.intensity = 220_000.0 * (0.8 + 0.2 * (t * 11.0).sin());
+                    }
+                }
+                if Vec2::new(x, h.z).distance(pp) < CHANDELIER_BURN && p.translation.y < 1.0 && body.cooldown <= 0.0 {
+                    body.cooldown = 1.0;
+                    sfx.write(PlaySfx(Sfx::Whoosh));
+                    subs.write(Subtitle::danger("[The burning chandelier scorches you!]"));
+                    hurt = Some((15.0, "BURNED IN THE CHASE", "A fallen chandelier burns in the middle of the room. Keep to the open side and give the flames a wide berth."));
+                }
+            }
             HazardKind::Debris => {
                 if body.done {
                     continue;
@@ -572,7 +694,7 @@ mod tests {
 
     #[test]
     fn every_chase_room_has_a_hazard_and_a_free_lane() {
-        let mut kinds = [0; 3];
+        let mut kinds = [0; 5];
         for seed in 0..300 {
             let plan = generate(seed);
             for i in chases(plan.last_room).flat_map(|(a, b)| a..=b) {
@@ -587,6 +709,15 @@ mod tests {
                             kinds[if matches!(h.kind, HazardKind::Hands { .. }) { 0 } else { 1 }] += 1;
                         }
                         HazardKind::Debris => kinds[2] += 1,
+                        HazardKind::Fallen { tilt } => {
+                            kinds[3] += 1;
+                            assert!(tilt.abs() < 0.06, "the beam stays high enough everywhere");
+                        }
+                        HazardKind::Chandelier { x } => {
+                            kinds[4] += 1;
+                            let free = (x - CHANDELIER_BURN - r.min.x).max(r.max.x - x - CHANDELIER_BURN);
+                            assert!(free >= LANE - 1e-3, "seed {seed} room {i}: no way round the chandelier");
+                        }
                         HazardKind::HandHall { west, east } => {
                             // The lane between the hands is free and lines up with both doors.
                             assert!(r.width() - west - east >= LANE - 1e-3, "seed {seed} room {i}: hand hall has no lane");
@@ -604,7 +735,7 @@ mod tests {
                 }
             }
         }
-        assert!(kinds.iter().all(|&k| k > 100), "{kinds:?}");
+        assert!(kinds.iter().all(|&k| k > 60), "{kinds:?}");
     }
 
     #[test]

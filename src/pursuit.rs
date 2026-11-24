@@ -246,8 +246,10 @@ fn run_pursuit(
         return;
     };
     if pursuit.active() {
-        // Hold the chase lighting even if something else touched it.
-        *mood = CHASE_MOOD;
+        // Hold the chase lighting even if something else touched it, and let
+        // it ripple: the red throbs brighter and darker.
+        let k = crate::chase_fx::ripple(time.elapsed_secs());
+        *mood = Mood { scale: CHASE_MOOD.scale * (0.7 + 0.45 * k), tint: Color::srgb(0.85 + 0.15 * k, 0.06 + 0.06 * k, 0.04 + 0.04 * k), ..CHASE_MOOD };
     }
     match pursuit.phase.clone() {
         PursuitPhase::Cue(t) => {
@@ -356,6 +358,12 @@ fn dev_warp(
     chase.phase = crate::hollow::ChasePhase::Done;
     chase.active = false;
     tf.translation = Vec3::new(r.entry_x, r.entry_height + 0.05, r.max.y - 0.8);
+    // QA: HALLWAYS_WARP_AT="x,z" lands at a spot inside instead.
+    if let Some(v) = std::env::var("HALLWAYS_WARP_AT").ok().map(|v| v.split(',').filter_map(|n| n.trim().parse::<f32>().ok()).collect::<Vec<_>>())
+        && v.len() >= 2
+    {
+        tf.translation = Vec3::new(v[0], 0.05, v[1]);
+    }
 }
 
 /// QA autopilot state: which room it is in and since when.
@@ -461,12 +469,19 @@ fn dev_bot(
     let floors: Vec<_> = grounds.iter().map(|g| g.0).collect();
     // Small steps that also follow stairs up and down (a long frame would
     // otherwise run into the next stair face before the height catches up).
+    // Crouch under low obstacles (fallen beams) like a player would.
+    let low = boxes.iter().any(|b| b.min.y > p.y + 1.1 && b.min.y < p.y + 1.8 && p.x > b.min.x - 0.4 && p.x < b.max.x + 0.4 && p.z > b.min.z - 1.0 && p.z < b.max.z + 1.5);
+    let head = if low { 1.08 } else { 1.7 };
+    if low {
+        pl.crouching = true;
+        pl.eye = crate::player::CROUCH_EYE;
+    }
     let walk = |dir: Vec3| {
         let step = dir * len;
         let n = ((step.length() / 0.1).ceil() as usize).max(1);
         let mut pos = p;
         for _ in 0..n {
-            pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, pos.y + crate::player::STEP_UP, pos.y + 1.7, &boxes);
+            pos = crate::physics::resolve_cylinder(pos + step / n as f32, 0.3, pos.y + crate::player::STEP_UP, pos.y + head, &boxes);
             pos.y = crate::physics::ground_height(pos, pos.y, crate::player::STEP_UP, &floors);
         }
         pos

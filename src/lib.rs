@@ -39,6 +39,7 @@ pub mod rng;
 pub mod run;
 pub mod settings;
 pub mod state;
+pub mod chase_fx;
 pub mod stranger;
 pub mod surge;
 pub mod theater;
@@ -70,7 +71,7 @@ impl Plugin for HallwaysPlugin {
             capture::CapturePlugin,
         ))
         .add_plugins((music::MusicPlugin, cutscene::CutscenePlugin, hollow::HollowPlugin, floor::FloorPlugin, surge::SurgePlugin, items::ItemsPlugin, encounters::EncountersPlugin, icons::IconsPlugin, lobby::LobbyPlugin, viewmodel::ViewModelPlugin));
-    app.add_plugins(stranger::StrangerPlugin);
+    app.add_plugins((stranger::StrangerPlugin, chase_fx::ChaseFxPlugin));
         app.init_resource::<presets::ActivePreset>();
         app.add_plugins((profile::ProfilePlugin, net::NetPlugin, avatar::AvatarPlugin, admin::AdminPlugin, graphics::GraphicsPlugin, world::sky::SkyPlugin, listener::ListenerPlugin, weather::WeatherPlugin, touch::TouchPlugin, ending::EndingPlugin, theater::TheaterPlugin, trailer::TrailerPlugin));
         app.add_plugins((pursuit::PursuitPlugin, guide::GuidePlugin, qa::QaPlugin, tap::TapPlugin, hazards::HazardPlugin, achievements::AchievementsPlugin, body::BodyPlugin, voice::VoicePlugin));

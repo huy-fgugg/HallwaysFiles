@@ -167,6 +167,13 @@ fn movement(
     for p in &peers.0 {
         boxes.push(crate::physics::Aabb { min: *p + Vec3::new(-0.3, 0.0, -0.3), max: *p + Vec3::new(0.3, 1.5, 0.3) });
     }
+    // Under something low (a fallen beam): stay crouched until clear of it.
+    let low_overhead = boxes.iter().any(|b| {
+        let pos = transform.translation;
+        b.min.y > pos.y + CROUCH_EYE + 0.05 && b.min.y < pos.y + STAND_EYE + 0.15 && pos.x > b.min.x - RADIUS && pos.x < b.max.x + RADIUS && pos.z > b.min.z - RADIUS && pos.z < b.max.z + RADIUS
+    });
+    let crouch = crouch || low_overhead;
+    player.crouching = crouch;
     let eye_target = if crouch { CROUCH_EYE } else { STAND_EYE };
     player.eye += (eye_target - player.eye) * (dt * 10.0).min(1.0);
     let feet = transform.translation.y;

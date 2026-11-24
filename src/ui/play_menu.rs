@@ -328,6 +328,10 @@ fn item_name(k: ItemKind) -> &'static str {
 
 /// A fresh seed from the clock (used when the seed box is empty).
 pub fn random_seed() -> u64 {
+    // QA: HALLWAYS_SEED=<hex> fixes the floor.
+    if let Some(s) = std::env::var("HALLWAYS_SEED").ok().and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok()) {
+        return s;
+    }
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7);
     let mut r = crate::rng::GameRng::new(nanos ^ 0x9E37_79B9_7F4A_7C15);
     r.next_u64()
