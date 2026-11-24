@@ -324,6 +324,13 @@ pub fn floor_clutter(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, rng: 
 
 /// Extra scenery for a room, by area; returns zones the furniture must avoid.
 pub fn dress_room(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, extra: &[Zone], rng: &mut GameRng) -> Vec<Zone> {
+    // Chases and rooms split by walls or shelves (zigzags, barricades, the
+    // Reading Hall) wind between lanes: nothing free-standing goes in them,
+    // so the way through is never blocked.
+    if r.pursuit || !r.dividers().is_empty() {
+        floor_clutter(b, props, r, rng);
+        return vec![];
+    }
     let mut blocked = keep_out(r);
     blocked.extend_from_slice(extra);
     let mut taken: Vec<Zone> = vec![];
@@ -451,6 +458,14 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn chases_and_divided_rooms_get_no_free_standing_scenery() {
+        // dress_room returns early for these; check the plan has both kinds so the rule matters.
+        let plan = generate(3);
+        assert!(plan.rooms.iter().any(|r| r.pursuit));
+        assert!(plan.rooms.iter().any(|r| !r.dividers().is_empty()));
     }
 
     #[test]
