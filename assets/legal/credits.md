@@ -16,6 +16,9 @@
 | Barrel 01 | Jorge Camacho |
 | Wooden Crate 01, Wooden Bucket 01 | James Ray Cock |
 | Wooden Crate 02 | James Ray Cock, Jurita Burger |
+| Wooden Bookshelf Worn (fallen shelves in the chase) | Ulan Cabanilla |
+| Book Encyclopedia Set 01 (spilled books) | John Malcolm |
+| Chandelier 01 (burning chandeliers in the chase) | Kirill Sannikov |
 
 ## More 3D models
 | Asset | Source | Licence |
@@ -44,6 +47,7 @@
 | Rock Wall 08 | Amal Kumar |
 | Gravel | Dimitrios Savva |
 | Mossy Stone Wall | Amal Kumar |
+| Dark Wood (fallen beams) | Dario Barresi, Dimitrios Savva, Rico Cilliers |
 
 ## Textures (ambientCG, CC0 1.0)
 | Asset | Source |

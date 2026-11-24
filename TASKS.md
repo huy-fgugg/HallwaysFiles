@@ -131,6 +131,21 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.2
+- [x] Mode Creator redesigned: a brown and cream screen with tabs (Floor, Areas, Monsters, Your Monster, Rooms, Lights, Player, Supplies, Cutscenes, Help), a row per setting with a selector box, ON/OFF pills and folding groups; nothing overlaps on PC or phone
+- [x] Every setting a mode can have: length, start door, room size, structures, locked doors, Hollow chases on/off, area order, each area, each monster's frequency, lights, dark rooms, fake doors, health, walk speed, sprinting, hiding time, revives (extra lives), starting items, supplies, Lumens earned and an item pool (switch items off)
+- [x] Your Monster: make your own rushing monster (name, colour, slowest and fastest speed, passes, damage, warning time, spawn chance, first room)
+- [x] Room Rules: how often key lofts, stairs, zigzag walls, pillar halls and streams appear, and which room the Reading Hall is at (or none)
+- [x] Cutscene Maker: build your own cutscenes shot by shot (camera move, effect, time, caption), played at the start of your mode or when players walk through a chosen door; Preview plays it straight away
+- [x] Share codes carry every new setting (cutscenes are saved with the mode file)
+- [x] Chases are scarier: a flash, then the light turns blood-red and ripples; eyes open in the walls and follow you; fallen beams with toppled bookshelves and spilled books to crouch under; burning chandeliers to weave around; a red glow bleeds under the door that slams behind you
+- [x] Player-made modes and maps say so on screen the whole run
+- [x] Working mirrors in some hotel rooms (beside the entry door): you see the room and yourself in them, moving and crouching as you do
+- [x] Fix: looking back from Room 002 showed the night sky around Door 001 (the wall around the start corridor was missing)
+- [x] Fix: the wood panelling ran straight across the doorway you came in through
+- [x] Fix: your first-person hand vanished after Retry
+- [x] Credits for the new Poly Haven models (bookshelf, books, chandelier) and the dark wood texture
+
 ## 1.1.1
 - [x] Scenery now uses models and textures from free online libraries instead of shapes built in code: low-poly trees (Low Poly Forest Pack), a garden shed (Medieval Shack) and windmills (Old Windmill) from OpenGameArt; Victorian street lamps, benches, a gothic statue, boulders, stumps, fallen trunks, hedges, potted plants, grandfather clocks, metal drums, crates and buckets from Poly Haven; an ambientCG lawn and Poly Haven gravel and mossy stone
 - [x] Nothing overlaps: every garden piece claims its footprint, tree crowns stay inside the walls, off the path and clear of lamps, and wall furniture keeps clear of them all

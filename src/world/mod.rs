@@ -28,6 +28,10 @@ use meshes::tiled_box;
 
 pub const WALL_T: f32 = 0.2;
 pub const DOOR_W: f32 = crate::floor::plan::DOOR_W;
+/// The hand-built Room 001 corridor (the first generated room backs onto it).
+pub const CORRIDOR_MIN_X: f32 = -1.4;
+pub const CORRIDOR_MAX_X: f32 = 1.4;
+pub const CORRIDOR_H: f32 = 2.7;
 pub const DOOR_H: f32 = crate::floor::plan::DOOR_H;
 
 /// A named room region; entering it updates the HUD room counter.
@@ -543,12 +547,12 @@ fn spawn_test_level(
     }
     // ---- Room 001: a narrow, neglected corridor ---------------------------
     let corridor = RoomStyle { wall: mats.peeling_wall.clone(), wall_tile: 2.0, floor: mats.carpet.clone(), floor_tile: 1.8, wainscot: false, sky: false };
-    let c_min = Vec2::new(-1.4, -14.0);
-    let c_max = Vec2::new(1.4, -5.0 - WALL_T);
+    let c_min = Vec2::new(CORRIDOR_MIN_X, -14.0);
+    let c_max = Vec2::new(CORRIDOR_MAX_X, -5.0 - WALL_T);
     b.room(
         c_min,
         c_max,
-        2.7,
+        CORRIDOR_H,
         &corridor,
         &[
             Opening { side: Side::South, center: 0.0, width: DOOR_W, height: DOOR_H, bottom: 0.0 },

@@ -209,7 +209,14 @@ pub fn spawn_room(
     for m in &r.mimics {
         openings.push(Opening { side: Side::North, center: m.x, width: DOOR_W, height: DOOR_H, bottom: 0.0 });
     }
+    // The entry door is in the shared south wall: it only breaks the trim
+    // there (without it the panelling ran straight across the doorway).
+    openings.push(Opening { side: Side::South, center: r.entry_x, width: DOOR_W, height: DOOR_H, bottom: r.entry_height });
     b.room(r.min, r.max, h, &style, &openings, &[Side::South]);
+    // Some rooms have a working mirror beside the entry door.
+    if let Some(x) = crate::mirror::mirror_spot(r) {
+        crate::mirror::spawn_mirror(b, r, x, images, std_mats);
+    }
 
     // ---- Exit door (and mimic) ----
     let saved = with_area_door_mats(b, r.area);
@@ -574,25 +581,30 @@ pub fn hiding_spots_needed(long: bool, players: u8) -> usize {
 /// wider or taller than that wall, fill the gap so you never see out into the
 /// void when you look back.
 pub fn close_south_side(b: &mut Builder, r: &RoomPlan, prev: Option<&RoomPlan>, props: &PropMaterials) {
-    let Some(p) = prev else { return };
+    // The first room backs onto the hand-built Room 001 corridor.
+    let (pmin, pmax, pheight, p_out) = match prev {
+        Some(p) => (p.min.x, p.max.x, p.height, p.area.outdoors()),
+        None if r.index == super::plan::FIRST_ROOM => (crate::world::CORRIDOR_MIN_X, crate::world::CORRIDOR_MAX_X, crate::world::CORRIDOR_H, false),
+        None => return,
+    };
     b.member = Some(r.index);
     let style = style_for(r.area, b, props);
     let (z0, z1) = (r.max.y, r.max.y + WALL_T);
     let h = r.height;
-    if !r.area.outdoors() || !p.area.outdoors() {
-        for (x0, x1) in [(r.min.x - WALL_T, p.min.x - WALL_T), (p.max.x + WALL_T, r.max.x + WALL_T)] {
+    if !r.area.outdoors() || !p_out {
+        for (x0, x1) in [(r.min.x - WALL_T, pmin - WALL_T), (pmax + WALL_T, r.max.x + WALL_T)] {
             if x1 - x0 > 0.01 {
                 b.block(Vec3::new(x0, 0.0, z0), Vec3::new(x1, h, z1), &style.wall, style.wall_tile, true);
             }
         }
         // Above the previous room's wall, if this room is taller.
-        let (ox0, ox1) = (r.min.x.max(p.min.x) - WALL_T, r.max.x.min(p.max.x) + WALL_T);
-        if h > p.height + 0.01 && ox1 > ox0 {
-            b.block(Vec3::new(ox0, p.height, z0), Vec3::new(ox1, h, z1), &style.wall, style.wall_tile, false);
+        let (ox0, ox1) = (r.min.x.max(pmin) - WALL_T, r.max.x.min(pmax) + WALL_T);
+        if h > pheight + 0.01 && ox1 > ox0 {
+            b.block(Vec3::new(ox0, pheight, z0), Vec3::new(ox1, h, z1), &style.wall, style.wall_tile, false);
         }
     } else {
         // Both outdoors: a garden wall is enough (open sky above).
-        for (x0, x1) in [(r.min.x - WALL_T, p.min.x - WALL_T), (p.max.x + WALL_T, r.max.x + WALL_T)] {
+        for (x0, x1) in [(r.min.x - WALL_T, pmin - WALL_T), (pmax + WALL_T, r.max.x + WALL_T)] {
             if x1 - x0 > 0.01 {
                 b.block(Vec3::new(x0, 0.0, z0), Vec3::new(x1, 3.2, z1), &style.wall, style.wall_tile, true);
             }

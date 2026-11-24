@@ -335,14 +335,17 @@ fn sync_view_arms(
     model: Option<Res<crate::body::PlayerModel>>,
     arms: Query<(Entity, &ViewArm)>,
     old: Query<Entity, With<VoxelArm>>,
-    mut last: Local<Option<(crate::body::Skin, usize)>>,
+    mut last: Local<Option<(crate::body::Skin, Vec<Entity>)>>,
 ) {
     let Some(model) = model else { return };
-    let n = arms.iter().count();
-    if n == 0 || *last == Some((profile.skin, n)) {
+    // Keyed on the arm entities themselves: a retry rebuilds them (same count),
+    // and they need their voxel arms again.
+    let mut ids: Vec<Entity> = arms.iter().map(|(e, _)| e).collect();
+    ids.sort();
+    if ids.is_empty() || last.as_ref().is_some_and(|(s, l)| *s == profile.skin && *l == ids) {
         return;
     }
-    *last = Some((profile.skin, n));
+    *last = Some((profile.skin, ids));
     for e in &old {
         commands.entity(e).try_despawn();
     }

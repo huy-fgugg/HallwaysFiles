@@ -348,6 +348,8 @@ pub const CREDITS: &[(&str, &[&str])] = &[
             "Painted Wooden Bench: Kirill Sannikov     Street Lamp 01: Josh Dean     Gothic Statue: Benny Weimer",
             "Vintage Grandfather Clock 01: Yann Kervran, James Ray Cock     Barrel 01: Jorge Camacho",
             "Wooden Crates 01 & 02, Wooden Bucket 01: James Ray Cock, Jurita Burger",
+            "Wooden Bookshelf Worn: Ulan Cabanilla     Book Encyclopedia Set 01: John Malcolm",
+            "Chandelier 01: Kirill Sannikov",
         ],
     ),
     (
@@ -372,6 +374,7 @@ pub const CREDITS: &[(&str, &[&str])] = &[
             "Dirt Floor: eye-candy.xyz     Dark Brick Wall: Dario Barresi, Dimitrios Savva",
             "Corrugated Iron 02: Jenelle van Heerden, Sergej Majboroda",
             "Gravel: Dimitrios Savva     Mossy Stone Wall: Amal Kumar",
+            "Dark Wood: Dario Barresi, Dimitrios Savva, Rico Cilliers",
             "Lawn: Grass 004 from ambientCG (CC0)",
         ],
     ),
