@@ -135,6 +135,7 @@
 - [x] Scenery now uses models and textures from free online libraries instead of shapes built in code: low-poly trees (Low Poly Forest Pack), a garden shed (Medieval Shack) and windmills (Old Windmill) from OpenGameArt; Victorian street lamps, benches, a gothic statue, boulders, stumps, fallen trunks, hedges, potted plants, grandfather clocks, metal drums, crates and buckets from Poly Haven; an ambientCG lawn and Poly Haven gravel and mossy stone
 - [x] Nothing overlaps: every garden piece claims its footprint, tree crowns stay inside the walls, off the path and clear of lamps, and wall furniture keeps clear of them all
 - [x] Proper standing street lamps with glowing lanterns, spaced further apart
+- [x] Planned layouts instead of random scatter: tree avenues along the garden walls and one corner cluster (with a stump, boulder or fallen trunk), sheds in corners, windmills in a free corner facing the garden, pairs of benches facing the path, atrium benches in pairs along the carpet, plants flanking the exit door and in the far corners, drums stored together in a corner
 - [x] Credits list every model and texture source (and the player characters)
 
 ## 1.1.0
