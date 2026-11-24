@@ -131,6 +131,12 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.1
+- [x] Scenery now uses models and textures from free online libraries instead of shapes built in code: low-poly trees (Low Poly Forest Pack), a garden shed (Medieval Shack) and windmills (Old Windmill) from OpenGameArt; Victorian street lamps, benches, a gothic statue, boulders, stumps, fallen trunks, hedges, potted plants, grandfather clocks, metal drums, crates and buckets from Poly Haven; an ambientCG lawn and Poly Haven gravel and mossy stone
+- [x] Nothing overlaps: every garden piece claims its footprint, tree crowns stay inside the walls, off the path and clear of lamps, and wall furniture keeps clear of them all
+- [x] Proper standing street lamps with glowing lanterns, spaced further apart
+- [x] Credits list every model and texture source (and the player characters)
+
 ## 1.1.0
 - [x] New player characters: chunky voxel heroes (Knight, Wizard, Cleric, Ranger; "Voxel Chibi Adventurers" free pack by zaddy99999, CC0) with walking, crouching, reaching, panicking and falling animations
 - [x] Customise screen (main menu button, and a Skin table with a floating figure in the boarding hall): pick your character, a crown and a backpack; drag the 3D preview to turn it; your look shows online; your first-person arms match your character
