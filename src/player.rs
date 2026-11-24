@@ -255,6 +255,11 @@ fn apply_camera(
         cam.translation = Vec3::new(0.25 * k, player.eye + (0.22 - player.eye) * k, 0.0) + shake_off;
         cam.rotation = Quat::from_euler(EulerRot::YXZ, 0.0, player.pitch * (1.0 - k) + 0.35 * k + twitch, 1.35 * k);
     }
+    // QA: HALLWAYS_TOPDOWN=<metres> looks straight down from that height (layout checks).
+    if let Some(h) = std::env::var("HALLWAYS_TOPDOWN").ok().and_then(|v| v.parse::<f32>().ok()) {
+        cam.translation = Vec3::new(0.0, h, 0.0);
+        cam.rotation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+    }
 }
 
 #[cfg(test)]

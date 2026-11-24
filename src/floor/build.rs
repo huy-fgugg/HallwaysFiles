@@ -1159,54 +1159,76 @@ fn grounds_architecture(b: &mut Builder, props: &PropMaterials, assets: &AssetSe
         let c = (z.0 + z.1) / 2.0;
         on_path(c.x, c.y, m + ((z.1 - z.0).max_element() / 2.0))
     };
-    // Trees (low-poly models): golden autumn, green, bare and pines.
-    let want = ((r.width() * r.depth()) / 45.0).round().clamp(2.0, 7.0) as usize;
-    let mut trees = 0;
-    for _ in 0..60 {
-        if trees >= want {
+    // Planting plan. Each garden has one main tree and one accent tree:
+    // the main ones stand in an evenly spaced avenue along the side walls
+    // (in from the wall, leaving room for hedges, sheds and chests), the
+    // accent ones in a small cluster in one corner with a stump, a boulder
+    // or a fallen trunk at their feet. Nothing is scattered at random.
+    let pick = |rng: &mut GameRng| super::scenery::TREES[rng.below(super::scenery::TREES.len() as u32) as usize];
+    let main = pick(rng);
+    let mut accent = pick(rng);
+    for _ in 0..4 {
+        if accent.0 != main.0 {
             break;
         }
-        let (name, hx, hz) = super::scenery::TREES[rng.below(super::scenery::TREES.len() as u32) as usize];
-        let k = rng.range_f32(0.85, 1.1);
-        let yaw = quarter(rng);
-        let at = Vec2::new(rng.range_f32(r.min.x, r.max.x), rng.range_f32(r.min.y, r.max.y));
+        accent = pick(rng);
+    }
+    let k = rng.range_f32(0.9, 1.05);
+    let plant = |b: &mut Builder, occ: &mut Vec<Zone>, (name, hx, hz): (&str, f32, f32), at: Vec2, yaw: f32, k: f32| -> bool {
         let z = footprint(at, Vec2::new(hx, hz) * k, yaw);
-        // The crown stays inside the walls and clear of the path's edge.
         if !inside(&z, 0.15) || path_zone(&z, 0.5) || occ.iter().any(|o| zones_overlap(&z, o)) {
-            continue;
+            return false;
         }
-        // Solid out to most of the crown: some crowns hang below eye height,
-        // and you should bump into the foliage, not walk inside it.
-        super::scenery::place(b, assets, name, Vec3::new(at.x, 0.0, at.y), yaw, Vec3::splat(k), Some(Vec3::new(hx * 0.6, 3.0, hz * 0.6) * Vec3::new(k, 1.0, k)));
+        // Solid out to most of the crown: some crowns hang below eye height.
+        super::scenery::place(b, assets, name, Vec3::new(at.x, 0.0, at.y), yaw, Vec3::splat(k), Some(Vec3::new(hx * 0.6 * k, 3.0, hz * 0.6 * k)));
         occ.push(z);
-        trees += 1;
+        true
+    };
+    // The avenue (wide gardens only): same yaw for every tree in the row.
+    let (hx, hz) = (main.1 * k, main.2 * k);
+    if r.width() > 2.0 * (1.3 + 2.0 * hx) + 3.0 {
+        let step = 2.0 * hz + 1.4;
+        for (wall, inward) in [(r.min.x, 1.0f32), (r.max.x, -1.0)] {
+            let x = wall + inward * (1.3 + hx + 0.1);
+            let mut z = r.max.y - hz - 1.2;
+            while z > r.min.y + hz + 1.2 {
+                plant(b, &mut occ, main, Vec2::new(x, z), 0.0, k);
+                z -= step;
+            }
+        }
     }
-    // Stumps and boulders in the grass, away from trees and each other.
-    for _ in 0..want * 3 {
-        let stump = rng.next_f32() < 0.5;
-        let k = if stump { rng.range_f32(0.6, 1.0) } else { rng.range_f32(0.4, 0.75) };
-        let half = if stump { Vec2::new(0.75, 0.84) } else { Vec2::new(0.58, 0.82) } * k;
-        let yaw = quarter(rng);
-        let at = Vec2::new(rng.range_f32(r.min.x, r.max.x), rng.range_f32(r.min.y, r.max.y));
-        let z = footprint(at, half, yaw);
-        if !inside(&z, 0.3) || path_zone(&z, 1.0) || occ.iter().any(|o| zones_overlap(&z, o)) {
-            continue;
-        }
-        let (name, h) = if stump { ("stump", 0.6) } else { ("boulder", 0.9) };
-        super::scenery::place(b, assets, name, Vec3::new(at.x, 0.0, at.y), yaw, Vec3::splat(k), Some(Vec3::new(half.x, h * k, half.y)));
-        occ.push(z);
-        if occ.len() > taken.len() + want * 2 + 8 {
+    // The corner cluster.
+    // Inset from the corner by the accent tree's crown, so its first tree
+    // fits snugly in the corner and the others step out toward the middle.
+    let reach = accent.1.max(accent.2) + 0.3;
+    let cx = if rng.next_f32() < 0.5 { r.min.x + reach } else { r.max.x - reach };
+    let cz = if rng.next_f32() < 0.5 { r.min.y + reach } else { r.max.y - reach };
+    let corner = Vec2::new(cx, cz);
+    let toward = (r.center() - corner).normalize_or_zero();
+    let mut cluster: Vec<Vec2> = vec![];
+    for i in 0..12 {
+        if cluster.len() >= 3 {
             break;
         }
+        let a = rng.range_f32(-0.8, 0.8);
+        let d = if i == 0 { 0.0 } else { reach * 1.6 + (i as f32 - 1.0) * 0.6 };
+        let dir = Vec2::new(toward.x * a.cos() - toward.y * a.sin(), toward.x * a.sin() + toward.y * a.cos());
+        let at = corner + dir * d;
+        if plant(b, &mut occ, accent, at, 0.0, 0.95) {
+            cluster.push(at);
+        }
     }
-    // A fallen tree trunk now and then.
-    if rng.next_f32() < 0.4 {
+    // At the cluster's feet: a stump, a boulder or a fallen trunk.
+    if let Some(&base) = cluster.first() {
+        let props_here: [(&str, Vec2, f32); 3] = [("stump", Vec2::new(0.75, 0.84), 0.6), ("boulder", Vec2::new(0.58, 0.82), 0.9), ("log", Vec2::new(1.55, 0.2), 0.3)];
         for _ in 0..12 {
+            let (name, half, h) = props_here[rng.below(3) as usize];
+            let kk = if name == "log" { 1.0 } else { rng.range_f32(0.55, 0.8) };
             let yaw = quarter(rng);
-            let at = Vec2::new(rng.range_f32(r.min.x + 2.0, r.max.x - 2.0), rng.range_f32(r.min.y + 2.0, r.max.y - 2.0));
-            let z = footprint(at, Vec2::new(1.55, 0.2), yaw);
-            if inside(&z, 0.4) && !path_zone(&z, 0.9) && !occ.iter().any(|o| zones_overlap(&z, o)) {
-                super::scenery::place(b, assets, "log", Vec3::new(at.x, 0.0, at.y), yaw, Vec3::splat(1.0), Some(Vec3::new(1.5, 0.3, 0.2)));
+            let at = base + Vec2::new(rng.range_f32(-3.0, 3.0), rng.range_f32(-3.0, 3.0));
+            let z = footprint(at, half * kk, yaw);
+            if inside(&z, 0.3) && !path_zone(&z, 0.9) && !occ.iter().any(|o| zones_overlap(&z, o)) {
+                super::scenery::place(b, assets, name, Vec3::new(at.x, 0.0, at.y), yaw, Vec3::splat(kk), Some(Vec3::new(half.x * kk, h * kk, half.y * kk)));
                 occ.push(z);
                 break;
             }

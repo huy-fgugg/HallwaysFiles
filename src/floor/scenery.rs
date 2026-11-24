@@ -121,16 +121,16 @@ pub fn shed_spot(r: &RoomPlan, blocked: &[Zone], rng: &mut GameRng) -> Option<(V
     if r.area != Area::Grounds || r.width() < 10.0 || r.depth() < 9.0 || matches!(r.kind, RoomKind::Final | RoomKind::Transition) {
         return None;
     }
+    // Corners first (by the north or south wall), then further along the wall.
+    let first_east = rng.next_f32() < 0.5;
     let mut tries: Vec<(f32, bool)> = vec![];
-    let mut z = r.max.y - 2.4;
-    while z > r.min.y + 2.4 {
-        tries.push((z, false));
-        tries.push((z, true));
-        z -= 1.3;
-    }
-    for i in (1..tries.len()).rev() {
-        let j = rng.below(i as u32 + 1) as usize;
-        tries.swap(i, j);
+    let mut d = 2.4;
+    while d < r.depth() / 2.0 {
+        for z in [r.max.y - d, r.min.y + d] {
+            tries.push((z, first_east));
+            tries.push((z, !first_east));
+        }
+        d += 1.3;
     }
     for (z, east) in tries {
         let x = if east { r.max.x - 0.15 - SHED_DEPTH / 2.0 } else { r.min.x + 0.15 + SHED_DEPTH / 2.0 };
@@ -214,13 +214,13 @@ pub fn barrel(b: &mut Builder, props: &PropMaterials, assets: &AssetServer, at: 
 
 /// Flat clutter that never blocks you: rugs, loose papers, scattered leaves.
 pub fn floor_clutter(b: &mut Builder, props: &PropMaterials, r: &RoomPlan, rng: &mut GameRng) {
-    let n = ((r.width() * r.depth()) / 14.0) as usize;
+    let n = ((r.width() * r.depth()) / 30.0) as usize;
     let mat = match r.area {
         Area::Grounds => props.leaves_orange.clone(),
         Area::QuarryLift => b.mats.dirt.clone(),
         _ => props.paper.clone(),
     };
-    for _ in 0..n.min(14) {
+    for _ in 0..n.min(6) {
         let x = rng.range_f32(r.min.x + 0.3, r.max.x - 0.3);
         let z = rng.range_f32(r.min.y + 0.3, r.max.y - 0.3);
         let (w, d) = match r.area {
@@ -247,83 +247,101 @@ pub fn dress_room(b: &mut Builder, props: &PropMaterials, assets: &AssetServer, 
     let mut blocked = keep_out(r);
     blocked.extend_from_slice(extra);
     let mut taken: Vec<Zone> = vec![];
-    let take = |blocked: &mut Vec<Zone>, taken: &mut Vec<Zone>, z: Zone| {
-        blocked.push(z);
-        taken.push(z);
+    let shed = if r.area == Area::Grounds { shed_spot(r, &blocked, rng) } else { None };
+    // Claims a spot if it's free; every piece below goes somewhere it makes
+    // sense (a corner, by a door, along the path), never just anywhere.
+    let mut claim = |z: Zone| -> bool {
+        if free(&z, &blocked) && z.0.x >= r.min.x && z.1.x <= r.max.x && z.0.y >= r.min.y && z.1.y <= r.max.y {
+            blocked.push(z);
+            taken.push(z);
+            true
+        } else {
+            false
+        }
     };
-    // Side-wall furniture slots run along the walls; scenery keeps to the
-    // middle band so lockers and chests still fit.
-    let side_band = 1.3;
-    let mut walls: Vec<Zone> = vec![(Vec2::new(r.min.x, r.min.y), Vec2::new(r.min.x + side_band, r.max.y)), (Vec2::new(r.max.x - side_band, r.min.y), Vec2::new(r.max.x, r.max.y))];
+    let sq = |c: Vec2, h: f32| (c - Vec2::splat(h), c + Vec2::splat(h));
+    let mid = (r.min.y + r.max.y) / 2.0;
     match r.area {
         Area::Grounds => {
-            if let Some((c, east)) = shed_spot(r, &blocked, rng) {
-                garden_shed(b, props, assets, c, east, rng);
-                take(&mut blocked, &mut taken, (c - Vec2::new(SHED_DEPTH / 2.0 + 0.5, SHED_LEN / 2.0 + 0.8), c + Vec2::new(SHED_DEPTH / 2.0 + 0.5, SHED_LEN / 2.0 + 0.8)));
-            }
-            walls.clear();
-            let mut all = blocked.clone();
-            all.extend(walls.iter().copied());
-            if r.width() > 9.0 && rng.next_f32() < 0.75 {
-                if let Some(p) = open_spot(r, &all, 0.9, rng) {
-                    windmill(b, assets, Vec3::new(p.x, 0.0, p.y), rng.range_f32(0.0, 6.28), 1.0, rng.range_f32(0.6, 1.4), true);
-                    take(&mut blocked, &mut taken, (p - Vec2::splat(0.9), p + Vec2::splat(0.9)));
+            // The shed stands in a corner against a side wall.
+            if let Some((c, east)) = shed {
+                let z = (c - Vec2::new(SHED_DEPTH / 2.0 + 0.5, SHED_LEN / 2.0 + 0.8), c + Vec2::new(SHED_DEPTH / 2.0 + 0.5, SHED_LEN / 2.0 + 0.8));
+                if claim(z) {
+                    garden_shed(b, props, assets, c, east, rng);
                 }
             }
-            // A bench beside the path now and then.
-            if rng.next_f32() < 0.5 {
-                let mut all = blocked.clone();
-                all.extend(walls.iter().copied());
-                if let Some(p) = open_spot(r, &all, 1.0, rng) {
-                    bench(b, props, assets, Vec3::new(p.x, 0.0, p.y), rng.range_f32(0.0, 6.2));
-                    take(&mut blocked, &mut taken, (p - Vec2::splat(1.0), p + Vec2::splat(1.0)));
+            // A windmill in a free corner of a wide garden.
+            if r.width() > 9.0 && rng.next_f32() < 0.6 {
+                let mut corners = [Vec2::new(r.min.x + 1.6, r.min.y + 1.8), Vec2::new(r.max.x - 1.6, r.min.y + 1.8), Vec2::new(r.min.x + 1.6, r.max.y - 1.8), Vec2::new(r.max.x - 1.6, r.max.y - 1.8)];
+                let k = rng.below(4) as usize;
+                corners.rotate_left(k);
+                for c in corners {
+                    if claim(sq(c, 1.0)) {
+                        // Sails turned toward the middle of the garden.
+                        let to = r.center() - c;
+                        windmill(b, assets, Vec3::new(c.x, 0.0, c.y), to.x.atan2(to.y), 1.0, rng.range_f32(0.6, 1.2), true);
+                        break;
+                    }
                 }
             }
-            // Tall windmills on the hills beyond the walls, turning slowly.
-            if rng.next_f32() < 0.55 {
+            // A pair of benches facing each other across the path near the entrance.
+            if r.depth() > 9.0 && rng.next_f32() < 0.7 {
+                let z = (r.max.y + mid) / 2.0;
+                for (dx, yaw) in [(-1.9f32, FRAC_PI_2), (1.9, -FRAC_PI_2)] {
+                    let c = Vec2::new(r.entry_x + dx, z);
+                    if claim((c - Vec2::new(0.35, 0.7), c + Vec2::new(0.35, 0.7))) {
+                        bench(b, props, assets, Vec3::new(c.x, 0.0, c.y), yaw);
+                    }
+                }
+            }
+            // One tall windmill on the hills beyond the walls, turning slowly.
+            if rng.next_f32() < 0.4 {
                 let east = rng.next_f32() < 0.5;
-                let x = if east { r.max.x + rng.range_f32(6.0, 11.0) } else { r.min.x - rng.range_f32(6.0, 11.0) };
-                let z = rng.range_f32(r.min.y, r.max.y);
-                windmill(b, assets, Vec3::new(x, 0.0, z), rng.range_f32(0.0, 6.28), rng.range_f32(2.4, 3.2), rng.range_f32(0.25, 0.5), false);
+                let x = if east { r.max.x + rng.range_f32(8.0, 12.0) } else { r.min.x - rng.range_f32(8.0, 12.0) };
+                windmill(b, assets, Vec3::new(x, 0.0, mid), if east { -FRAC_PI_2 } else { FRAC_PI_2 }, 2.8, 0.35, false);
             }
         }
         Area::Atrium if r.width() > 7.0 => {
-            let mut all = blocked.clone();
-            all.extend(walls.iter().copied());
-            for _ in 0..3 {
-                if let Some(p) = open_spot(r, &all, 0.95, rng) {
-                    bench(b, props, assets, Vec3::new(p.x, 0.0, p.y), if rng.next_f32() < 0.5 { 0.0 } else { std::f32::consts::PI });
-                    take(&mut blocked, &mut taken, (p - Vec2::splat(0.95), p + Vec2::splat(0.95)));
-                    all.push((p - Vec2::splat(0.95), p + Vec2::splat(0.95)));
+            // Benches in facing pairs either side of the carpet runner.
+            let x = (r.entry_x + r.exit_x) / 2.0;
+            let n = ((r.depth() - 4.0) / 4.5).floor().clamp(0.0, 3.0) as usize;
+            for i in 0..n {
+                let z = r.max.y - 2.5 - i as f32 * 4.5;
+                for (dx, yaw) in [(-1.6f32, FRAC_PI_2), (1.6, -FRAC_PI_2)] {
+                    let c = Vec2::new(x + dx, z);
+                    if claim((c - Vec2::new(0.35, 0.7), c + Vec2::new(0.35, 0.7))) {
+                        bench(b, props, assets, Vec3::new(c.x, 0.0, c.y), yaw);
+                    }
                 }
             }
         }
         Area::ServiceTunnels | Area::QuarryLift if r.width() > 5.0 => {
-            let mut all = blocked.clone();
-            all.extend(walls.iter().copied());
-            for _ in 0..rng.below(3) + 1 {
-                if let Some(p) = open_spot(r, &all, 0.55, rng) {
-                    barrel(b, props, assets, Vec3::new(p.x, 0.0, p.y), rng.next_f32() < 0.25);
-                    let z = (p - Vec2::splat(0.55), p + Vec2::splat(0.55));
-                    take(&mut blocked, &mut taken, z);
-                    all.push(z);
+            // Drums stored together in one corner.
+            let east = rng.next_f32() < 0.5;
+            let south = rng.next_f32() < 0.5;
+            let cx = if east { r.max.x - 0.45 } else { r.min.x + 0.45 };
+            let cz = if south { r.max.y - 0.45 } else { r.min.y + 0.45 };
+            let ix = if east { -1.0 } else { 1.0 };
+            let iz = if south { -1.0 } else { 1.0 };
+            for (k, (ox, oz)) in [(0.0f32, 0.0f32), (0.0, 0.66), (0.66, 0.0)].into_iter().enumerate().take(1 + rng.below(3) as usize) {
+                let c = Vec2::new(cx + ix * ox, cz + iz * oz);
+                if claim(sq(c, 0.32)) {
+                    barrel(b, props, assets, Vec3::new(c.x, 0.0, c.y), k == 2 && rng.next_f32() < 0.3);
                 }
             }
         }
         _ => {}
     }
-    // Big indoor rooms: planters and lamps standing out in the open.
-    if matches!(r.area, Area::GuestWing | Area::Atrium | Area::Archive) && r.width() > 6.0 {
-        let mut all = blocked.clone();
-        all.extend(walls.iter().copied());
-        let n = ((r.width() * r.depth()) / 35.0).round().clamp(1.0, 5.0) as usize;
-        for _ in 0..n {
-            if let Some(p) = open_spot(r, &all, 0.5, rng) {
-                let at = Vec3::new(p.x, 0.0, p.y);
-                potted_plant(b, props, assets, at, rng.range_f32(1.2, 1.8), rng);
-                let z = (p - Vec2::splat(0.5), p + Vec2::splat(0.5));
-                take(&mut blocked, &mut taken, z);
-                all.push((p - Vec2::splat(1.4), p + Vec2::splat(1.4)));
+    // Indoors: plants flank the exit door and stand in the far corners.
+    if matches!(r.area, Area::GuestWing | Area::Atrium | Area::Archive) && r.width() > 5.0 {
+        let y = r.min.y + 0.4;
+        let mut spots = vec![Vec2::new(r.exit_x - 1.45, y), Vec2::new(r.exit_x + 1.45, y)];
+        if r.depth() > 8.0 && r.width() > 6.5 {
+            spots.extend([Vec2::new(r.min.x + 0.4, y), Vec2::new(r.max.x - 0.4, y)]);
+        }
+        for c in spots {
+            if claim(sq(c, 0.32)) {
+                potted_plant(b, props, assets, Vec3::new(c.x, 0.0, c.y), 1.3, rng);
             }
         }
     }
