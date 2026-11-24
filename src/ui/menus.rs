@@ -106,7 +106,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
                 // Grouped: play first, then extras and options, quit apart at the bottom.
                 let groups: [(&str, &[(&str, MenuAction)]); 3] = [
                     ("", &[("Play", MenuAction::OpenPlay), ("Customise", MenuAction::OpenSkin)]),
-                    ("EXTRAS", &[("Map Builder", MenuAction::OpenMapBuilder), ("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
+                    ("EXTRAS", &[("Mode Creator", MenuAction::OpenModeCreator), ("Cutscenes", MenuAction::OpenCutscenes), ("Achievements", MenuAction::OpenAchievements), ("Settings", MenuAction::OpenSettings), ("Credits", MenuAction::OpenCredits)]),
                     ("", &[("Quit", MenuAction::Quit)]),
                 ];
                 let mut i = 0;
@@ -451,7 +451,7 @@ fn reveal_death_screen(
 }
 
 fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<crate::hollow::DeathCause>, run: Res<crate::run::RunState>, profile: Res<crate::profile::Profile>) {
-    let earned = (run.lumens as f32 * profile.lumen_multiplier()).round() as u32;
+    let earned = (run.lumens as f32 * profile.lumen_multiplier() * run.lumen_scale).round() as u32;
     commands
         .spawn((
             Node {
@@ -564,7 +564,7 @@ fn spawn_summary(mut commands: Commands, theme: Res<UiTheme>, run: Res<crate::ru
                     ("Time", run.timer_text()),
                     ("Doors opened", format!("{final_door} / {final_door}")),
                     ("Lumens collected", run.lumens.to_string()),
-                    ("Lumens banked (with modifiers)", format!("{}", (run.lumens as f32 * profile.lumen_multiplier()).round() as u32)),
+                    ("Lumens banked (with modifiers)", format!("{}", (run.lumens as f32 * profile.lumen_multiplier() * run.lumen_scale).round() as u32)),
                     ("Surges survived", run.surges_survived.to_string()),
                     ("Mimics that fooled you", run.mimics_fooled.to_string()),
                     ("Damage taken", format!("{:.0}", run.damage_taken)),

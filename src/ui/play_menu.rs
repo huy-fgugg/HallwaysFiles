@@ -23,6 +23,8 @@ pub enum FieldKind {
     PresetName,
     PresetSeed,
     MapName,
+    ModeName,
+    ShareCode,
 }
 
 impl FieldKind {
@@ -35,6 +37,8 @@ impl FieldKind {
             FieldKind::PresetName => "PRESET NAME",
             FieldKind::PresetSeed => "SEED",
             FieldKind::MapName => "MAP NAME",
+            FieldKind::ModeName => "MODE NAME",
+            FieldKind::ShareCode => "ENTER A CODE",
         }
     }
 
@@ -47,6 +51,8 @@ impl FieldKind {
             FieldKind::PresetName => 24,
             FieldKind::PresetSeed => 24,
             FieldKind::MapName => 24,
+            FieldKind::ModeName => 24,
+            FieldKind::ShareCode => 32,
         }
     }
 
@@ -59,6 +65,8 @@ impl FieldKind {
             FieldKind::PresetName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::PresetSeed => c.is_ascii_graphic() || c == ' ',
             FieldKind::MapName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
+            FieldKind::ModeName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
+            FieldKind::ShareCode => c.is_ascii_alphanumeric() || c == '-',
         }
     }
 }
@@ -187,6 +195,7 @@ fn type_into_fields(
     mut focus_once: Local<bool>,
     mut editor: Option<ResMut<crate::ui::custom_menu::CustomEditor>>,
     mut map_editor: Option<ResMut<crate::ui::map_builder::MapEditor>>,
+    mut mode_editor: Option<ResMut<crate::ui::mode_creator::ModeEditor>>,
     time: Res<Time<Real>>,
     mut profile: ResMut<Profile>,
 ) {
@@ -263,6 +272,16 @@ fn type_into_fields(
                         m.map.name = field.value.clone();
                     }
                 }
+                FieldKind::ModeName => {
+                    if let Some(m) = mode_editor.as_mut() {
+                        m.mode.name = field.value.clone();
+                    }
+                }
+                FieldKind::ShareCode => {
+                    if let Some(m) = mode_editor.as_mut() {
+                        m.code = field.value.clone();
+                    }
+                }
             }
         }
         let caret = if active && (time.elapsed_secs() * 2.0) as i32 % 2 == 0 { "_" } else { " " };
@@ -271,7 +290,8 @@ fn type_into_fields(
                 FieldKind::Seed => "random".to_string(),
                 FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
                 FieldKind::PresetSeed => "random".to_string(),
-                FieldKind::Name | FieldKind::PresetName | FieldKind::MapName => String::new(),
+                FieldKind::Name | FieldKind::PresetName | FieldKind::MapName | FieldKind::ModeName => String::new(),
+                FieldKind::ShareCode => "HW-...".to_string(),
             }
         } else {
             let v = if field.kind == FieldKind::AdminCode { "*".repeat(field.value.len()) } else { field.value.clone() };

@@ -42,7 +42,64 @@ pub struct Preset {
     /// A hand-built map (Map Builder): its rooms in order. Empty = generated.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rooms: Vec<crate::mapfile::MapRoom>,
+    /// How often each monster comes (Mode Creator): 0 off, 1 rare, 2 normal,
+    /// 3 often, 4 constant. Empty = from the on/off switches (on = normal).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub levels: Vec<u8>,
+    /// Mode Creator extras (all optional in files; defaults = the normal game).
+    /// Door you start at (0 = the beginning).
+    pub start_door: u32,
+    /// The two Hollow chases happen.
+    pub chases: bool,
+    /// Areas come in a shuffled order (false = in the order listed).
+    pub shuffle_areas: bool,
+    /// How often exits are locked (key in a drawer), percent.
+    pub locks: u32,
+    /// Player health, speed, hiding time, Lumens earned (percent; hide 0 = no limit).
+    pub health: u32,
+    pub speed: u32,
+    pub hide_time: u32,
+    pub lumens: u32,
+    /// Starting items: 0 normal (flashlight, bandage), 1 nothing, 2 extra supplies, 3 the full kit.
+    pub start_kit: u8,
 }
+
+pub const KIT_NAMES: [&str; 4] = ["Normal", "Nothing", "Extra", "Full kit"];
+
+/// The rules of the run being played, from its mode (all 1.0 for the normal game).
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct ModeRules {
+    /// Damage taken is multiplied by this (100 / health%).
+    pub damage: f32,
+    pub speed: f32,
+    /// Hiding timer speed (0 = no limit).
+    pub hide_rate: f32,
+    pub lumens: f32,
+    pub kit: u8,
+}
+
+impl Default for ModeRules {
+    fn default() -> Self {
+        Self { damage: 1.0, speed: 1.0, hide_rate: 1.0, lumens: 1.0, kit: 0 }
+    }
+}
+
+impl ModeRules {
+    pub fn of(p: Option<&Preset>) -> Self {
+        let Some(p) = p else { return Self::default() };
+        Self {
+            damage: 100.0 / p.health.max(25) as f32,
+            speed: p.speed as f32 / 100.0,
+            hide_rate: if p.hide_time == 0 { 0.0 } else { 100.0 / p.hide_time as f32 },
+            lumens: p.lumens as f32 / 100.0,
+            kit: p.start_kit,
+        }
+    }
+}
+
+/// Monster frequency names (Mode Creator).
+pub const LEVEL_NAMES: [&str; 5] = ["Off", "Rare", "Normal", "Often", "Constant"];
+const LEVEL_RATE: [f32; 5] = [0.0, 0.45, 1.0, 1.7, 3.0];
 
 impl Default for Preset {
     fn default() -> Self {
@@ -66,6 +123,16 @@ impl Default for Preset {
             hush: true,
             listener: true,
             rooms: Vec::new(),
+            levels: Vec::new(),
+            start_door: 0,
+            chases: true,
+            shuffle_areas: true,
+            locks: 100,
+            health: 100,
+            speed: 100,
+            hide_time: 100,
+            lumens: 100,
+            start_kit: 0,
         }
     }
 }
@@ -163,6 +230,121 @@ impl PresetField {
 pub const ENTITY_NAMES: [&str; 6] = ["The Surge", "The Undertow", "The Whisperer", "The Gallery", "The Hush", "The Listener"];
 
 impl Preset {
+    /// A monster's frequency level (0 off .. 4 constant).
+    pub fn level(&self, i: usize) -> u8 {
+        match self.levels.get(i) {
+            Some(&l) => l.min(4),
+            None => if self.entity_on(i) { 2 } else { 0 },
+        }
+    }
+
+    /// Sets a monster's level (and its on/off switch to match).
+    pub fn set_level(&mut self, i: usize, l: u8) {
+        if self.levels.len() < ENTITY_NAMES.len() {
+            self.levels = (0..ENTITY_NAMES.len()).map(|k| self.level(k)).collect();
+        }
+        self.levels[i] = l.min(4);
+        if self.entity_on(i) != (l > 0) {
+            self.toggle_entity(i);
+        }
+    }
+
+    /// 0..100: how hard this mode is, for the creator's meter.
+    pub fn difficulty(&self) -> u32 {
+        let monsters: f32 = (0..ENTITY_NAMES.len()).map(|i| LEVEL_RATE[self.level(i) as usize]).sum::<f32>() / 6.0 * self.entities as f32 / 100.0;
+        let dark = (1.0 - self.brightness as f32 / 160.0) * 0.6 + self.dark_rooms as f32 / 300.0 * 0.6;
+        let tricks = self.fake_doors as f32 / 300.0 * 0.5 + self.stair_rooms as f32 / 300.0 * 0.15;
+        let supplies = (1.0 - self.loot as f32 / 200.0).max(0.0) * 0.4;
+        let length = self.doors as f32 / 100.0 * 0.5;
+        // Scaled so the classic floor reads HARD (it is), all-out reads IMPOSSIBLE.
+        ((monsters * 0.9 + dark + tricks + supplies + length) / 4.2 * 100.0).clamp(0.0, 100.0) as u32
+    }
+
+    /// A name for the difficulty meter.
+    pub fn difficulty_name(&self) -> &'static str {
+        match self.difficulty() {
+            0..=20 => "EASY",
+            21..=40 => "NORMAL",
+            41..=60 => "HARD",
+            61..=80 => "NIGHTMARE",
+            _ => "IMPOSSIBLE",
+        }
+    }
+
+    /// True for anything a player made (not one of the game's built-in floors).
+    pub fn player_made(&self) -> bool {
+        !self.rooms.is_empty() || !builtin().iter().any(|b| b.name == self.name && b.doors == self.doors && b.areas == self.areas && b.entities == self.entities)
+    }
+
+    /// A short code that carries the mode's settings (not its rooms or name),
+    /// to type into another player's game: "HW-" and base-32 letters.
+    pub fn share_code(&self) -> String {
+        let mut bytes = vec![
+            1u8,
+            self.doors.min(255) as u8,
+            (self.room_size / 10) as u8,
+            (self.brightness / 10) as u8,
+            (self.dark_rooms / 25) as u8,
+            (self.fake_doors / 25) as u8,
+            (self.stair_rooms / 25) as u8,
+            (self.loot / 25) as u8,
+            (self.entities / 25) as u8,
+        ];
+        let mask = Area::ALL.iter().enumerate().fold(0u8, |m, (i, a)| if self.areas.contains(a) { m | 1 << i } else { m });
+        bytes.push(mask);
+        let lv: u32 = (0..6).fold(0u32, |acc, i| acc | (self.level(i) as u32) << (i * 3));
+        bytes.extend_from_slice(&lv.to_le_bytes()[..3]);
+        bytes[0] = 2;
+        bytes.extend_from_slice(&[
+            self.start_door.min(255) as u8,
+            (self.chases as u8) | (self.shuffle_areas as u8) << 1 | self.start_kit.min(3) << 2,
+            (self.locks / 25) as u8,
+            (self.health / 25) as u8,
+            (self.speed / 10) as u8,
+            (self.hide_time / 25) as u8,
+            (self.lumens / 25) as u8,
+        ]);
+        let sum = bytes.iter().fold(0u8, |a, b| a.wrapping_mul(31).wrapping_add(*b));
+        bytes.push(sum);
+        format!("HW-{}", base32(&bytes))
+    }
+
+    /// Reads a share code back into a mode (None if it's mistyped).
+    pub fn from_share_code(code: &str) -> Option<Self> {
+        let clean: String = code.trim().to_ascii_uppercase().trim_start_matches("HW-").chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let b = unbase32(&clean)?;
+        let n = match b.first() {
+            Some(1) => 13,
+            Some(2) => 20,
+            _ => return None,
+        };
+        if b.len() < n + 1 {
+            return None;
+        }
+        let sum = b[..n].iter().fold(0u8, |a, x| a.wrapping_mul(31).wrapping_add(*x));
+        if sum != b[n] {
+            return None;
+        }
+        let mut p = Preset { name: format!("Shared {}", &clean[..clean.len().min(5)]), doors: b[1] as u32, room_size: b[2] as u32 * 10, brightness: b[3] as u32 * 10, dark_rooms: b[4] as u32 * 25, fake_doors: b[5] as u32 * 25, stair_rooms: b[6] as u32 * 25, loot: b[7] as u32 * 25, entities: b[8] as u32 * 25, ..Preset::default() };
+        p.areas = Area::ALL.iter().enumerate().filter(|(i, _)| b[9] & (1 << i) != 0).map(|(_, a)| *a).collect();
+        let lv = u32::from_le_bytes([b[10], b[11], b[12], 0]);
+        for i in 0..6 {
+            p.set_level(i, ((lv >> (i * 3)) & 7) as u8);
+        }
+        if n == 20 {
+            p.start_door = b[13] as u32;
+            p.chases = b[14] & 1 != 0;
+            p.shuffle_areas = b[14] & 2 != 0;
+            p.start_kit = (b[14] >> 2) & 3;
+            p.locks = b[15] as u32 * 25;
+            p.health = b[16] as u32 * 25;
+            p.speed = b[17] as u32 * 10;
+            p.hide_time = b[18] as u32 * 25;
+            p.lumens = b[19] as u32 * 25;
+        }
+        Some(p.sanitized())
+    }
+
     pub fn entity_on(&self, i: usize) -> bool {
         [self.surge, self.undertow, self.whisperer, self.gallery, self.hush, self.listener].get(i).copied().unwrap_or(false)
     }
@@ -201,6 +383,17 @@ impl Preset {
             self.areas = Area::ALL.to_vec();
         }
         self.room_size = self.room_size.clamp(60, 160);
+        self.start_door = self.start_door.min(self.doors.saturating_sub(5));
+        self.locks = self.locks.min(300);
+        self.health = self.health.clamp(25, 400);
+        self.speed = self.speed.clamp(60, 160);
+        self.hide_time = self.hide_time.min(400);
+        self.lumens = self.lumens.min(400);
+        self.start_kit = self.start_kit.min(3);
+        self.levels.truncate(ENTITY_NAMES.len());
+        for l in &mut self.levels {
+            *l = (*l).min(4);
+        }
         self.rooms.truncate(crate::mapfile::MAX_ROOMS);
         for r in &mut self.rooms {
             *r = r.sanitized();
@@ -228,6 +421,9 @@ impl Preset {
             fake_doors: self.fake_doors as f32 / 100.0,
             stairs: self.stair_rooms as f32 / 100.0,
             loot: self.loot as f32 / 100.0,
+            chases: self.chases,
+            shuffle: self.shuffle_areas,
+            locks: self.locks as f32 / 100.0,
         }
     }
 
@@ -241,7 +437,9 @@ impl Preset {
         let k = self.entities as f32 / 100.0;
         let tunings = [&mut cfg.surge, &mut cfg.undertow, &mut cfg.whisperer, &mut cfg.gallery, &mut cfg.hush, &mut cfg.listener];
         for (i, t) in tunings.into_iter().enumerate() {
-            t.chance = if self.entity_on(i) { (t.chance * k).min(0.95) } else { 0.0 };
+            // Overall rate times this monster's own level (Mode Creator).
+            let k = k * LEVEL_RATE[self.level(i) as usize];
+            t.chance = if self.entity_on(i) && k > 0.0 { (t.chance * k).min(0.95) } else { 0.0 };
             if k > 1.0 {
                 t.cooldown = (t.cooldown as f32 / k).round() as u32;
             }
@@ -255,6 +453,46 @@ impl Preset {
     pub fn from_ron(text: &str) -> Option<Self> {
         ron::from_str::<Preset>(text).ok().map(Preset::sanitized)
     }
+}
+
+const B32: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+fn base32(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for b in bytes {
+        acc = (acc << 8) | *b as u32;
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(B32[((acc >> bits) & 31) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        out.push(B32[((acc << (5 - bits)) & 31) as usize] as char);
+    }
+    out
+}
+
+fn unbase32(s: &str) -> Option<Vec<u8>> {
+    let mut out = vec![];
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.bytes() {
+        // Easily confused letters read as the digits they look like.
+        let c = match c {
+            b'O' => b'0',
+            b'I' => b'1',
+            c => c,
+        };
+        let v = B32.iter().position(|x| *x == c)? as u32;
+        acc = (acc << 5) | v;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((acc >> bits) & 0xff) as u8);
+        }
+    }
+    Some(out)
 }
 
 fn clean_name(s: &str) -> String {
@@ -358,6 +596,61 @@ pub struct ActivePreset(pub Option<Preset>);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn share_codes_round_trip() {
+        let p0 = Preset { name: "Mine".into(), doors: 45, room_size: 130, brightness: 40, dark_rooms: 200, fake_doors: 150, stair_rooms: 50, loot: 75, entities: 125, areas: vec![Area::Grounds, Area::Atrium], ..Preset::default() };
+        let mut p = p0;
+        p.set_level(0, 4);
+        p.set_level(2, 0);
+        p.set_level(5, 1);
+        let code = p.share_code();
+        assert!(code.starts_with("HW-") && code.len() < 44, "{code}");
+        let back = Preset::from_share_code(&code.to_lowercase()).unwrap();
+        for f in PresetField::ALL {
+            assert_eq!(f.get(&back), f.get(&p), "{f:?}");
+        }
+        assert_eq!(back.areas, p.areas);
+        assert_eq!((0..6).map(|i| back.level(i)).collect::<Vec<_>>(), vec![4, 2, 0, 2, 2, 1]);
+        let mut q = p.clone();
+        q.start_door = 20;
+        q.chases = false;
+        q.shuffle_areas = false;
+        q.start_kit = 3;
+        q.health = 150;
+        q.speed = 120;
+        q.hide_time = 0;
+        q.lumens = 200;
+        q.locks = 50;
+        let back = Preset::from_share_code(&q.share_code()).unwrap();
+        assert_eq!((back.start_door, back.chases, back.shuffle_areas, back.start_kit, back.health, back.speed, back.hide_time, back.lumens, back.locks), (20, false, false, 3, 150, 120, 0, 200, 50));
+        assert!(back.player_made());
+        // A typo is caught by the checksum.
+        let mut bad = code.clone();
+        bad.replace_range(5..6, if &code[5..6] == "A" { "B" } else { "A" });
+        assert!(Preset::from_share_code(&bad).is_none());
+        assert!(!builtin()[0].player_made(), "the classic floor isn't player-made");
+    }
+
+    #[test]
+    fn levels_shape_the_monsters_and_the_difficulty() {
+        assert_eq!(builtin()[0].difficulty_name(), "HARD", "the classic floor is hard");
+        let mut p = Preset::default();
+        let easy = p.difficulty();
+        for i in 0..6 {
+            p.set_level(i, 4);
+        }
+        p.brightness = 30;
+        assert!(p.difficulty() > easy + 15);
+        let mut cfg = crate::data::EntityConfig::default();
+        let base = cfg.surge.chance;
+        p.apply_entities(&mut cfg);
+        assert!(cfg.surge.chance > base);
+        p.set_level(0, 0);
+        let mut cfg = crate::data::EntityConfig::default();
+        p.apply_entities(&mut cfg);
+        assert_eq!(cfg.surge.chance, 0.0);
+    }
 
     #[test]
     fn round_trip_and_sanitize() {

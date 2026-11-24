@@ -18,18 +18,23 @@ pub struct RunState {
     pub best_room: u32,
     /// Fragile modifier: 50% more damage.
     pub fragile: bool,
+    /// Mode rule: damage multiplier (from the mode's health setting).
+    pub damage_scale: f32,
+    /// Mode rule: Lumens earned multiplier.
+    pub lumen_scale: f32,
     /// Lumens already banked (a revived player who dies again isn't paid twice).
     pub banked: bool,
 }
 
 impl RunState {
     pub fn new() -> Self {
-        Self { vitality: 100.0, ..Default::default() }
+        Self { vitality: 100.0, damage_scale: 1.0, lumen_scale: 1.0, ..Default::default() }
     }
 
     /// Applies damage; returns true if this was fatal.
     pub fn damage(&mut self, amount: f32) -> bool {
         let amount = if self.fragile { amount * 1.5 } else { amount };
+        let amount = amount * if self.damage_scale > 0.0 { self.damage_scale } else { 1.0 };
         self.vitality = (self.vitality - amount).max(0.0);
         self.damage_taken += amount;
         self.vitality <= 0.0
@@ -77,8 +82,11 @@ impl Plugin for RunPlugin {
         app.add_message::<Subtitle>()
             .init_resource::<RunState>()
             .init_resource::<CameraShake>()
-            .add_systems(OnEnter(AppState::Playing), |mut commands: Commands, profile: Res<crate::profile::Profile>| {
-                commands.insert_resource(RunState { fragile: profile.has(crate::profile::Modifier::Fragile), ..RunState::new() });
+            .init_resource::<crate::presets::ModeRules>()
+            .add_systems(OnEnter(AppState::Playing), |mut commands: Commands, profile: Res<crate::profile::Profile>, active: Res<crate::presets::ActivePreset>| {
+                let rules = crate::presets::ModeRules::of(active.0.as_ref());
+                commands.insert_resource(rules);
+                commands.insert_resource(RunState { fragile: profile.has(crate::profile::Modifier::Fragile), damage_scale: rules.damage, lumen_scale: rules.lumens, ..RunState::new() });
                 commands.insert_resource(CameraShake::default());
             })
             .add_systems(Update, tick_timer.run_if(gameplay_active));

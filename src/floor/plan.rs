@@ -483,11 +483,17 @@ pub struct GenOptions {
     pub fake_doors: f32,
     pub stairs: f32,
     pub loot: f32,
+    /// The Hollow chases happen (Mode Creator can switch them off).
+    pub chases: bool,
+    /// Custom area lists are shuffled per seed (false = in the listed order).
+    pub shuffle: bool,
+    /// Multiplier on how often exits are locked.
+    pub locks: f32,
 }
 
 impl Default for GenOptions {
     fn default() -> Self {
-        Self { last_room: LAST_ROOM, areas: None, size: 1.0, darkness: 1.0, fake_doors: 1.0, stairs: 1.0, loot: 1.0 }
+        Self { last_room: LAST_ROOM, areas: None, size: 1.0, darkness: 1.0, fake_doors: 1.0, stairs: 1.0, loot: 1.0, chases: true, shuffle: true, locks: 1.0 }
     }
 }
 
@@ -501,6 +507,7 @@ const CLASSIC_SECTIONS: [u32; 6] = [FIRST_ROOM, 21, 41, 51, 61, 81];
 pub fn area_order(seed: u64, opt: &GenOptions) -> Vec<Area> {
     let mut rng = GameRng::fork(seed, 0xA4EA_0D3E);
     let (mut list, keep_first) = match &opt.areas {
+        Some(list) if !list.is_empty() && !opt.shuffle => return list.clone(),
         Some(list) if !list.is_empty() => (list.clone(), 0),
         _ => (Area::ALL.to_vec(), 1),
     };
@@ -566,7 +573,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
                 (RoomKind::Loot, 5.0),
                 (RoomKind::Hall, 2.2),
                 (RoomKind::Dark, if index >= 5 { dark_w * opt.darkness.clamp(0.0, 3.0) } else { 0.0 }),
-                (RoomKind::KeyPuzzle, if index >= 8 && i64::from(index) - last_key >= 6 { 1.3 } else { 0.0 }),
+                (RoomKind::KeyPuzzle, if index >= 8 && i64::from(index) - last_key >= 6 { 1.3 * opt.locks.clamp(0.0, 3.0) } else { 0.0 }),
             ];
             let weights: Vec<f32> = candidates
                 .iter()
@@ -585,7 +592,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             candidates[i].0
         };
         // The chase rooms must never be locked.
-        let pursuit = chase_of(index, last).is_some();
+        let pursuit = opt.chases && chase_of(index, last).is_some();
         let kind = if pursuit && kind == RoomKind::KeyPuzzle {
             // Swap the lock for something that keeps the no-three-in-a-row rule.
             let prev = history.last().copied();
@@ -638,7 +645,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
 
         // The last room of a chase is the hand hall: a straight hall centred on
         // its entrance (hands on both walls, the lane down the middle).
-        let hand_hall = chase_of(index, last).is_some_and(|(_, b)| b == index);
+        let hand_hall = opt.chases && chase_of(index, last).is_some_and(|(_, b)| b == index);
         // Centre so the entry door fits with a margin; drift gently, pull back toward x = 0.
         let lo = entry_x + DOOR_MARGIN - width / 2.0;
         let hi = entry_x - DOOR_MARGIN + width / 2.0;

@@ -453,6 +453,7 @@ fn update_hiding(
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
     threat: Res<ThreatActive>,
+    rules: Res<crate::presets::ModeRules>,
 ) {
     let dt = time.delta_secs();
     hide.cooldown = (hide.cooldown - dt).max(0.0);
@@ -484,7 +485,7 @@ fn update_hiding(
         HidePhase::Hidden(t) => {
             spot.doors_target = 0.06; // a crack to peek through
             // You hold your breath while something is out there: the timer pauses.
-            let dt = if threat.0 { 0.0 } else { dt };
+            let dt = if threat.0 { 0.0 } else { dt * rules.hide_rate };
             match hide_tick(t, dt, hide.warned) {
                 HideTick::Nothing => hide.phase = HidePhase::Hidden(t + dt),
                 HideTick::Warn => {

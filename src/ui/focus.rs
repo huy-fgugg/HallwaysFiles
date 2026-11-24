@@ -83,6 +83,16 @@ pub enum MenuAction {
     MapImport,
     MapFolder,
     MapDeleteFile,
+    OpenModeCreator,
+    CloseModeCreator,
+    /// Cycle a Mode Creator card (index, +1/-1).
+    CreatorCard(u8, i8),
+    CreatorTemplate(i8),
+    CreatorPlay,
+    CreatorHost,
+    CreatorSave,
+    CreatorUseCode,
+    CreatorRooms,
     WatchCutscene(u8),
 }
 

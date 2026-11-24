@@ -173,12 +173,20 @@ impl Plugin for ItemsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inventory>()
             .init_resource::<SpeedBoost>()
-            .add_systems(OnEnter(AppState::Playing), |mut c: Commands, mut profile: ResMut<crate::profile::Profile>, cfg: Res<ItemConfig>| {
+            .add_systems(OnEnter(AppState::Playing), |mut c: Commands, mut profile: ResMut<crate::profile::Profile>, cfg: Res<ItemConfig>, active: Res<crate::presets::ActivePreset>| {
                 // Items bought in the shop are handed over once, at the start of a run.
                 let mut inv = Inventory::default();
-                // Nobody starts empty-handed: a flashlight and a bandage, plus shop items.
-                for k in STARTING_ITEMS {
-                    inv.add(k, &cfg);
+                // Nobody starts empty-handed: a flashlight and a bandage, plus shop
+                // items (a mode can start you with nothing, or more).
+                let kit = active.0.as_ref().map_or(0, |p| p.start_kit);
+                let items: &[ItemKind] = match kit {
+                    1 => &[],
+                    2 => &[ItemKind::Flashlight, ItemKind::Bandage, ItemKind::Bandage, ItemKind::Vitamins],
+                    3 => &[ItemKind::Flashlight, ItemKind::Bandage, ItemKind::Vitamins, ItemKind::Lockpick, ItemKind::SkeletonKey],
+                    _ => &STARTING_ITEMS,
+                };
+                for k in items {
+                    inv.add(*k, &cfg);
                 }
                 if !profile.loadout.is_empty() {
                     for k in std::mem::take(&mut profile.loadout) {

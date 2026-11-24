@@ -142,7 +142,7 @@ impl Profile {
 
     /// Banks a finished run. Returns the Lumens added.
     pub fn bank_run(&mut self, run: &RunState, won: bool) -> u32 {
-        let earned = (run.lumens as f32 * self.lumen_multiplier()).round() as u32;
+        let earned = (run.lumens as f32 * self.lumen_multiplier() * run.lumen_scale).round() as u32;
         self.lumens = self.lumens.saturating_add(earned);
         self.runs += 1;
         if won {

@@ -221,7 +221,9 @@ fn custom_quick_start(
         return;
     }
     let Ok((mut pl, mut tf)) = player.single_mut() else { return };
-    let Some(r) = floor.0.room(FIRST_ROOM) else { return };
+    // A mode can start you further in (Mode Creator "Start at door").
+    let first = (p.start_door + 1).clamp(FIRST_ROOM, floor.0.last_room);
+    let Some(r) = floor.0.room(first) else { return };
     *done = true;
     chase.phase = ChasePhase::Done;
     chase.active = false;
@@ -234,7 +236,9 @@ fn custom_quick_start(
         subs.write(Subtitle { text: format!("-  {}  -   {}", p.name.to_uppercase(), r.area.name().to_uppercase()), seconds: 4.0, danger: false });
     } else {
         anchor.0 = Vec3::new(r.entry_x, r.entry_height, r.max.y);
-        *vars = crate::cutscene::CutsceneVars { floor: p.name.clone(), area: r.area.name().to_string(), doors: floor.0.final_door() };
+        // Player-made modes and maps say so on the title card.
+        let area = if p.player_made() { format!("PLAYER-MADE  -  {}", r.area.name()) } else { r.area.name().to_string() };
+        *vars = crate::cutscene::CutsceneVars { floor: p.name.clone(), area, doors: floor.0.final_door() };
         play.write(crate::cutscene::PlayCutscene(crate::cutscene::CUSTOM_START.into()));
     }
 }
