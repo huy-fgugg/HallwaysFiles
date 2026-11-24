@@ -25,6 +25,7 @@ pub enum FieldKind {
     MapName,
     ModeName,
     ShareCode,
+    MonsterName,
 }
 
 impl FieldKind {
@@ -39,6 +40,7 @@ impl FieldKind {
             FieldKind::MapName => "MAP NAME",
             FieldKind::ModeName => "MODE NAME",
             FieldKind::ShareCode => "ENTER A CODE",
+            FieldKind::MonsterName => "NAME",
         }
     }
 
@@ -53,6 +55,7 @@ impl FieldKind {
             FieldKind::MapName => 24,
             FieldKind::ModeName => 24,
             FieldKind::ShareCode => 32,
+            FieldKind::MonsterName => 16,
         }
     }
 
@@ -67,6 +70,7 @@ impl FieldKind {
             FieldKind::MapName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::ModeName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::ShareCode => c.is_ascii_alphanumeric() || c == '-',
+            FieldKind::MonsterName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-'),
         }
     }
 }
@@ -282,6 +286,11 @@ fn type_into_fields(
                         m.code = field.value.clone();
                     }
                 }
+                FieldKind::MonsterName => {
+                    if let Some(m) = mode_editor.as_mut() {
+                        m.mode.custom.name = field.value.clone();
+                    }
+                }
             }
         }
         let caret = if active && (time.elapsed_secs() * 2.0) as i32 % 2 == 0 { "_" } else { " " };
@@ -290,7 +299,7 @@ fn type_into_fields(
                 FieldKind::Seed => "random".to_string(),
                 FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
                 FieldKind::PresetSeed => "random".to_string(),
-                FieldKind::Name | FieldKind::PresetName | FieldKind::MapName | FieldKind::ModeName => String::new(),
+                FieldKind::Name | FieldKind::PresetName | FieldKind::MapName | FieldKind::ModeName | FieldKind::MonsterName => String::new(),
                 FieldKind::ShareCode => "HW-...".to_string(),
             }
         } else {

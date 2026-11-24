@@ -133,8 +133,9 @@ fn trigger(
     mut threat: ResMut<ThreatActive>,
     mut sfx: MessageWriter<PlaySfx>,
     mut subs: MessageWriter<Subtitle>,
+    stranger: Res<crate::stranger::StrangerThreat>,
 ) {
-    threat.0 = state.0 != SurgePhase::Idle;
+    threat.0 = state.0 != SurgePhase::Idle || stranger.0;
     let (Some(floor), Some(rt)) = (floor, rt) else { return };
     if state.0 != SurgePhase::Idle {
         return;

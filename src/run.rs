@@ -22,6 +22,8 @@ pub struct RunState {
     pub damage_scale: f32,
     /// Mode rule: Lumens earned multiplier.
     pub lumen_scale: f32,
+    /// Mode rule: extra lives left.
+    pub revives_left: u8,
     /// Lumens already banked (a revived player who dies again isn't paid twice).
     pub banked: bool,
 }
@@ -86,7 +88,7 @@ impl Plugin for RunPlugin {
             .add_systems(OnEnter(AppState::Playing), |mut commands: Commands, profile: Res<crate::profile::Profile>, active: Res<crate::presets::ActivePreset>| {
                 let rules = crate::presets::ModeRules::of(active.0.as_ref());
                 commands.insert_resource(rules);
-                commands.insert_resource(RunState { fragile: profile.has(crate::profile::Modifier::Fragile), damage_scale: rules.damage, lumen_scale: rules.lumens, ..RunState::new() });
+                commands.insert_resource(RunState { fragile: profile.has(crate::profile::Modifier::Fragile), damage_scale: rules.damage, lumen_scale: rules.lumens, revives_left: rules.revives, ..RunState::new() });
                 commands.insert_resource(CameraShake::default());
             })
             .add_systems(Update, tick_timer.run_if(gameplay_active));

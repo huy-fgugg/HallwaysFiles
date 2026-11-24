@@ -233,7 +233,15 @@ impl Plugin for ProfilePlugin {
         app.insert_resource(load_profile())
             .init_resource::<LastBanked>()
             .add_systems(OnEnter(Overlay::Dead), |mut p: ResMut<Profile>, mut run: ResMut<RunState>, mut last: ResMut<LastBanked>| {
-                if !run.banked {
+                // With a revive left the run may go on: it's banked when you leave instead.
+                if !run.banked && run.revives_left == 0 {
+                    run.banked = true;
+                    last.0 = p.bank_run(&run, false);
+                    save_profile(&p);
+                }
+            })
+            .add_systems(OnExit(crate::state::AppState::Playing), |mut p: ResMut<Profile>, mut run: ResMut<RunState>, mut last: ResMut<LastBanked>| {
+                if !run.banked && run.vitality <= 0.0 {
                     run.banked = true;
                     last.0 = p.bank_run(&run, false);
                     save_profile(&p);

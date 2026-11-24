@@ -137,7 +137,19 @@ fn setup_floor(
     let custom_light = preset.0.as_ref().map_or(1.0, |p| p.light_scale());
     let light_scale = custom_light * if profile.has(Modifier::LightsLow) { 0.5 } else { 1.0 };
     let players = (peers.0.len() + 1).min(crate::net::proto::MAX_PLAYERS as usize) as u8;
-    commands.insert_resource(FloorRuntime { items: items.clone(), light_scale, players, ..default() });
+    // A mode can take items out of the drawers.
+    let mut items = items.clone();
+    if let Some(p) = preset.0.as_ref().filter(|p| p.items_off != 0) {
+        for (i, k) in crate::items::ItemKind::ALL.iter().enumerate() {
+            if p.items_off & (1 << i) != 0 {
+                k.tuning_mut(&mut items).weight = 0.0;
+            }
+        }
+        if p.items_off & 0b1_1111 == 0b1_1111 {
+            items.item_chance = 0.0;
+        }
+    }
+    commands.insert_resource(FloorRuntime { items, light_scale, players, ..default() });
     commands.insert_resource(PropMaterials::new(&mut std_mats, &mut meshes, &mut images, &asset_server));
 }
 

@@ -89,6 +89,9 @@ pub enum MenuAction {
     CreatorCard(u8, i8),
     CreatorTemplate(i8),
     CreatorPlay,
+    Revive,
+    CreatorTab(u8),
+    CreatorGroup(u8),
     CreatorHost,
     CreatorSave,
     CreatorUseCode,
@@ -339,18 +342,31 @@ fn keyboard_and_gamepad_navigation(
 }
 
 /// Visible focus state: cyan border, brighter fill, and a ">" marker via text colour.
+/// Own colours for a focusable (instead of the theme's): background,
+/// border and label colour, normal and focused.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FocusPalette {
+    pub bg: Color,
+    pub border: Color,
+    pub text: Color,
+    pub bg_focus: Color,
+    pub border_focus: Color,
+    pub text_focus: Color,
+}
+
 fn paint_focus(
     theme: Res<UiTheme>,
     focus: Res<InputFocus>,
-    mut q: Query<(Entity, &mut BackgroundColor, &mut BorderColor, Option<&Children>), With<Focusable>>,
+    mut q: Query<(Entity, &mut BackgroundColor, &mut BorderColor, Option<&Children>, Option<&FocusPalette>), With<Focusable>>,
     mut texts: Query<&mut TextColor>,
 ) {
-    for (e, mut bg, mut border, children) in &mut q {
+    for (e, mut bg, mut border, children, pal) in &mut q {
         let focused = focus.get() == Some(e);
-        let (want_bg, want_border, want_text) = if focused {
-            (theme.button_bg_focus, theme.interact, theme.interact)
-        } else {
-            (theme.button_bg, theme.panel_border, theme.text)
+        let (want_bg, want_border, want_text) = match (pal, focused) {
+            (Some(p), true) => (p.bg_focus, p.border_focus, p.text_focus),
+            (Some(p), false) => (p.bg, p.border, p.text),
+            (None, true) => (theme.button_bg_focus, theme.interact, theme.interact),
+            (None, false) => (theme.button_bg, theme.panel_border, theme.text),
         };
         if bg.0 != want_bg {
             bg.0 = want_bg;

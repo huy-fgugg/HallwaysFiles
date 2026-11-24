@@ -62,7 +62,70 @@ pub struct Preset {
     pub lumens: u32,
     /// Starting items: 0 normal (flashlight, bandage), 1 nothing, 2 extra supplies, 3 the full kit.
     pub start_kit: u8,
+    /// Extra lives: after dying you can get back up this many times.
+    pub revives: u8,
+    /// Sprinting allowed.
+    pub sprint: bool,
+    /// Items that never turn up in drawers (bit per [`crate::items::ItemKind::ALL`]).
+    pub items_off: u8,
+    /// How often each structure appears (lofts, stairs, zigzags, pillars,
+    /// streams), as monster-style levels 0..4 (2 = normal).
+    pub structures: [u8; 5],
+    /// Room the Reading Hall is at (0 = no Reading Hall).
+    pub reading_room: u32,
+    /// The mode's own rushing monster.
+    pub custom: CustomMonster,
 }
+
+/// A monster made in the Mode Creator: it rushes through the rooms like the
+/// Surge, in its own colour and with its own rules.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomMonster {
+    pub on: bool,
+    pub name: String,
+    /// Index into [`MONSTER_COLORS`].
+    pub color: u8,
+    /// Speed in m/s, slowest and fastest (each run picks in between).
+    pub speed_min: u8,
+    pub speed_max: u8,
+    /// Times it turns around and comes back.
+    pub passes: u8,
+    /// Damage when it catches you (100 = kills).
+    pub damage: u8,
+    /// Warning before it arrives, tenths of a second.
+    pub warning: u8,
+    /// Chance per room, percent.
+    pub chance: u8,
+    /// First room it can appear in.
+    pub first_room: u32,
+}
+
+impl Default for CustomMonster {
+    fn default() -> Self {
+        Self { on: false, name: "The Stranger".into(), color: 0, speed_min: 16, speed_max: 24, passes: 0, damage: 100, warning: 40, chance: 15, first_room: 10 }
+    }
+}
+
+pub const MONSTER_COLORS: [(&str, [f32; 3]); 8] = [
+    ("Red", [1.0, 0.2, 0.15]),
+    ("Orange", [1.0, 0.55, 0.15]),
+    ("Yellow", [1.0, 0.9, 0.3]),
+    ("Green", [0.35, 1.0, 0.4]),
+    ("Cyan", [0.3, 0.95, 1.0]),
+    ("Blue", [0.3, 0.45, 1.0]),
+    ("Purple", [0.75, 0.35, 1.0]),
+    ("White", [0.95, 0.95, 1.0]),
+];
+
+impl CustomMonster {
+    pub fn rgb(&self) -> Color {
+        let c = MONSTER_COLORS[(self.color as usize) % MONSTER_COLORS.len()].1;
+        Color::srgb(c[0], c[1], c[2])
+    }
+}
+
+pub const STRUCTURE_NAMES: [&str; 5] = ["Key lofts", "Stairs", "Zigzag walls", "Pillar halls", "Streams"];
 
 pub const KIT_NAMES: [&str; 4] = ["Normal", "Nothing", "Extra", "Full kit"];
 
@@ -76,11 +139,13 @@ pub struct ModeRules {
     pub hide_rate: f32,
     pub lumens: f32,
     pub kit: u8,
+    pub sprint: bool,
+    pub revives: u8,
 }
 
 impl Default for ModeRules {
     fn default() -> Self {
-        Self { damage: 1.0, speed: 1.0, hide_rate: 1.0, lumens: 1.0, kit: 0 }
+        Self { damage: 1.0, speed: 1.0, hide_rate: 1.0, lumens: 1.0, kit: 0, sprint: true, revives: 0 }
     }
 }
 
@@ -93,6 +158,8 @@ impl ModeRules {
             hide_rate: if p.hide_time == 0 { 0.0 } else { 100.0 / p.hide_time as f32 },
             lumens: p.lumens as f32 / 100.0,
             kit: p.start_kit,
+            sprint: p.sprint,
+            revives: p.revives,
         }
     }
 }
@@ -133,6 +200,12 @@ impl Default for Preset {
             hide_time: 100,
             lumens: 100,
             start_kit: 0,
+            revives: 0,
+            sprint: true,
+            items_off: 0,
+            structures: [2; 5],
+            reading_room: crate::floor::plan::READING_HALL,
+            custom: CustomMonster::default(),
         }
     }
 }
@@ -304,6 +377,24 @@ impl Preset {
             (self.hide_time / 25) as u8,
             (self.lumens / 25) as u8,
         ]);
+        bytes[0] = 3;
+        let st = self.structures.iter().enumerate().fold(0u16, |m, (i, l)| m | (u16::from((*l).min(4)) << (i * 3)));
+        let c = &self.custom;
+        bytes.extend_from_slice(&[
+            self.revives.min(5) | (self.sprint as u8) << 3 | (c.on as u8) << 4,
+            self.items_off,
+            st as u8,
+            (st >> 8) as u8,
+            self.reading_room.min(255) as u8,
+            c.color,
+            c.speed_min,
+            c.speed_max,
+            c.passes,
+            c.damage,
+            c.warning,
+            c.chance,
+            c.first_room.min(255) as u8,
+        ]);
         let sum = bytes.iter().fold(0u8, |a, b| a.wrapping_mul(31).wrapping_add(*b));
         bytes.push(sum);
         format!("HW-{}", base32(&bytes))
@@ -316,6 +407,7 @@ impl Preset {
         let n = match b.first() {
             Some(1) => 13,
             Some(2) => 20,
+            Some(3) => 33,
             _ => return None,
         };
         if b.len() < n + 1 {
@@ -331,7 +423,7 @@ impl Preset {
         for i in 0..6 {
             p.set_level(i, ((lv >> (i * 3)) & 7) as u8);
         }
-        if n == 20 {
+        if n >= 20 {
             p.start_door = b[13] as u32;
             p.chases = b[14] & 1 != 0;
             p.shuffle_areas = b[14] & 2 != 0;
@@ -341,6 +433,20 @@ impl Preset {
             p.speed = b[17] as u32 * 10;
             p.hide_time = b[18] as u32 * 25;
             p.lumens = b[19] as u32 * 25;
+        }
+        if n >= 33 {
+            p.revives = b[20] & 7;
+            p.sprint = b[20] & 8 != 0;
+            p.custom.on = b[20] & 16 != 0;
+            p.items_off = b[21];
+            let st = u16::from_le_bytes([b[22], b[23]]);
+            for i in 0..5 {
+                p.structures[i] = ((st >> (i * 3)) & 7) as u8;
+            }
+            p.reading_room = b[24] as u32;
+            let c = &mut p.custom;
+            (c.color, c.speed_min, c.speed_max, c.passes, c.damage, c.warning, c.chance) = (b[25], b[26], b[27], b[28], b[29], b[30], b[31]);
+            c.first_room = b[32] as u32;
         }
         Some(p.sanitized())
     }
@@ -390,6 +496,27 @@ impl Preset {
         self.hide_time = self.hide_time.min(400);
         self.lumens = self.lumens.min(400);
         self.start_kit = self.start_kit.min(3);
+        self.revives = self.revives.min(5);
+        self.items_off &= 0b1_1111;
+        for s in &mut self.structures {
+            *s = (*s).min(4);
+        }
+        if self.reading_room != 0 {
+            self.reading_room = self.reading_room.clamp(FIRST_ROOM + 2, 98);
+        }
+        let c = &mut self.custom;
+        c.name = clean_name(&c.name);
+        if c.name.is_empty() {
+            c.name = "The Stranger".into();
+        }
+        c.color %= MONSTER_COLORS.len() as u8;
+        c.speed_min = c.speed_min.clamp(6, 40);
+        c.speed_max = c.speed_max.clamp(c.speed_min, 40);
+        c.passes = c.passes.min(5);
+        c.damage = c.damage.clamp(10, 100);
+        c.warning = c.warning.clamp(10, 100);
+        c.chance = c.chance.clamp(1, 100);
+        c.first_room = c.first_room.clamp(FIRST_ROOM + 1, 99);
         self.levels.truncate(ENTITY_NAMES.len());
         for l in &mut self.levels {
             *l = (*l).min(4);
@@ -424,6 +551,8 @@ impl Preset {
             chases: self.chases,
             shuffle: self.shuffle_areas,
             locks: self.locks as f32 / 100.0,
+            structures: self.structures.map(|l| LEVEL_RATE[l.min(4) as usize]),
+            reading_hall: self.reading_room,
         }
     }
 
@@ -605,7 +734,7 @@ mod tests {
         p.set_level(2, 0);
         p.set_level(5, 1);
         let code = p.share_code();
-        assert!(code.starts_with("HW-") && code.len() < 44, "{code}");
+        assert!(code.starts_with("HW-") && code.len() < 64, "{code}");
         let back = Preset::from_share_code(&code.to_lowercase()).unwrap();
         for f in PresetField::ALL {
             assert_eq!(f.get(&back), f.get(&p), "{f:?}");
@@ -625,6 +754,16 @@ mod tests {
         let back = Preset::from_share_code(&q.share_code()).unwrap();
         assert_eq!((back.start_door, back.chases, back.shuffle_areas, back.start_kit, back.health, back.speed, back.hide_time, back.lumens, back.locks), (20, false, false, 3, 150, 120, 0, 200, 50));
         assert!(back.player_made());
+        let mut r = q.clone();
+        r.revives = 2;
+        r.sprint = false;
+        r.items_off = 0b10010;
+        r.structures = [0, 1, 2, 3, 4];
+        r.reading_room = 33;
+        r.custom = CustomMonster { on: true, color: 4, speed_min: 10, speed_max: 30, passes: 2, damage: 40, warning: 25, chance: 60, first_room: 12, ..CustomMonster::default() };
+        let back = Preset::from_share_code(&r.share_code()).unwrap();
+        assert_eq!((back.revives, back.sprint, back.items_off, back.structures, back.reading_room), (2, false, 0b10010, [0, 1, 2, 3, 4], 33));
+        assert_eq!(back.custom, r.custom);
         // A typo is caught by the checksum.
         let mut bad = code.clone();
         bad.replace_range(5..6, if &code[5..6] == "A" { "B" } else { "A" });

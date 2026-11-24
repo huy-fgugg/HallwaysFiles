@@ -33,6 +33,16 @@ pub enum ItemKind {
 impl ItemKind {
     pub const ALL: [ItemKind; 5] = [ItemKind::Flashlight, ItemKind::Lockpick, ItemKind::Vitamins, ItemKind::Bandage, ItemKind::SkeletonKey];
 
+    pub fn tuning_mut(self, cfg: &mut ItemConfig) -> &mut ItemTuning {
+        match self {
+            ItemKind::Flashlight => &mut cfg.flashlight,
+            ItemKind::Lockpick => &mut cfg.lockpick,
+            ItemKind::Vitamins => &mut cfg.vitamins,
+            ItemKind::Bandage => &mut cfg.bandage,
+            ItemKind::SkeletonKey => &mut cfg.skeleton_key,
+        }
+    }
+
     pub fn tuning(self, cfg: &ItemConfig) -> &ItemTuning {
         match self {
             ItemKind::Flashlight => &cfg.flashlight,

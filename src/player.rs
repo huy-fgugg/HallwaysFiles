@@ -147,7 +147,7 @@ fn movement(
     }
 
     player.crouching = crouch;
-    player.sprinting = sprint && !crouch && input.y > 0.1;
+    player.sprinting = sprint && rules.sprint && !crouch && input.y > 0.1;
     let speed = if crouch {
         CROUCH_SPEED
     } else if player.sprinting {

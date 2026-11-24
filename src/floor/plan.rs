@@ -489,11 +489,16 @@ pub struct GenOptions {
     pub shuffle: bool,
     /// Multiplier on how often exits are locked.
     pub locks: f32,
+    /// Per-structure multipliers: key lofts, raised exits (stairs), zigzags,
+    /// pillar halls, streams.
+    pub structures: [f32; 5],
+    /// Room the Reading Hall is at (0 = none).
+    pub reading_hall: u32,
 }
 
 impl Default for GenOptions {
     fn default() -> Self {
-        Self { last_room: LAST_ROOM, areas: None, size: 1.0, darkness: 1.0, fake_doors: 1.0, stairs: 1.0, loot: 1.0, chases: true, shuffle: true, locks: 1.0 }
+        Self { last_room: LAST_ROOM, areas: None, size: 1.0, darkness: 1.0, fake_doors: 1.0, stairs: 1.0, loot: 1.0, chases: true, shuffle: true, locks: 1.0, structures: [1.0; 5], reading_hall: READING_HALL }
     }
 }
 
@@ -604,7 +609,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         } else {
             kind
         };
-        let reading_hall = index == READING_HALL && last >= READING_HALL + 2 && !first_of_area && !pursuit;
+        let reading_hall = opt.reading_hall != 0 && index == opt.reading_hall && last >= opt.reading_hall + 2 && !first_of_area && !pursuit;
         let kind = if reading_hall { RoomKind::KeyPuzzle } else { kind };
         if kind == RoomKind::KeyPuzzle {
             last_key = i64::from(index);
@@ -732,7 +737,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             None
         } else if reading_hall {
             Some(Feature::ReadingHall)
-        } else if kind == RoomKind::KeyPuzzle && width >= 5.5 && depth >= 7.6 && feature_roll < 0.6 * opt.stairs.clamp(0.0, 1.6) {
+        } else if kind == RoomKind::KeyPuzzle && width >= 5.5 && depth >= 7.6 && feature_roll < 0.6 * opt.stairs.clamp(0.0, 1.6) * opt.structures[0] {
             Some(Feature::KeyLoft { east: rng.next_f32() < 0.5 })
         } else if index >= 8
             && index + 2 < last
@@ -740,7 +745,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             && !surge
             && matches!(kind, RoomKind::Loot | RoomKind::Dark)
             && depth >= 7.5
-            && feature_roll < 0.14 * opt.stairs.clamp(0.0, 6.0)
+            && feature_roll < 0.14 * opt.stairs.clamp(0.0, 6.0) * opt.structures[1]
         {
             let height = if rng.next_f32() < 0.5 { 1.2 } else { 1.6 };
             Some(Feature::RaisedExit { height })
@@ -751,7 +756,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             && matches!(kind, RoomKind::Loot | RoomKind::Dark)
             && width >= 5.0
             && depth >= 8.0
-            && zig_roll < 0.16 * opt.stairs.clamp(0.0, 4.0)
+            && zig_roll < 0.16 * opt.stairs.clamp(0.0, 4.0) * opt.structures[2]
         {
             Some(Feature::Zigzag)
         } else if index >= 6
@@ -759,7 +764,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             && area == Area::Grounds
             && matches!(kind, RoomKind::Loot | RoomKind::Dark | RoomKind::Hall)
             && depth >= 14.0
-            && structure_roll < 0.4
+            && structure_roll < 0.4 * opt.structures[4]
         {
             Some(Feature::Stream { z: ((max.y - depth * 0.3) * 10.0).round() / 10.0 })
         } else if index >= 6
@@ -769,7 +774,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             && encounter.is_none_or(|e| e != Encounter::Listener)
             && width >= 8.5
             && depth >= 10.0
-            && structure_roll < 0.25 * opt.stairs.clamp(0.0, 4.0)
+            && structure_roll < 0.25 * opt.stairs.clamp(0.0, 4.0) * opt.structures[3]
         {
             Some(Feature::PillarHall)
         } else {

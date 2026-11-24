@@ -479,11 +479,18 @@ fn spawn_death_screen(mut commands: Commands, theme: Res<UiTheme>, cause: Res<cr
                 ))
                 .with_child((Text::new(format!("LESSON  -  {}", cause.lesson)), theme.font(false, theme.size_small), TextColor(theme.interact)));
                 p.spawn((
-                    Text::new(format!("Reached Room {:03}   -   {} Lumens banked for the shop", run.best_room.max(run.current_room), earned)),
+                    Text::new(if run.revives_left > 0 {
+                        format!("Reached Room {:03}   -   {} Lumens so far   -   this mode lets you get back up", run.best_room.max(run.current_room), earned)
+                    } else {
+                        format!("Reached Room {:03}   -   {} Lumens banked for the shop", run.best_room.max(run.current_room), earned)
+                    }),
                     theme.font(false, theme.size_small),
                     TextColor(theme.text_dim),
                 ));
-                spawn_button(p, &theme, "Retry", MenuAction::Retry, 0, true);
+                if run.revives_left > 0 {
+                    spawn_button(p, &theme, &format!("Revive ({} left)", run.revives_left), MenuAction::Revive, -1, true);
+                }
+                spawn_button(p, &theme, "Retry", MenuAction::Retry, 0, run.revives_left == 0);
                 spawn_button(p, &theme, "Return to Main Menu", MenuAction::AbandonRun, 1, false);
             });
         });
@@ -496,9 +503,18 @@ fn death_actions(
     profile: Res<crate::profile::Profile>,
     preset: Res<crate::presets::ActivePreset>,
     session: Res<crate::net::NetSession>,
+    (mut run, mut chase, mut next_overlay, mut subs): (ResMut<crate::run::RunState>, ResMut<crate::hollow::ChaseState>, ResMut<NextState<crate::state::Overlay>>, MessageWriter<crate::run::Subtitle>),
 ) {
     for MenuActivated(a) in reader.read() {
         match a {
+            MenuAction::Revive if run.revives_left > 0 => {
+                // Mode Creator revives: back up where you fell, with half health.
+                run.revives_left -= 1;
+                run.vitality = 50.0;
+                *chase = crate::hollow::ChaseState::default();
+                next_overlay.set(crate::state::Overlay::None);
+                subs.write(crate::run::Subtitle::info(format!("You got back up. ({} revives left)", run.revives_left)));
+            }
             MenuAction::Retry => {
                 // A retry is a new floor (new rooms, monsters and chase), unless the
                 // player typed a seed to replay or the room's host picked it.
