@@ -103,6 +103,9 @@ pub struct NetSession {
     pub started: bool,
     /// Your name in the room (for rejoining).
     pub my_name: String,
+    /// The room's floor settings as the server holds them (sent back when
+    /// rejoining, in case the server restarted and must recreate the room).
+    pub config: Option<serde_json::Value>,
 }
 
 impl NetSession {
@@ -405,14 +408,14 @@ fn pump(
                     if rejoining.is_some() {
                         // Back in the same room mid-run: carry on, don't restart.
                         let (name, was_started) = (session.my_name.clone(), session.started);
-                        *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: was_started, my_name: name };
+                        *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: was_started, my_name: name, config };
                         commands.remove_resource::<Reconnect>();
                         notice.show("Reconnected to the room.", Some(3.0), false);
                         chat.push("*", "You reconnected to the room.", false, true);
                         continue;
                     }
                     let name = session.my_name.clone();
-                    *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: false, my_name: name };
+                    *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: false, my_name: name, config: config.clone() };
                     let preset = config.and_then(|c| serde_json::from_value::<crate::presets::Preset>(c).ok()).map(crate::presets::Preset::sanitized);
                     ready.write(RoomReady { seed, preset });
                 }
@@ -546,7 +549,7 @@ fn reconnect(
     r.tries += 1;
     r.wait = 3.0;
     notice.show(format!("Connection to the room lost. Reconnecting... (try {} of {REJOIN_TRIES})", r.tries), None, true);
-    let first = to_text(&ClientMsg::Rejoin { code: r.code.clone(), name: r.name.clone(), version: PROTOCOL_VERSION, token: session_token() });
+    let first = to_text(&ClientMsg::Rejoin { code: r.code.clone(), name: r.name.clone(), version: PROTOCOL_VERSION, token: session_token(), seed: session.seed, started: session.started, config: session.config.clone() });
     commands.insert_resource(connect(server_url(), first));
 }
 
@@ -653,6 +656,11 @@ fn run_socket(url: &str, first: String, out: Receiver<String>, inc: &Sender<Inco
     raw.set_read_timeout(Some(Duration::from_millis(10))).ok();
     ws.send(Message::text(first)).map_err(|e| e.to_string())?;
     let mut last_ping = Instant::now();
+    // Free hosts (Render) put a server to sleep when no *new* web requests
+    // arrive for 15 minutes, even with games running over open connections,
+    // which dropped everyone mid-game. A tiny extra connection every few
+    // minutes counts as a request and keeps it awake.
+    let mut last_wake = Instant::now();
     // The server answers every ping: hearing nothing for this long means the
     // connection is dead even if writes still "succeed" (a dropped mobile
     // connection, a sleeping laptop, a proxy that closed only one side).
@@ -673,6 +681,16 @@ fn run_socket(url: &str, first: String, out: Receiver<String>, inc: &Sender<Inco
                     return Ok(());
                 }
             }
+        }
+        if last_wake.elapsed() > Duration::from_secs(240) {
+            last_wake = Instant::now();
+            let url = url.to_string();
+            std::thread::spawn(move || {
+                if let Ok((mut ws, _)) = tungstenite::connect(url.as_str()) {
+                    let _ = ws.close(None);
+                    let _ = ws.flush();
+                }
+            });
         }
         if last_ping.elapsed() > Duration::from_secs(8) {
             ws.send(Message::text(to_text(&ClientMsg::Ping))).map_err(|e| e.to_string())?;

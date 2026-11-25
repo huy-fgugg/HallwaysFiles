@@ -131,6 +131,11 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.6
+- [x] Fix random disconnects: the free server host put the server to sleep after 15 minutes without new web requests, even mid-game; the game now pokes it every 4 minutes while you're in a room
+- [x] If the server restarts anyway, the room isn't lost: the first player back recreates it with the same code and floor, and everyone else rejoins it automatically
+- [x] Hosting a big hand-built map no longer gets the host's connection closed (the server's message size limit was too small)
+
 ## 1.1.5
 - [x] Text chat: press T, type, Enter to send (Esc to close); messages show bottom-left
 - [x] Mute your microphone with M (saved); a MIC MUTED badge shows while you're in a room

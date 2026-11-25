@@ -39,7 +39,20 @@ pub enum ClientMsg {
     },
     /// Come back to a room after the connection dropped (allowed even after
     /// the group has left the lift, for a couple of minutes, with the same token).
-    Rejoin { code: String, name: String, version: u32, token: u64 },
+    /// If the server restarted and lost the room, the first player back
+    /// recreates it from `seed`, `started` and `config`, and the rest rejoin it.
+    Rejoin {
+        code: String,
+        name: String,
+        version: u32,
+        token: u64,
+        #[serde(default)]
+        seed: u64,
+        #[serde(default)]
+        started: bool,
+        #[serde(default)]
+        config: Option<serde_json::Value>,
+    },
     /// Room host only: remove a player from the room.
     Kick { id: u8, #[serde(default)] reason: String },
     /// Server admin tools; `key` must match the server's `HALLWAYS_ADMIN_KEY`.

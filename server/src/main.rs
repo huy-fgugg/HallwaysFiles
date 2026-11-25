@@ -28,8 +28,9 @@ use futures_util::{SinkExt, StreamExt};
 use proto::{AdminCmd, ClientMsg, PlayerInfo, RoomSummary, ServerMsg, MAX_PLAYERS, PROTOCOL_VERSION};
 use tokio::sync::mpsc;
 
-/// Frames bigger than this are dropped (positions are ~200 bytes).
-const MAX_FRAME: usize = 16 * 1024;
+/// Frames bigger than this close the connection (positions are ~200 bytes;
+/// a hand-built map sent when hosting can be tens of kilobytes).
+const MAX_FRAME: usize = 256 * 1024;
 /// Clients ping every 8 s; a socket silent for this long is closed.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_ROOMS: usize = 2000;
@@ -55,6 +56,9 @@ struct Room {
     created: Instant,
     /// Players whose connection dropped: (token, name, when).
     dropped: Vec<(u64, String, Instant)>,
+    /// Recreated by a rejoining player after the server lost it (a restart):
+    /// for a while anyone with a token can rejoin it.
+    recreated: bool,
 }
 
 impl Room {
@@ -128,19 +132,29 @@ impl Rooms {
         let code = Self::new_code(&map);
         let player = Player { id: 1, name: clean_name(name), token, tx: tx.clone() };
         let info = vec![PlayerInfo { id: 1, name: player.name.clone() }];
-        map.insert(code.clone(), Room { players: vec![player], host_id: 1, seed, started: false, next_id: 2, config: config.clone(), created: Instant::now(), dropped: vec![] });
+        map.insert(code.clone(), Room { players: vec![player], host_id: 1, seed, started: false, next_id: 2, config: config.clone(), created: Instant::now(), dropped: vec![], recreated: false });
         send(&tx, &ServerMsg::Welcome { code: code.clone(), id: 1, host_id: 1, seed, max: MAX_PLAYERS, players: info, config });
         Ok((code, 1))
     }
 
     /// Joins a room (`rejoin`: coming back after a dropped connection, which
     /// is allowed after the start if the token matches a recent drop).
-    fn join(&self, code: &str, name: &str, token: u64, rejoin: bool, tx: mpsc::UnboundedSender<String>) -> Result<u8, String> {
+    fn join(&self, code: &str, name: &str, token: u64, rejoin: Option<(u64, bool, Option<serde_json::Value>)>, tx: mpsc::UnboundedSender<String>) -> Result<u8, String> {
         let code = proto::normalize_code(code);
         let mut map = self.0.lock().unwrap();
+        // The server restarted and lost the room: the first player back brings it back.
+        if let Some((seed, started, config)) = rejoin.clone()
+            && token != 0
+            && proto::valid_code(&code)
+            && !map.contains_key(&code)
+            && map.len() < MAX_ROOMS
+        {
+            map.insert(code.clone(), Room { players: vec![], host_id: 0, seed, started, next_id: 1, config, created: Instant::now(), dropped: vec![], recreated: true });
+        }
+        let rejoin = rejoin.is_some();
         let room = map.get_mut(&code).ok_or_else(|| format!("No room with code {code}. Check the letters and try again."))?;
         room.dropped.retain(|d| d.2.elapsed() < REJOIN_WINDOW);
-        let returning = rejoin && token != 0 && room.dropped.iter().any(|d| d.0 == token);
+        let returning = rejoin && token != 0 && (room.dropped.iter().any(|d| d.0 == token) || (room.recreated && room.created.elapsed() < REJOIN_WINDOW));
         if rejoin && !returning {
             return Err("Couldn't get back into the room (it waited too long, or it's gone).".into());
         }
@@ -160,6 +174,9 @@ impl Rooms {
         let player = PlayerInfo { id, name };
         room.broadcast(&ServerMsg::Joined { player: player.clone() }, None);
         room.players.push(Player { id, name: player.name.clone(), token, tx: tx.clone() });
+        if room.host_id == 0 {
+            room.host_id = id;
+        }
         let players = room.players.iter().map(|p| PlayerInfo { id: p.id, name: p.name.clone() }).collect();
         send(&tx, &ServerMsg::Welcome { code, id, host_id: room.host_id, seed: room.seed, max: MAX_PLAYERS, players, config: room.config.clone() });
         Ok(id)
@@ -318,11 +335,11 @@ async fn handle(socket: WebSocket, rooms: Rooms) {
                 Ok(j) => joined = Some(j),
                 Err(e) => send(&tx, &ServerMsg::Error { msg: e }),
             },
-            (ClientMsg::Join { code, name, token, .. }, None) => match rooms.join(&code, &name, token, false, tx.clone()) {
+            (ClientMsg::Join { code, name, token, .. }, None) => match rooms.join(&code, &name, token, None, tx.clone()) {
                 Ok(id) => joined = Some((proto::normalize_code(&code), id)),
                 Err(e) => send(&tx, &ServerMsg::Error { msg: e }),
             },
-            (ClientMsg::Rejoin { code, name, token, .. }, None) => match rooms.join(&code, &name, token, true, tx.clone()) {
+            (ClientMsg::Rejoin { code, name, token, seed, started, config, .. }, None) => match rooms.join(&code, &name, token, Some((seed, started, config)), tx.clone()) {
                 Ok(id) => joined = Some((proto::normalize_code(&code), id)),
                 Err(e) => send(&tx, &ServerMsg::Error { msg: e }),
             },
@@ -463,9 +480,9 @@ mod tests {
         drop(b);
         assert_eq!(recv(&mut a).await, ServerMsg::Left { id: bo });
         let (mut b2, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-        b2.send(text(&ClientMsg::Rejoin { code: code.clone(), name: "Bo".into(), version: PROTOCOL_VERSION, token: 999 })).await.unwrap();
+        b2.send(text(&ClientMsg::Rejoin { code: code.clone(), name: "Bo".into(), version: PROTOCOL_VERSION, token: 999, seed: 1, started: true, config: None })).await.unwrap();
         assert!(matches!(recv(&mut b2).await, ServerMsg::Error { .. }), "wrong token");
-        b2.send(text(&ClientMsg::Rejoin { code: code.clone(), name: "Bo".into(), version: PROTOCOL_VERSION, token: 202 })).await.unwrap();
+        b2.send(text(&ClientMsg::Rejoin { code: code.clone(), name: "Bo".into(), version: PROTOCOL_VERSION, token: 202, seed: 1, started: true, config: None })).await.unwrap();
         let ServerMsg::Welcome { id: bo2, .. } = recv(&mut b2).await else { panic!() };
         assert!(matches!(recv(&mut a).await, ServerMsg::Joined { player } if player.name == "Bo"));
 
@@ -492,5 +509,24 @@ mod tests {
         admin.send(text(&ClientMsg::Admin { key: "test-admin-key".into(), cmd: AdminCmd::CloseRoom { code: code.clone(), reason: String::new() } })).await.unwrap();
         assert!(matches!(recv(&mut a).await, ServerMsg::Kicked { .. }));
         assert!(matches!(recv(&mut admin).await, ServerMsg::AdminOk { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_lost_room_is_recreated_by_the_players_coming_back() {
+        // As after a server restart: the room doesn't exist any more.
+        let url = start().await;
+        let code = proto::code_from_bytes([3, 1, 4, 1, 5]);
+        let (mut a, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        a.send(text(&ClientMsg::Rejoin { code: code.clone(), name: "Ana".into(), version: PROTOCOL_VERSION, token: 5, seed: 77, started: true, config: Some(serde_json::json!({"doors": 20})) })).await.unwrap();
+        let ServerMsg::Welcome { code: c, id, host_id, seed, config, .. } = recv(&mut a).await else { panic!() };
+        assert_eq!((c.as_str(), seed, host_id), (code.as_str(), 77, id), "same code and floor; first back hosts");
+        assert_eq!(config, Some(serde_json::json!({"doors": 20})));
+        let (mut b, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        b.send(text(&ClientMsg::Rejoin { code: code.clone(), name: "Bo".into(), version: PROTOCOL_VERSION, token: 6, seed: 77, started: true, config: None })).await.unwrap();
+        assert!(matches!(recv(&mut b).await, ServerMsg::Welcome { players, .. } if players.len() == 2));
+        // A plain join can't get into a started game.
+        let (mut c2, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        c2.send(text(&ClientMsg::Join { code: code.clone(), name: "Cy".into(), version: PROTOCOL_VERSION, token: 7 })).await.unwrap();
+        assert!(matches!(recv(&mut c2).await, ServerMsg::Error { .. }));
     }
 }
