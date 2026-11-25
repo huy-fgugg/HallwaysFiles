@@ -131,6 +131,11 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.7
+- [x] Sprinting is now a short burst: walking is a little quicker, sprinting only a bit faster, and a stamina bar (bottom-left) drains in about 5 seconds and refills after a short rest; run it dry and it turns red until you've caught your breath. During a Hollow chase adrenaline keeps it full
+- [x] Rooms are longer (about a third deeper, halls up to 30 m), and zigzag rooms turn up twice as often and twist back and forth up to six times
+- [x] Fix the Listener turning up room after room: at most 3 per floor, always at least 8 rooms apart
+
 ## 1.1.6
 - [x] Fix random disconnects: the free server host put the server to sleep after 15 minutes without new web requests, even mid-game; the game now pokes it every 4 minutes while you're in a room
 - [x] If the server restarts anyway, the room isn't lost: the first player back recreates it with the same code and floor, and everyone else rejoins it automatically

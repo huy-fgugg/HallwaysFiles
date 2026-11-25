@@ -23,10 +23,10 @@ use crate::state::{gameplay_active, AppState, Overlay};
 use crate::world::Mood;
 
 /// Faster than walking, slower than sprinting.
-pub const PURSUIT_SPEED: f32 = 4.6;
+pub const PURSUIT_SPEED: f32 = 4.1;
 /// When it falls this far behind it hurries to keep the pressure on.
 const CATCH_UP_GAP: f32 = 13.0;
-const CATCH_UP_SPEED: f32 = 5.1;
+const CATCH_UP_SPEED: f32 = 4.55;
 pub const PURSUIT_CATCH: f32 = 1.15;
 const CUE_SECS: f32 = 2.6;
 const SINK_SECS: f32 = 2.2;

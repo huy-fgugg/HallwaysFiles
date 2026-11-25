@@ -11,8 +11,17 @@ use crate::run::CameraShake;
 use crate::settings::Settings;
 use crate::state::gameplay_active;
 
-pub const WALK_SPEED: f32 = 3.0;
-pub const SPRINT_SPEED: f32 = 5.2;
+pub const WALK_SPEED: f32 = 3.2;
+/// Only a little faster than walking: sprinting is for short bursts.
+pub const SPRINT_SPEED: f32 = 4.7;
+/// Seconds of sprinting on a full bar.
+pub const STAMINA_SECS: f32 = 5.0;
+/// Seconds to refill an empty bar.
+pub const STAMINA_REFILL: f32 = 4.0;
+/// Pause after sprinting before the bar starts refilling.
+pub const STAMINA_DELAY: f32 = 0.9;
+/// Run dry and you must recover this much before sprinting again.
+pub const STAMINA_RECOVER: f32 = 0.35;
 pub const CROUCH_SPEED: f32 = 1.6;
 pub const STAND_EYE: f32 = 1.62;
 pub const CROUCH_EYE: f32 = 1.0;
@@ -39,11 +48,44 @@ pub struct Player {
     step_accum: f32,
     /// Vertical speed while dropping off a ledge.
     pub fall: f32,
+    /// 0..1 sprint stamina.
+    pub stamina: f32,
+    /// Ran dry: no sprinting until it recovers to `STAMINA_RECOVER`.
+    pub winded: bool,
+    rest: f32,
+}
+
+/// One stamina tick. `wants` = trying to sprint; `adrenaline` (a chase)
+/// keeps the bar full. Returns whether the player may sprint this frame.
+pub fn stamina_step(stamina: &mut f32, winded: &mut bool, rest: &mut f32, wants: bool, adrenaline: bool, dt: f32) -> bool {
+    if adrenaline {
+        *stamina = (*stamina + dt / STAMINA_REFILL).min(1.0);
+        *winded = false;
+        *rest = 0.0;
+        return wants;
+    }
+    if *winded && *stamina >= STAMINA_RECOVER {
+        *winded = false;
+    }
+    let sprint = wants && !*winded && *stamina > 0.0;
+    if sprint {
+        *stamina = (*stamina - dt / STAMINA_SECS).max(0.0);
+        *rest = 0.0;
+        if *stamina <= 0.0 {
+            *winded = true;
+        }
+    } else {
+        *rest += dt;
+        if *rest >= STAMINA_DELAY {
+            *stamina = (*stamina + dt / STAMINA_REFILL).min(1.0);
+        }
+    }
+    sprint
 }
 
 impl Player {
     pub fn new(yaw: f32) -> Self {
-        Self { yaw, pitch: 0.0, eye: STAND_EYE, crouching: false, sprinting: false, speed: 0.0, bob_phase: 0.0, step_accum: 0.0, fall: 0.0 }
+        Self { yaw, pitch: 0.0, eye: STAND_EYE, crouching: false, sprinting: false, speed: 0.0, bob_phase: 0.0, step_accum: 0.0, fall: 0.0, stamina: 1.0, winded: false, rest: 0.0 }
     }
 }
 
@@ -113,7 +155,7 @@ fn movement(
     mut sfx: MessageWriter<PlaySfx>,
     boost: Res<crate::items::SpeedBoost>,
     grabbed: Res<crate::hazards::Grabbed>,
-    (peers, rules): (Res<crate::avatar::PeerBodies>, Res<crate::presets::ModeRules>),
+    (peers, rules, pursuit): (Res<crate::avatar::PeerBodies>, Res<crate::presets::ModeRules>, Res<crate::pursuit::Pursuit>),
 ) {
     let (mut player, mut transform) = player_q.into_inner();
     let dt = time.delta_secs();
@@ -147,7 +189,11 @@ fn movement(
     }
 
     player.crouching = crouch;
-    player.sprinting = sprint && rules.sprint && !crouch && input.y > 0.1;
+    let wants = sprint && rules.sprint && !crouch && input.y > 0.1;
+    // Stamina: a few seconds of sprint, then catch your breath. The chase's
+    // adrenaline keeps you going while the Hollow is behind you.
+    let p = &mut *player;
+    p.sprinting = stamina_step(&mut p.stamina, &mut p.winded, &mut p.rest, wants, pursuit.active(), dt);
     let speed = if crouch {
         CROUCH_SPEED
     } else if player.sprinting {
@@ -274,6 +320,33 @@ fn apply_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stamina_runs_out_and_recovers() {
+        let (mut s, mut w, mut r) = (1.0, false, 0.0);
+        let mut t = 0.0;
+        while stamina_step(&mut s, &mut w, &mut r, true, false, 0.05) {
+            t += 0.05;
+            assert!(t < 10.0);
+        }
+        assert!((t - STAMINA_SECS).abs() < 0.2, "{t}");
+        assert!(w, "winded once it runs dry");
+        // Can't sprint again straight away...
+        for _ in 0..20 {
+            assert!(!stamina_step(&mut s, &mut w, &mut r, true, false, 0.05));
+        }
+        // ...but after a rest it comes back.
+        for _ in 0..80 {
+            stamina_step(&mut s, &mut w, &mut r, false, false, 0.05);
+        }
+        assert!(stamina_step(&mut s, &mut w, &mut r, true, false, 0.05));
+        // A chase never drains it.
+        let (mut s, mut w, mut r) = (1.0, false, 0.0);
+        for _ in 0..1000 {
+            assert!(stamina_step(&mut s, &mut w, &mut r, true, true, 0.05));
+        }
+        assert_eq!(s, 1.0);
+    }
 
     #[test]
     fn forward_at_zero_yaw_is_negative_z() {

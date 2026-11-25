@@ -104,6 +104,8 @@ pub fn just_before_chase(index: u32, last: u32) -> bool {
 /// Room entered through Door 050: the Reading Hall, a big archive room whose
 /// exit is locked until you find the key among its shelves.
 pub const READING_HALL: u32 = 50;
+/// Most Listener encounters on one floor.
+pub const LISTENER_MAX: u32 = 3;
 /// Width of the opening in a divider (a wall, barricade or shelf row).
 pub const DIVIDER_GAP: f32 = 1.8;
 
@@ -162,12 +164,12 @@ impl Area {
     /// (width range, depth range) for ordinary rooms in this area.
     fn size_ranges(self) -> ((f32, f32), (f32, f32)) {
         match self {
-            Area::GuestWing => ((7.0, 11.0), (8.0, 13.0)),
-            Area::Archive => ((9.0, 13.0), (10.0, 15.0)),
-            Area::ServiceTunnels => ((5.5, 8.0), (11.0, 18.0)),
-            Area::Grounds => ((18.0, 26.0), (18.0, 28.0)),
-            Area::QuarryLift => ((6.5, 10.0), (9.0, 15.0)),
-            Area::Atrium => ((12.0, 16.0), (12.0, 18.0)),
+            Area::GuestWing => ((7.0, 11.0), (11.0, 18.0)),
+            Area::Archive => ((9.0, 13.0), (13.0, 20.0)),
+            Area::ServiceTunnels => ((5.5, 8.0), (15.0, 24.0)),
+            Area::Grounds => ((18.0, 26.0), (22.0, 32.0)),
+            Area::QuarryLift => ((6.5, 10.0), (12.0, 20.0)),
+            Area::Atrium => ((12.0, 16.0), (15.0, 22.0)),
         }
     }
 }
@@ -373,7 +375,8 @@ impl RoomPlan {
     pub fn dividers(&self) -> Vec<Divider> {
         let max_n = match self.feature {
             Some(Feature::HandHall) => return vec![],
-            Some(Feature::Zigzag) => 3,
+            // Long rooms twist back and forth more.
+            Some(Feature::Zigzag) => 6,
             Some(Feature::ReadingHall) => 4,
             _ if self.pursuit => 4,
             _ => return vec![],
@@ -555,6 +558,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
     let mut south = START_Z;
     let mut history: Vec<RoomKind> = Vec::new();
     let mut last_seen: std::collections::HashMap<Encounter, i64> = std::collections::HashMap::new();
+    let mut seen_count: std::collections::HashMap<Encounter, u32> = std::collections::HashMap::new();
     let mut last_any: i64 = -100;
     let mut last_key: i64 = -100;
     let mut pending_entry = 0.0f32;
@@ -618,7 +622,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
         // ---- Size ----
         let ((w0, w1), (d0, d1)) = area.size_ranges();
         let (width, depth) = match kind {
-            RoomKind::Hall => (3.4, rng.range_f32(15.0, 24.0)),
+            RoomKind::Hall => (3.4, rng.range_f32(20.0, 30.0)),
             RoomKind::Final => (13.0, 15.0),
             RoomKind::Transition => (w1, d0.max(6.0)),
             _ => (rng.range_f32(w0, w1), rng.range_f32(d0, d1)),
@@ -695,6 +699,8 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
                 (Encounter::Gallery, &cfg.gallery, light != LightState::Dark && kind != RoomKind::Hall),
             ];
             for (enc, t, allowed) in order {
+                // The Listener is a big event: a few per floor at most.
+                let allowed = allowed && !(enc == Encounter::Listener && seen_count.get(&enc).copied().unwrap_or(0) >= LISTENER_MAX);
                 let since = i64::from(index) - last_seen.get(&enc).copied().unwrap_or(-1000);
                 // Always draw the roll so the RNG stream doesn't depend on earlier outcomes.
                 let roll = rng.next_f32();
@@ -705,6 +711,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             chosen
         };
         if let Some(e) = encounter {
+            *seen_count.entry(e).or_insert(0) += 1;
             last_seen.insert(e, i64::from(index));
             last_any = i64::from(index);
         }
@@ -756,7 +763,7 @@ pub fn generate_custom(seed: u64, cfg: &EntityConfig, opt: &GenOptions) -> Floor
             && matches!(kind, RoomKind::Loot | RoomKind::Dark)
             && width >= 5.0
             && depth >= 8.0
-            && zig_roll < 0.16 * opt.stairs.clamp(0.0, 4.0) * opt.structures[2]
+            && zig_roll < 0.32 * opt.stairs.clamp(0.0, 4.0) * opt.structures[2]
         {
             Some(Feature::Zigzag)
         } else if index >= 6

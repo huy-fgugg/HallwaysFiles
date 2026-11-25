@@ -12,5 +12,5 @@
     gallery:   (min_room: 10, chance: 0.25, cooldown: 5,  warn: 1.3, warn_min: 0.8, window: 0.0, damage: 15.0),
     hush:      (min_room: 9,  chance: 0.25, cooldown: 5,  warn: 1.2, warn_min: 0.8, window: 2.4, damage: 45.0),
     // Outdoors only. Blind: it hears footsteps. Crouch to move silently.
-    listener:  (min_room: 21, chance: 0.65, cooldown: 2,  warn: 2.0, warn_min: 2.0, window: 0.0, damage: 100.0),
+    listener:  (min_room: 21, chance: 0.4,  cooldown: 8,  warn: 2.0, warn_min: 2.0, window: 0.0, damage: 100.0),
 )

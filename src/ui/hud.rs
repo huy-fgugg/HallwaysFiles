@@ -47,6 +47,10 @@ struct ItemIcon(usize);
 #[derive(Component)]
 struct BatteryBar;
 #[derive(Component)]
+struct StaminaRow;
+#[derive(Component)]
+struct StaminaFill;
+#[derive(Component)]
 struct BatteryFill;
 
 #[derive(Resource, Default)]
@@ -68,7 +72,7 @@ impl Plugin for HudPlugin {
             .add_systems(OnEnter(AppState::Playing), spawn_hud)
             .add_systems(
                 Update,
-                (update_labels, update_prompt, update_hide_overlay, update_subtitles, hud_visibility, update_items, update_damage_flash)
+                (update_labels, update_stamina, update_prompt, update_hide_overlay, update_subtitles, hud_visibility, update_items, update_damage_flash)
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -145,6 +149,13 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
                         BorderColor::all(t.panel_border),
                     ))
                     .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(2)), ..default() }, BackgroundColor(t.text.with_alpha(0.85)), VitalityFill));
+                    // Stamina: shown while it's not full.
+                    c.spawn((Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() }, Visibility::Hidden, StaminaRow))
+                        .with_children(|r| {
+                            r.spawn((Node { width: px(186), height: px(6), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(t.panel.with_alpha(0.9))))
+                                .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(Color::srgb(0.55, 0.78, 0.95)), StaminaFill));
+                            r.spawn((Text::new("STAMINA"), t.font(false, 12.0), TextColor(t.text_dim), TextLayout::no_wrap()));
+                        });
                 });
 
             // Bottom-centre: item slots (+ flashlight battery bar above them).
@@ -337,6 +348,25 @@ fn update_labels(
     }
     if let Ok(mut n) = vit.single_mut() {
         n.width = percent(run.vitality.clamp(0.0, 100.0));
+    }
+}
+
+fn update_stamina(
+    player: Query<&crate::player::Player>,
+    mut row: Query<&mut Visibility, With<StaminaRow>>,
+    mut fill: Query<(&mut Node, &mut BackgroundColor), With<StaminaFill>>,
+) {
+    let Ok(p) = player.single() else { return };
+    if let Ok(mut v) = row.single_mut() {
+        let want = if p.stamina < 0.999 { Visibility::Inherited } else { Visibility::Hidden };
+        if *v != want {
+            *v = want;
+        }
+    }
+    if let Ok((mut n, mut c)) = fill.single_mut() {
+        n.width = percent(p.stamina.clamp(0.0, 1.0) * 100.0);
+        // Red while winded (can't sprint until it recovers).
+        c.0 = if p.winded { Color::srgb(0.85, 0.35, 0.3) } else { Color::srgb(0.55, 0.78, 0.95) };
     }
 }
 

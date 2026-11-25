@@ -491,6 +491,13 @@ mod tests {
                 }
             }
         }
-        assert!(seen >= 10, "the Listener should be common outdoors: {seen}");
+        assert!(seen >= 5, "the Listener still turns up outdoors: {seen}");
+        // ...but only a few times a floor, never room after room.
+        for seed in 0..200 {
+            let plan = generate(seed);
+            let rooms: Vec<u32> = plan.rooms.iter().filter(|r| r.encounter == Some(Encounter::Listener)).map(|r| r.index).collect();
+            assert!(rooms.len() as u32 <= crate::floor::plan::LISTENER_MAX, "seed {seed}: {rooms:?}");
+            assert!(rooms.windows(2).all(|w| w[1] - w[0] >= 8), "seed {seed}: {rooms:?}");
+        }
     }
 }
