@@ -132,7 +132,7 @@
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
 ## 1.1.4: Low-End Edition (downloads from 1.1.3 on)
-- [x] Every release has Low-End Edition downloads for weak PCs (Windows zip, Linux tar.gz): textures shrunk to 256 px (62 MB of assets down to 12 MB), Low graphics; from 1.1.4 also a 1280x720 window, 2 rooms loaded ahead instead of 3 and no mirrors
+- [x] Every release has Low-End Edition downloads for weak PCs and phones (Windows zip, Linux tar.gz, Android APK that installs as its own "HALLWAYS Low-End" app): textures shrunk to 256 px (62 MB of assets down to 12 MB), Low graphics; from 1.1.4 also a 1280x720 window, 2 rooms loaded ahead instead of 3 and no mirrors
 - [x] Fix: phones (and the Low-End Edition) really start on Low graphics the first time (the setting said Low but Medium was used)
 
 ## 1.1.3

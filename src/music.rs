@@ -165,13 +165,13 @@ fn apk_files(_dir: &str) -> Vec<String> {
 
 /// True if the APK contains this asset path (always false off Android).
 #[cfg(target_os = "android")]
-fn apk_has(path: &str) -> bool {
+pub(crate) fn apk_has(path: &str) -> bool {
     let Some(app) = bevy::android::ANDROID_APP.get() else { return false };
     std::ffi::CString::new(path).ok().is_some_and(|c| app.asset_manager().open(&c).is_some())
 }
 
 #[cfg(not(target_os = "android"))]
-fn apk_has(_path: &str) -> bool {
+pub(crate) fn apk_has(_path: &str) -> bool {
     false
 }
 

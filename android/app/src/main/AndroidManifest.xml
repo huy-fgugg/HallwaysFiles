@@ -9,7 +9,7 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
-        android:label="HALLWAYS"
+        android:label="${appLabel}"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.AppCompat.NoActionBar"
         android:appCategory="game"

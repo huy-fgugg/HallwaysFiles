@@ -6,8 +6,16 @@ android {
     namespace 'com.hallways.game'
     compileSdk 35
 
+    // `gradle assembleRelease -PlowEnd` builds the Low-End Edition: its own
+    // app (installs next to the normal one) named "HALLWAYS Low-End".
+    def lowEnd = project.hasProperty('lowEnd')
+
     defaultConfig {
         applicationId "com.hallways.game"
+        if (lowEnd) {
+            applicationIdSuffix ".lowend"
+        }
+        manifestPlaceholders = [appLabel: lowEnd ? "HALLWAYS Low-End" : "HALLWAYS"]
         minSdk 28
         targetSdk 35
         versionCode 15

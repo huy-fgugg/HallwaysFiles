@@ -10,6 +10,10 @@ on:
         description: "Only add Low-End Edition downloads to an existing release tag (e.g. v1.1.3); leave empty for a full release"
         required: false
         default: ""
+      lowend_platforms:
+        description: "Which Low-End Edition downloads to add (any of: windows linux android)"
+        required: false
+        default: "windows linux android"
   push:
     branches: [main, "claude/**"]
 
@@ -125,10 +129,16 @@ jobs:
         run: gradle --no-daemon assembleRelease
       - name: Rename
         run: cp android/app/build/outputs/apk/release/app-release.apk "hallways-${{ needs.check.outputs.version }}-android.apk"
+      - name: Low-End Edition APK
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 -I packaging/lowend/shrink.py android/app/src/main/assets 256
+          (cd android && gradle --no-daemon assembleRelease -PlowEnd)
+          cp android/app/build/outputs/apk/release/app-release.apk "hallways-${{ needs.check.outputs.version }}-android-lowend.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: hallways-*-android.apk
+          path: hallways-*-android*.apk
 
   attach-apk:
     needs: [check, android, publish]
@@ -166,6 +176,7 @@ jobs:
             Smaller textures (a much smaller download and less video memory), Low graphics, a smaller window, fewer rooms loaded at once and no mirrors. Online play works with everyone else.
             - **Windows:** `hallways-${{ needs.check.outputs.version }}-windows-lowend.zip`. Unzip it and run `HALLWAYS (Low-End).bat`.
             - **Linux:** `hallways-${{ needs.check.outputs.version }}-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.
+            - **Android:** `hallways-${{ needs.check.outputs.version }}-android-lowend.apk` (added with the normal APK). Installs as its own app, **HALLWAYS Low-End**, next to the normal one.
 
             - **Android (phones/tablets, 64-bit, Android 9+):** `hallways-${{ needs.check.outputs.version }}-android.apk` (added a few minutes after the others). Download it on the phone, allow "install unknown apps" for your browser, and open it. Touch controls: left thumb walks, right thumb looks, buttons for USE / CROUCH / RUN / LIGHT / ITEM / MENU.
 
@@ -183,37 +194,80 @@ jobs:
   lowend-backfill:
     if: github.event_name == 'workflow_dispatch' && inputs.lowend_for != ''
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows
             runner: windows-latest
           - os: linux
             runner: ubuntu-22.04
+          - os: android
+            runner: ubuntu-latest
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      WANTED: ${{ contains(inputs.lowend_platforms, matrix.os) }}
     steps:
       - uses: actions/checkout@v4
+        if: env.WANTED == 'true'
       - uses: actions/checkout@v4
+        if: env.WANTED == 'true'
         with:
           ref: ${{ inputs.lowend_for }}
           path: game
       - name: System libraries
-        if: matrix.os == 'linux'
+        if: env.WANTED == 'true' && matrix.os == 'linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: actions/setup-java@v4
+        if: env.WANTED == 'true' && matrix.os == 'android'
+        with:
+          distribution: temurin
+          java-version: "17"
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        if: env.WANTED == 'true'
         with:
           toolchain: stable
+          target: ${{ matrix.os == 'android' && 'aarch64-linux-android' || '' }}
           cache: true
-          cache-workspaces: game
+          cache-workspaces: ${{ matrix.os == 'android' && 'game/mobile' || 'game' }}
       - name: Build
+        if: env.WANTED == 'true' && matrix.os != 'android'
         working-directory: game
         run: cargo build --release
       - name: Package Low-End Edition
+        if: env.WANTED == 'true' && matrix.os != 'android'
         shell: bash
         run: |
           v="${{ inputs.lowend_for }}"
           packaging/lowend/package.sh ${{ matrix.os }} "${v#v}" game
+      - name: cargo-ndk
+        if: env.WANTED == 'true' && matrix.os == 'android'
+        run: cargo install cargo-ndk --locked
+      - name: Android native library
+        if: env.WANTED == 'true' && matrix.os == 'android'
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cd game/mobile
+          cargo ndk -t arm64-v8a --platform 28 --link-libcxx-shared -o ../android/app/src/main/jniLibs build --release
+      - uses: gradle/actions/setup-gradle@v4
+        if: env.WANTED == 'true' && matrix.os == 'android'
+        with:
+          gradle-version: "8.11.1"
+      - name: Android Low-End APK
+        if: env.WANTED == 'true' && matrix.os == 'android'
+        run: |
+          v="${{ inputs.lowend_for }}"
+          cp -r game/assets game/android/app/src/main/assets
+          python3 -m pip install --quiet pillow
+          python3 -I packaging/lowend/shrink.py game/android/app/src/main/assets 256
+          # Older tags have no -PlowEnd switch: give the app its own id and name here.
+          sed -i 's/applicationId "com.hallways.game"/applicationId "com.hallways.game.lowend"/' game/android/app/build.gradle
+          sed -i 's/android:label="HALLWAYS"/android:label="HALLWAYS Low-End"/' game/android/app/src/main/AndroidManifest.xml
+          (cd game/android && gradle --no-daemon assembleRelease -PlowEnd)
+          mkdir -p dist
+          cp game/android/app/build/outputs/apk/release/app-release.apk "dist/hallways-${v#v}-android-lowend.apk"
       - uses: softprops/action-gh-release@v2
+        if: env.WANTED == 'true'
         with:
           tag_name: ${{ inputs.lowend_for }}
           files: dist/*-lowend.*
@@ -222,4 +276,4 @@ jobs:
             ${{ matrix.os == 'windows' && '### Low-End Edition (weak or old PCs)
             Smaller textures (a much smaller download and less video memory) and Low graphics. Online play works with everyone else.
             - **Windows:** the `-windows-lowend.zip`. Unzip it and run `HALLWAYS (Low-End).bat`.
-            - **Linux:** the `-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.' || '' }}
+            - **Linux:** the `-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.' || matrix.os == 'android' && '- **Android Low-End:** the `-android-lowend.apk`. Smaller textures, Low graphics; installs as its own app, **HALLWAYS Low-End**, next to the normal one.' || '' }}

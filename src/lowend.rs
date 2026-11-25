@@ -1,4 +1,4 @@
-//! Low-End Edition: the build for weak PCs (the `-lowend` downloads).
+//! Low-End Edition: the build for weak PCs and phones (the `-lowend` downloads).
 //!
 //! It's the same game, packaged with smaller textures (see
 //! `packaging/lowend/shrink.py`) and an `assets/LOWEND` marker file. With the
@@ -20,6 +20,8 @@ pub fn enabled() -> bool {
         std::env::args().skip(1).any(|a| a.eq_ignore_ascii_case("--lowend"))
             || std::env::var_os("HALLWAYS_LOWEND").is_some_and(|v| v != "0")
             || crate::music::asset_root().join(MARKER).is_file()
+            // Android: the marker ships inside the low-end APK.
+            || crate::music::apk_has(MARKER)
     })
 }
 
