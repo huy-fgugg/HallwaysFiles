@@ -1,9 +1,15 @@
 //! Admin panel (F8 in a run, or Pause → Admin Panel). Locked behind a code.
-//! Once unlocked for the session it can spawn items for yourself, and kill,
-//! revive or jumpscare any player in the room (including yourself offline).
+//! Once unlocked for the session it can:
+//! * spawn items for yourself;
+//! * kill, revive, jumpscare, bring to you, mute the chat of, or give Lumens
+//!   to any player in the room (and, as the room's host, remove them);
+//! * send an announcement to everyone in the room;
+//! * with the server's admin key: list every room on the server, send an
+//!   announcement to all of them, close a room or remove a player from one.
 //!
-//! This is a party/testing tool for friends playing together: the code ships
-//! inside the game, so it is not real security.
+//! The in-room code ships inside the game, so it's a party tool, not real
+//! security. The server tools are protected by the key on the server
+//! (`HALLWAYS_ADMIN_KEY`), which never ships in the game.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -26,6 +32,23 @@ pub enum AdminAction {
     Kill,
     Revive,
     Jumpscare,
+    /// Teleport them to the admin.
+    Bring,
+    /// They can't send chat messages until unmuted.
+    MuteChat,
+    UnmuteChat,
+    /// +50 Lumens.
+    GiveLumens,
+}
+
+/// Results from the server's admin tools.
+#[derive(Resource, Debug, Default)]
+struct ServerTools {
+    rooms: Vec<crate::net::proto::RoomSummary>,
+    status: String,
+    /// The fields' text, kept when the panel is rebuilt.
+    key: String,
+    announcement: String,
 }
 
 /// Unlocked for the rest of the session once the right code is entered.
@@ -37,6 +60,8 @@ pub struct AdminUnlocked(pub bool);
 pub struct AdminEffect {
     pub action: AdminAction,
     pub by: String,
+    /// The admin's player id (for Bring), if they're another player.
+    pub from: Option<u8>,
 }
 
 /// Seconds left on the jumpscare overlay.
@@ -58,6 +83,7 @@ impl Plugin for AdminPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AdminUnlocked>()
             .init_resource::<Jumpscare>()
+            .init_resource::<ServerTools>()
             .add_message::<AdminEffect>()
             .add_systems(OnEnter(Screen::Admin), spawn_panel)
             .add_systems(OnEnter(AppState::Playing), spawn_scare_overlay)
@@ -65,7 +91,7 @@ impl Plugin for AdminPlugin {
                 Update,
                 (
                     open_panel.run_if(in_state(Screen::Hud)),
-                    (submit_code, panel_actions, close_on_escape).chain().run_if(in_state(Screen::Admin)),
+                    (submit_code, panel_actions, server_replies, close_on_escape).chain().run_if(in_state(Screen::Admin)),
                     receive_admin,
                     apply_effects,
                     animate_scare,
@@ -104,11 +130,22 @@ fn targets(session: &NetSession, me: &str) -> Vec<(u8, String)> {
 #[derive(Component)]
 struct AdminRoot;
 
-fn spawn_panel(mut commands: Commands, theme: Res<UiTheme>, unlocked: Res<AdminUnlocked>, session: Res<NetSession>, profile: Res<crate::profile::Profile>) {
-    build_panel(&mut commands, &theme, unlocked.0, &session, &profile.name);
+fn spawn_panel(mut commands: Commands, theme: Res<UiTheme>, unlocked: Res<AdminUnlocked>, session: Res<NetSession>, profile: Res<crate::profile::Profile>, tools: Res<ServerTools>) {
+    build_panel(&mut commands, &theme, unlocked.0, &session, &profile.name, &tools);
 }
 
-fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session: &NetSession, me: &str) {
+/// A compact panel button.
+fn small_btn(row: &mut ChildSpawnerCommands, t: &UiTheme, label: &str, action: MenuAction, order: i32, w: f32) {
+    let b = spawn_button(row, t, label, action, order, false);
+    row.commands().entity(b).entry::<Node>().and_modify(move |mut n| {
+        n.width = px(w);
+        n.min_width = px(w);
+        n.height = px(40);
+        n.padding = UiRect::horizontal(px(6));
+    });
+}
+
+fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session: &NetSession, me: &str, tools: &ServerTools) {
     let t = theme.clone();
     commands
         .spawn((t.screen_root(false), GlobalZIndex(30), DespawnOnExit(Screen::Admin), AdminRoot, Name::new("Admin panel")))
@@ -143,20 +180,54 @@ fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session
                     });
                 }
                 p.spawn((Text::new("PLAYERS"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
+                let host = session.online() && session.my_id == session.host_id;
                 for (row_i, (id, name)) in targets(session, me).into_iter().enumerate() {
-                    p.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|row| {
-                        row.spawn((Text::new(name), t.font(true, t.size_small), TextColor(t.text), Node { width: px(170), ..default() }));
-                        let base = 10 + row_i as i32 * 3;
-                        for (j, (label, action)) in
-                            [("Kill", AdminAction::Kill), ("Revive", AdminAction::Revive), ("Scare", AdminAction::Jumpscare)].into_iter().enumerate()
-                        {
-                            let b = spawn_button(row, &t, label, MenuAction::Admin(id, action), base + j as i32, false);
-                            row.commands().entity(b).entry::<Node>().and_modify(|mut n| {
-                                n.width = px(120);
-                                n.min_width = px(120);
-                            });
+                    let base = 20 + row_i as i32 * 10;
+                    let them = session.online() && id != session.my_id;
+                    p.spawn((Text::new(name), t.font(true, t.size_small), TextColor(t.text), Node { margin: UiRect::top(px(4)), ..default() }));
+                    p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
+                        for (j, (label, action)) in [("Kill", AdminAction::Kill), ("Revive", AdminAction::Revive), ("Scare", AdminAction::Jumpscare), ("+50 Lumens", AdminAction::GiveLumens)].into_iter().enumerate() {
+                            small_btn(row, &t, label, MenuAction::Admin(id, action), base + j as i32, if j == 3 { 150.0 } else { 110.0 });
                         }
                     });
+                    if them {
+                        p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
+                            small_btn(row, &t, "Bring", MenuAction::Admin(id, AdminAction::Bring), base + 4, 110.0);
+                            small_btn(row, &t, "Mute chat", MenuAction::Admin(id, AdminAction::MuteChat), base + 5, 150.0);
+                            small_btn(row, &t, "Unmute", MenuAction::Admin(id, AdminAction::UnmuteChat), base + 6, 120.0);
+                            if host {
+                                small_btn(row, &t, "Kick", MenuAction::AdminKick(id), base + 7, 100.0);
+                            }
+                        });
+                    }
+                }
+                // ---- Announcement ----
+                p.spawn((Text::new("ANNOUNCEMENT"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
+                let f = field_row(p, &t, FieldKind::Announcement, &tools.announcement, 80);
+                let _ = f;
+                p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
+                    small_btn(row, &t, "To this room", MenuAction::AdminAnnounce, 81, 200.0);
+                    small_btn(row, &t, "To every room", MenuAction::AdminServerAnnounce, 82, 200.0);
+                });
+                // ---- Server tools ----
+                p.spawn((Text::new("SERVER (needs the server's admin key)"), t.font(true, t.size_small), TextColor(t.interact), Node { margin: UiRect::top(px(10)), ..default() }));
+                field_row(p, &t, FieldKind::ServerKey, &tools.key, 83);
+                small_btn(p, &t, "List rooms", MenuAction::AdminServerRooms, 84, 200.0);
+                for (ri, room) in tools.rooms.iter().take(8).enumerate() {
+                    let base = 120 + ri as i32 * 10;
+                    p.spawn(Node { column_gap: px(8), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                        let state = if room.started { "playing" } else { "in the lift" };
+                        row.spawn((Text::new(format!("{}  -  {} player(s), {state}, {} min", room.code, room.players.len(), room.age / 60)), t.font(true, t.size_small), TextColor(t.text), Node { width: px(330), ..default() }));
+                        small_btn(row, &t, "Close room", MenuAction::AdminServerClose(ri as u8), base, 150.0);
+                    });
+                    p.spawn(Node { column_gap: px(6), flex_wrap: FlexWrap::Wrap, ..default() }).with_children(|row| {
+                        for (pi, pl) in room.players.iter().take(4).enumerate() {
+                            small_btn(row, &t, &format!("Kick {}", pl.name), MenuAction::AdminServerKick(ri as u8, pl.id), base + 1 + pi as i32, 150.0);
+                        }
+                    });
+                }
+                if !tools.status.is_empty() {
+                    p.spawn((Text::new(tools.status.clone()), t.font(false, t.size_small), TextColor(t.text_dim)));
                 }
                 p.spawn((Text::new(""), t.font(false, t.size_small), TextColor(t.text_dim), AdminMessage));
                 let close = spawn_button(p, &t, "Close", MenuAction::CloseAdmin, 100, false);
@@ -208,7 +279,16 @@ fn panel_actions(
     profile: Res<crate::profile::Profile>,
     mut out: MessageWriter<SendPeer>,
     mut effects: MessageWriter<AdminEffect>,
+    (mut tools, mut net, mut notice, mut chat): (ResMut<ServerTools>, MessageWriter<crate::net::NetRequest>, ResMut<crate::net::NetNotice>, ResMut<crate::chat::Chat>),
 ) {
+    // Remember what's typed in the boxes (the panel is rebuilt with replies).
+    for f in &fields {
+        match f.kind {
+            FieldKind::ServerKey => tools.key = f.value.clone(),
+            FieldKind::Announcement => tools.announcement = f.value.clone(),
+            _ => {}
+        }
+    }
     let mut say = |s: String| {
         for mut t in &mut msg {
             t.0 = s.clone();
@@ -225,7 +305,7 @@ fn panel_actions(
                     for e in &roots {
                         commands.entity(e).try_despawn();
                     }
-                    build_panel(&mut commands, &theme, true, &session, &profile.name);
+                    build_panel(&mut commands, &theme, true, &session, &profile.name, &tools);
                 } else {
                     say("Wrong code.".into());
                 }
@@ -237,7 +317,7 @@ fn panel_actions(
             MenuAction::Admin(target, action) if unlocked.0 => {
                 let me = !session.online() || target == session.my_id;
                 if me {
-                    effects.write(AdminEffect { action, by: "You".into() });
+                    effects.write(AdminEffect { action, by: "You".into(), from: None });
                 } else {
                     out.write(SendPeer(PeerMsg::Admin { target, action }));
                 }
@@ -246,6 +326,10 @@ fn panel_actions(
                     AdminAction::Kill => format!("Killed {who}."),
                     AdminAction::Revive => format!("Revived {who}."),
                     AdminAction::Jumpscare => format!("Jumpscared {who}."),
+                    AdminAction::Bring => format!("Brought {who} to you."),
+                    AdminAction::MuteChat => format!("Muted {who}'s chat."),
+                    AdminAction::UnmuteChat => format!("Unmuted {who}'s chat."),
+                    AdminAction::GiveLumens => format!("Gave {who} 50 Lumens."),
                 });
                 // Close the panel when targeting yourself so you can see it happen.
                 if me {
@@ -253,8 +337,77 @@ fn panel_actions(
                 }
                 let _ = &profile;
             }
+            MenuAction::AdminKick(id) if unlocked.0 => {
+                net.write(crate::net::NetRequest::Kick { id, reason: String::new() });
+                say(format!("Removing {}...", session.name_of(id)));
+            }
+            MenuAction::AdminAnnounce if unlocked.0 => {
+                let text = crate::chat::clean(&tools.announcement);
+                if text.is_empty() {
+                    say("Type a message first.".into());
+                } else {
+                    if session.online() {
+                        out.write(SendPeer(PeerMsg::Announce { text: text.clone() }));
+                    }
+                    notice.show(format!("ANNOUNCEMENT:  {text}"), Some(8.0), false);
+                    chat.push("ANNOUNCEMENT", text, true, true);
+                    say("Announced to the room.".into());
+                }
+            }
+            MenuAction::AdminServerRooms if unlocked.0 => {
+                net.write(crate::net::NetRequest::Admin { key: tools.key.clone(), cmd: crate::net::proto::AdminCmd::Rooms });
+                say("Asking the server...".into());
+            }
+            MenuAction::AdminServerAnnounce if unlocked.0 => {
+                net.write(crate::net::NetRequest::Admin { key: tools.key.clone(), cmd: crate::net::proto::AdminCmd::Announce { text: tools.announcement.clone(), code: None } });
+                say("Sending to every room...".into());
+            }
+            MenuAction::AdminServerClose(i) if unlocked.0 => {
+                if let Some(r) = tools.rooms.get(i as usize) {
+                    net.write(crate::net::NetRequest::Admin { key: tools.key.clone(), cmd: crate::net::proto::AdminCmd::CloseRoom { code: r.code.clone(), reason: String::new() } });
+                    net.write(crate::net::NetRequest::Admin { key: tools.key.clone(), cmd: crate::net::proto::AdminCmd::Rooms });
+                }
+            }
+            MenuAction::AdminServerKick(i, id) if unlocked.0 => {
+                if let Some(r) = tools.rooms.get(i as usize) {
+                    net.write(crate::net::NetRequest::Admin { key: tools.key.clone(), cmd: crate::net::proto::AdminCmd::KickPlayer { code: r.code.clone(), id, reason: String::new() } });
+                    net.write(crate::net::NetRequest::Admin { key: tools.key.clone(), cmd: crate::net::proto::AdminCmd::Rooms });
+                }
+            }
             _ => {}
         }
+    }
+}
+
+/// Server tools' answers: rebuild the panel to show them.
+#[allow(clippy::too_many_arguments)]
+fn server_replies(
+    mut commands: Commands,
+    theme: Res<UiTheme>,
+    mut replies: MessageReader<crate::net::AdminReply>,
+    mut tools: ResMut<ServerTools>,
+    unlocked: Res<AdminUnlocked>,
+    session: Res<NetSession>,
+    profile: Res<crate::profile::Profile>,
+    roots: Query<Entity, With<AdminRoot>>,
+) {
+    let mut changed = false;
+    for r in replies.read() {
+        match r {
+            crate::net::AdminReply::Rooms(rooms) => {
+                tools.rooms = rooms.clone();
+                tools.status = format!("{} room(s) on the server.", rooms.len());
+            }
+            crate::net::AdminReply::Ok(m) => tools.status = m.clone(),
+            crate::net::AdminReply::Error(m) => tools.status = m.clone(),
+        }
+        changed = true;
+    }
+    if changed && unlocked.0 {
+        for e in &roots {
+            commands.entity(e).try_despawn();
+        }
+        build_panel(&mut commands, &theme, true, &session, &profile.name, &tools);
     }
 }
 
@@ -262,7 +415,7 @@ fn receive_admin(session: Res<NetSession>, mut events: MessageReader<PeerEvent>,
     for ev in events.read() {
         if let PeerMsg::Admin { target, action } = &ev.msg {
             if *target == session.my_id {
-                effects.write(AdminEffect { action: *action, by: session.name_of(ev.from) });
+                effects.write(AdminEffect { action: *action, by: session.name_of(ev.from), from: Some(ev.from) });
             }
         }
     }
@@ -281,6 +434,7 @@ fn apply_effects(
     mut shake: ResMut<CameraShake>,
     mut subs: MessageWriter<Subtitle>,
     settings: Res<crate::settings::Settings>,
+    (peers, mut player, mut chat_muted): (Res<crate::net::Peers>, Query<&mut Transform, With<crate::player::Player>>, ResMut<crate::chat::ChatMuted>),
 ) {
     for e in effects.read() {
         match e.action {
@@ -310,6 +464,27 @@ fn apply_effects(
                     sfx.write(PlaySfx(Sfx::SurgeRoar));
                 }
                 shake.add(1.0);
+            }
+            AdminAction::Bring => {
+                if let Some(st) = e.from.and_then(|id| peers.0.get(&id))
+                    && let Ok(mut tf) = player.single_mut()
+                {
+                    tf.translation = Vec3::from_array(st.p) + Vec3::new(0.6, 0.0, 0.6);
+                    subs.write(Subtitle::info(format!("{} brought you to them.", e.by)));
+                }
+            }
+            AdminAction::MuteChat => {
+                chat_muted.0 = true;
+                subs.write(Subtitle::info(format!("{} muted your chat.", e.by)));
+            }
+            AdminAction::UnmuteChat => {
+                chat_muted.0 = false;
+                subs.write(Subtitle::info(format!("{} unmuted your chat.", e.by)));
+            }
+            AdminAction::GiveLumens => {
+                run.lumens += 50;
+                sfx.write(PlaySfx(Sfx::Pickup));
+                subs.write(Subtitle::info(format!("{} gave you 50 Lumens.", e.by)));
             }
         }
     }

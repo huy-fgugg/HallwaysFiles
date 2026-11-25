@@ -44,6 +44,15 @@ pub enum MenuAction {
     AdminUnlock,
     AdminSpawn(crate::items::ItemKind),
     Admin(u8, crate::admin::AdminAction),
+    /// Room host: remove this player.
+    AdminKick(u8),
+    /// Send the typed message to everyone in your room.
+    AdminAnnounce,
+    /// Server tools (need the server's admin key).
+    AdminServerRooms,
+    AdminServerAnnounce,
+    AdminServerClose(u8),
+    AdminServerKick(u8, u8),
     OpenCustom,
     CloseCustom,
     PresetPrev,

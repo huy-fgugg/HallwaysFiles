@@ -227,7 +227,7 @@ fn run_capture(
             }
         }
         if label.starts_with("36") && cap.frames > 20 {
-            effects.write(crate::admin::AdminEffect { action: crate::admin::AdminAction::Jumpscare, by: "QA".into() });
+            effects.write(crate::admin::AdminEffect { action: crate::admin::AdminAction::Jumpscare, by: "QA".into(), from: None });
         }
         if *app_overlay.get() == crate::state::Overlay::Dead {
             next_overlay.set(crate::state::Overlay::None);

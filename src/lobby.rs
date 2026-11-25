@@ -197,12 +197,14 @@ fn run_lobby(
         lobby.countdown = None;
         *asked = false;
         lift.write(ElevatorCommand::CloseRear { seconds: 1.2 });
-        if in_car(tf.translation) {
-            // The descent is the intro cutscene (skippable by holding Space).
-            play.write(PlayCutscene(INTRO.into()));
-        } else {
-            lobby.left_behind = Some(0.0);
+        // Everyone goes down together: anyone still outside the lift is
+        // brought in as the gate closes. The descent is the intro cutscene
+        // (skippable by holding Space).
+        if !in_car(tf.translation) {
+            tf.translation = CAR_START + Vec3::X * (0.35 * (session.my_id % 3) as f32 - 0.35);
+            pl.yaw = 0.0;
         }
+        play.write(PlayCutscene(INTRO.into()));
     }
 }
 
@@ -268,7 +270,7 @@ fn update_panel(
     let hint = format!(
         "{code}{}",
         if lobby.aboard > 0 && lobby.aboard < lobby.players_joined {
-            "The lift leaves without anyone who isn't inside when the countdown ends"
+            "When the countdown ends, everyone goes down together"
         } else if lobby.is_host {
             "Walk into the lift  -  host: [Enter] / [A] to go now"
         } else {

@@ -57,6 +57,10 @@ pub fn clean(text: &str) -> String {
     t.trim().to_string()
 }
 
+/// An admin muted your chat: you can't send messages.
+#[derive(Resource, Debug, Default)]
+pub struct ChatMuted(pub bool);
+
 #[derive(Component)]
 struct ChatRoot;
 #[derive(Component)]
@@ -67,6 +71,7 @@ pub struct ChatPlugin;
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Chat>()
+            .init_resource::<ChatMuted>()
             .add_systems(OnEnter(AppState::Playing), |mut chat: ResMut<Chat>| {
                 chat.open = false;
                 chat.draft.clear();
@@ -79,7 +84,8 @@ impl Plugin for ChatPlugin {
                 }
             })
             .add_systems(PreUpdate, chat_keys.after(bevy::input::InputSystems).after(crate::touch::TouchInput).run_if(in_state(AppState::Playing)))
-            .add_systems(Update, (receive, age_lines, draw, muted_badge).chain().run_if(in_state(AppState::Playing)));
+            .add_systems(Update, (receive, age_lines, draw, muted_badge).chain().run_if(in_state(AppState::Playing)))
+            .add_systems(Update, draw_notice);
     }
 }
 
@@ -94,6 +100,7 @@ fn chat_keys(
     session: Res<NetSession>,
     mut out: MessageWriter<SendPeer>,
     mut subs: MessageWriter<crate::run::Subtitle>,
+    muted_by_admin: Res<ChatMuted>,
 ) {
     let events: Vec<KeyboardInput> = typed.read().cloned().collect();
     if !chat.open {
@@ -127,7 +134,9 @@ fn chat_keys(
         match &e.logical_key {
             Key::Enter => {
                 let text = clean(&chat.draft);
-                if !text.is_empty() {
+                if !text.is_empty() && muted_by_admin.0 {
+                    chat.push("*", "An admin muted your chat.", false, true);
+                } else if !text.is_empty() {
                     if session.online() {
                         out.write(SendPeer(PeerMsg::Chat { text: text.clone() }));
                     }
@@ -166,8 +175,16 @@ fn chat_keys(
     keys.reset_all();
 }
 
-fn receive(mut events: MessageReader<PeerEvent>, session: Res<NetSession>, settings: Res<Settings>, mut chat: ResMut<Chat>) {
+fn receive(mut events: MessageReader<PeerEvent>, session: Res<NetSession>, settings: Res<Settings>, mut chat: ResMut<Chat>, mut notice: ResMut<crate::net::NetNotice>) {
     for ev in events.read() {
+        if let PeerMsg::Announce { text } = &ev.msg {
+            let text = clean(text);
+            if !text.is_empty() {
+                notice.show(format!("ANNOUNCEMENT from {}:  {text}", session.name_of(ev.from)), Some(8.0), false);
+                chat.push("ANNOUNCEMENT", text, false, true);
+            }
+            continue;
+        }
         if let PeerMsg::Chat { text } = &ev.msg {
             let name = session.name_of(ev.from);
             let text = clean(text);
@@ -233,6 +250,30 @@ fn draw(mut commands: Commands, theme: Res<UiTheme>, chat: Res<Chat>, roots: Que
                 .with_child((Text::new(format!("SAY:  {}{}", chat.draft, if blink { "_" } else { " " })), theme.font(true, theme.size_small), TextColor(theme.text), Pickable::IGNORE));
                 c.spawn((Text::new("Enter to send  -  Esc to close"), theme.font(false, theme.size_small * 0.8), TextColor(theme.text_dim), Pickable::IGNORE));
             }
+        });
+}
+
+#[derive(Component)]
+struct NoticeRoot;
+
+/// The big message across the top (connection lost, removed, announcements).
+fn draw_notice(mut commands: Commands, theme: Res<UiTheme>, notice: Res<crate::net::NetNotice>, roots: Query<Entity, With<NoticeRoot>>, mut drawn: Local<u32>) {
+    if *drawn == notice.version && (notice.text.is_empty() == roots.is_empty()) {
+        return;
+    }
+    *drawn = notice.version;
+    for r in &roots {
+        commands.entity(r).despawn();
+    }
+    if notice.text.is_empty() {
+        return;
+    }
+    let (bg, edge) = if notice.danger { (Color::srgba(0.35, 0.04, 0.04, 0.92), Color::srgb(1.0, 0.4, 0.35)) } else { (Color::srgba(0.08, 0.1, 0.2, 0.92), Color::srgb(1.0, 0.82, 0.4)) };
+    commands
+        .spawn((Node { position_type: PositionType::Absolute, top: px(56), width: percent(100), justify_content: JustifyContent::Center, ..default() }, GlobalZIndex(60), Pickable::IGNORE, NoticeRoot))
+        .with_children(|r| {
+            r.spawn((Node { max_width: px(900), padding: UiRect::axes(px(18), px(10)), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(8)), ..default() }, BackgroundColor(bg), BorderColor::all(edge), Pickable::IGNORE))
+                .with_child((Text::new(notice.text.clone()), theme.font(true, theme.size_body), TextColor(Color::WHITE), TextLayout::justify(Justify::Center), Pickable::IGNORE));
         });
 }
 

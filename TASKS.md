@@ -131,6 +131,20 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.5
+- [x] Text chat: press T, type, Enter to send (Esc to close); messages show bottom-left
+- [x] Mute your microphone with M (saved); a MIC MUTED badge shows while you're in a room
+- [x] A speaker icon lights up over players who are talking, and they nod and gesture as they talk
+- [x] Settings: set each player in your room's voice volume, or mute them (muting also hides their chat); saved by name
+- [x] New items: Battery (common: recharges the flashlight), Med Kit (uncommon: +70 vitality), Lucky Charm (very rare: saves you from one death); rare finds say so
+- [x] More Lumens in drawers, and now and then a pouch of 15-30
+- [x] Two players with the same name can't be in one room
+- [x] Dropped connections: the game notices within 25 seconds, says so at the top of the screen and rejoins the room automatically (even mid-run); being removed from a room says why
+- [x] Admin panel: bring a player to you, mute their chat, give Lumens, kick (room host), announcements to the room; with the server's admin key: list every room, announce to all, close rooms, remove players
+- [x] The start lift takes everyone down when it leaves; the ending lift only takes the players who reached it (the others keep playing and can still escape)
+- [x] Fix: crouching sank the legs into the floor
+- [x] Fix: pressed against a mirror, your reflection's head was cut open
+
 ## 1.1.4: Low-End Edition (downloads from 1.1.3 on)
 - [x] Every release has Low-End Edition downloads for weak PCs and phones (Windows zip, Linux tar.gz, Android APK that installs as its own "HALLWAYS Low-End" app): textures shrunk to 256 px (62 MB of assets down to 12 MB), Low graphics; from 1.1.4 also a 1280x720 window, 2 rooms loaded ahead instead of 3 and no mirrors
 - [x] Fix: phones (and the Low-End Edition) really start on Low graphics the first time (the setting said Low but Medium was used)

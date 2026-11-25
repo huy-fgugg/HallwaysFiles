@@ -104,6 +104,12 @@ impl Plugin for EndingPlugin {
     }
 }
 
+/// Whether a player standing at `p` made it to the exit lift: in the last
+/// room, or past its final door.
+pub fn at_exit(p: Vec3, min: Vec2, max: Vec2) -> bool {
+    p.x > min.x - 1.0 && p.x < max.x + 1.0 && p.z < max.y + 0.5 && p.z > min.y - 12.0
+}
+
 /// Called by the floor when the final door opens.
 pub fn start_ending(anchor: &mut CutsceneAnchor, play: &mut MessageWriter<PlayCutscene>, floor: &Floor, rt: &FloorRuntime) {
     let Some(r) = floor.0.room(floor.0.last_room) else { return };
@@ -155,10 +161,12 @@ fn run_cues(
                     }
                 }
                 build_set(&mut commands, &mut meshes, &mut mats, anchor.0);
-                // You plus everyone else in the room.
+                // You plus the teammates who made it to the exit lift (in the
+                // last room, alive); anyone still elsewhere isn't on the lift.
                 let my_id = if session.online() { session.my_id } else { 0 };
                 let mut ids: Vec<u8> = vec![my_id];
-                ids.extend(peers.0.keys().copied());
+                let last = floor.as_ref().and_then(|f| f.0.room(f.0.last_room)).map(|r| (r.min, r.max));
+                ids.extend(peers.0.iter().filter(|(_, p)| p.alive && last.is_none_or(|(min, max)| crate::ending::at_exit(Vec3::from_array(p.p), min, max))).map(|(id, _)| *id));
                 ids.sort();
                 let n = ids.len().min(5);
                 for (i, id) in ids.into_iter().take(5).enumerate() {

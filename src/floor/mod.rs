@@ -290,16 +290,30 @@ fn announce_areas(run: Res<RunState>, floor: Option<Res<Floor>>, mut last: Local
     }
 }
 
-/// Opening Door 100 ends the floor: fade, then the run summary.
+/// Opening the final door ends the floor for whoever is at the exit lift:
+/// the ending plays, then the run summary. Teammates still elsewhere on the
+/// floor keep playing (they're told someone made it) and get their own
+/// ending when they reach the last room.
 fn finish_floor(
     floor: Option<Res<Floor>>,
     mut rt: ResMut<FloorRuntime>,
     run: Res<RunState>,
     mut anchor: ResMut<crate::ending::CutsceneAnchor>,
     mut play: MessageWriter<crate::cutscene::PlayCutscene>,
+    mut subs: MessageWriter<Subtitle>,
+    mut told: Local<bool>,
 ) {
     let Some(floor) = floor else { return };
-    if rt.opened.contains(&floor.0.final_door()) && rt.finished_at.is_none() {
+    if run.elapsed < 0.5 {
+        *told = false;
+    }
+    let door_open = rt.opened.contains(&floor.0.final_door());
+    let here = run.current_room >= floor.0.last_room && run.vitality > 0.0;
+    if door_open && !here && !*told && rt.finished_at.is_none() {
+        *told = true;
+        subs.write(Subtitle::info("Someone reached the exit lift! Get to the last room to escape."));
+    }
+    if door_open && here && rt.finished_at.is_none() {
         rt.finished_at = Some(run.elapsed);
     }
     // A beat after the final door swings open, the ending cutscene plays;

@@ -20,6 +20,10 @@ pub enum FieldKind {
     Seed,
     Code,
     AdminCode,
+    /// Admin panel: announcement text.
+    Announcement,
+    /// Admin panel: the server's admin key (hidden as you type).
+    ServerKey,
     PresetName,
     PresetSeed,
     MapName,
@@ -32,6 +36,8 @@ impl FieldKind {
             FieldKind::Seed => "SEED",
             FieldKind::Code => "ROOM CODE",
             FieldKind::AdminCode => "CODE",
+            FieldKind::Announcement => "MESSAGE",
+            FieldKind::ServerKey => "SERVER KEY",
             FieldKind::PresetName => "PRESET NAME",
             FieldKind::PresetSeed => "SEED",
             FieldKind::MapName => "MAP NAME",
@@ -44,6 +50,8 @@ impl FieldKind {
             FieldKind::Seed => 24,
             FieldKind::Code => 5,
             FieldKind::AdminCode => 5,
+            FieldKind::Announcement => 120,
+            FieldKind::ServerKey => 64,
             FieldKind::PresetName => 24,
             FieldKind::PresetSeed => 24,
             FieldKind::MapName => 24,
@@ -56,6 +64,8 @@ impl FieldKind {
             FieldKind::Seed => c.is_ascii_graphic() || c == ' ',
             FieldKind::Code => c.is_ascii_alphanumeric(),
             FieldKind::AdminCode => c.is_ascii_digit(),
+            FieldKind::Announcement => c.is_ascii_graphic() || c == ' ',
+            FieldKind::ServerKey => c.is_ascii_graphic(),
             FieldKind::PresetName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
             FieldKind::PresetSeed => c.is_ascii_graphic() || c == ' ',
             FieldKind::MapName => c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'),
@@ -248,7 +258,7 @@ fn type_into_fields(
                 FieldKind::Name if !field.value.trim().is_empty() => profile.name = field.value.clone(),
                 FieldKind::Name => {}
                 FieldKind::Seed => profile.seed_text = field.value.clone(),
-                FieldKind::Code | FieldKind::AdminCode => {}
+                FieldKind::Code | FieldKind::AdminCode | FieldKind::Announcement | FieldKind::ServerKey => {}
                 FieldKind::PresetName => {
                     if let Some(ed) = editor.as_mut() {
                         ed.edit.name = field.value.clone();
@@ -272,11 +282,13 @@ fn type_into_fields(
             match field.kind {
                 FieldKind::Seed => "random".to_string(),
                 FieldKind::Code | FieldKind::AdminCode => "-----".to_string(),
+                FieldKind::Announcement => "(type a message)".to_string(),
+                FieldKind::ServerKey => "(from HALLWAYS_ADMIN_KEY)".to_string(),
                 FieldKind::PresetSeed => "random".to_string(),
                 FieldKind::Name | FieldKind::PresetName | FieldKind::MapName => String::new(),
             }
         } else {
-            let v = if field.kind == FieldKind::AdminCode { "*".repeat(field.value.len()) } else { field.value.clone() };
+            let v = if matches!(field.kind, FieldKind::AdminCode | FieldKind::ServerKey) { "*".repeat(field.value.len()) } else { field.value.clone() };
             format!("{v}{caret}")
         };
         for c in children.iter() {

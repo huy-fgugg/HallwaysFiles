@@ -76,6 +76,8 @@ pub enum PeerMsg {
     Voice { seq: u32, data: String },
     /// A chat message (T).
     Chat { text: String },
+    /// An admin's announcement for the room (big banner).
+    Announce { text: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -99,6 +101,8 @@ pub struct NetSession {
     pub players: Vec<PlayerInfo>,
     /// The host started the descent.
     pub started: bool,
+    /// Your name in the room (for rejoining).
+    pub my_name: String,
 }
 
 impl NetSession {
@@ -125,7 +129,69 @@ pub enum NetRequest {
     Host { name: String, seed: u64, preset: Option<crate::presets::Preset> },
     Join { name: String, code: String },
     Leave,
+    /// Room host: remove a player.
+    Kick { id: u8, reason: String },
+    /// Server admin tools (through your room's connection, or a short-lived one).
+    Admin { key: String, cmd: proto::AdminCmd },
 }
+
+/// A reply from the server's admin tools (or an error for them).
+#[derive(Message, Debug, Clone)]
+pub enum AdminReply {
+    Rooms(Vec<proto::RoomSummary>),
+    Ok(String),
+    Error(String),
+}
+
+/// Big message across the top of the screen (connection lost, removed from
+/// the room, announcements). `seconds` = None stays until replaced.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct NetNotice {
+    pub text: String,
+    pub seconds: Option<f32>,
+    pub danger: bool,
+    pub version: u32,
+}
+
+impl NetNotice {
+    pub fn show(&mut self, text: impl Into<String>, seconds: Option<f32>, danger: bool) {
+        self.text = text.into();
+        self.seconds = seconds;
+        self.danger = danger;
+        self.version = self.version.wrapping_add(1);
+    }
+
+    pub fn clear(&mut self) {
+        if !self.text.is_empty() {
+            self.text.clear();
+            self.version = self.version.wrapping_add(1);
+        }
+    }
+}
+
+/// This game's rejoin token (random per launch): proves to the server that
+/// a reconnecting player is the one whose connection dropped.
+pub fn session_token() -> u64 {
+    static TOKEN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *TOKEN.get_or_init(|| rand::random::<u64>() | 1)
+}
+
+/// Trying to get back into the room after the connection dropped.
+#[derive(Resource, Debug)]
+struct Reconnect {
+    code: String,
+    name: String,
+    tries: u8,
+    /// Seconds until the next try.
+    wait: f32,
+}
+
+/// Attempts at rejoining before giving up.
+const REJOIN_TRIES: u8 = 4;
+
+/// The admin tools' own connection, used when you aren't in a room.
+#[derive(Resource)]
+struct AdminLink(Link);
 
 /// Fired once when the room is ready (the seed is known): menus start the run.
 #[derive(Message, Debug, Clone)]
@@ -175,7 +241,9 @@ impl Plugin for NetPlugin {
             .add_message::<SendPeer>()
             .add_message::<PeerEvent>()
             .add_message::<RequestStart>()
-            .add_systems(Update, (auto_online, handle_requests, pump, send_outgoing, send_start).chain())
+            .add_message::<AdminReply>()
+            .init_resource::<NetNotice>()
+            .add_systems(Update, (auto_online, handle_requests, reconnect, pump, pump_admin, send_outgoing, send_start, tick_notice).chain())
             .add_systems(OnEnter(crate::state::AppState::MainMenu), |mut req: MessageWriter<NetRequest>, s: Res<NetSession>| {
                 if s.status != NetStatus::Offline && !matches!(s.status, NetStatus::Error(_)) {
                     req.write(NetRequest::Leave);
@@ -256,19 +324,47 @@ fn to_text(m: &ClientMsg) -> String {
     serde_json::to_string(m).unwrap_or_default()
 }
 
-fn handle_requests(mut commands: Commands, mut reqs: MessageReader<NetRequest>, mut session: ResMut<NetSession>, mut peers: ResMut<Peers>) {
+#[allow(clippy::too_many_arguments)]
+fn handle_requests(
+    mut commands: Commands,
+    mut reqs: MessageReader<NetRequest>,
+    mut session: ResMut<NetSession>,
+    mut peers: ResMut<Peers>,
+    link: Option<Res<Link>>,
+    admin_link: Option<Res<AdminLink>>,
+    mut notice: ResMut<NetNotice>,
+) {
     for r in reqs.read() {
         match r {
             NetRequest::Leave => {
                 commands.remove_resource::<Link>();
+                commands.remove_resource::<Reconnect>();
                 *session = NetSession::default();
                 peers.0.clear();
+                notice.clear();
+            }
+            NetRequest::Kick { id, reason } => {
+                if let Some(l) = link.as_ref() {
+                    let _ = l.out.send(to_text(&ClientMsg::Kick { id: *id, reason: reason.clone() }));
+                }
+            }
+            NetRequest::Admin { key, cmd } => {
+                let msg = to_text(&ClientMsg::Admin { key: key.clone(), cmd: cmd.clone() });
+                if let Some(l) = link.as_ref() {
+                    let _ = l.out.send(msg);
+                } else if let Some(a) = admin_link.as_ref() {
+                    let _ = a.0.out.send(msg);
+                } else {
+                    // Not in a room: a connection just for the admin tools.
+                    commands.insert_resource(AdminLink(connect(server_url(), msg)));
+                }
             }
             NetRequest::Host { name, seed, preset } => {
                 let config = preset.as_ref().and_then(|p| serde_json::to_value(p).ok());
-                let first = to_text(&ClientMsg::Host { name: name.clone(), seed: *seed, version: PROTOCOL_VERSION, config });
+                let first = to_text(&ClientMsg::Host { name: name.clone(), seed: *seed, version: PROTOCOL_VERSION, config, token: session_token() });
                 commands.insert_resource(connect(server_url(), first));
-                *session = NetSession { status: NetStatus::Connecting, ..default() };
+                commands.remove_resource::<Reconnect>();
+                *session = NetSession { status: NetStatus::Connecting, my_name: name.clone(), ..default() };
                 peers.0.clear();
             }
             NetRequest::Join { name, code } => {
@@ -277,9 +373,10 @@ fn handle_requests(mut commands: Commands, mut reqs: MessageReader<NetRequest>, 
                     session.status = NetStatus::Error("Room codes are 5 letters/numbers, like K7QXM.".into());
                     continue;
                 }
-                let first = to_text(&ClientMsg::Join { code, name: name.clone(), version: PROTOCOL_VERSION });
+                let first = to_text(&ClientMsg::Join { code, name: name.clone(), version: PROTOCOL_VERSION, token: session_token() });
                 commands.insert_resource(connect(server_url(), first));
-                *session = NetSession { status: NetStatus::Connecting, ..default() };
+                commands.remove_resource::<Reconnect>();
+                *session = NetSession { status: NetStatus::Connecting, my_name: name.clone(), ..default() };
                 peers.0.clear();
             }
         }
@@ -297,6 +394,7 @@ fn pump(
     mut events: MessageWriter<PeerEvent>,
     mut subs: MessageWriter<crate::run::Subtitle>,
     mut voice: MessageWriter<crate::voice::VoiceIn>,
+    (mut notice, mut admin, mut rejoining, mut chat): (ResMut<NetNotice>, MessageWriter<AdminReply>, Option<ResMut<Reconnect>>, ResMut<crate::chat::Chat>),
 ) {
     let Some(link) = link else { return };
     let Ok(inc) = link.inc.lock() else { return };
@@ -304,9 +402,39 @@ fn pump(
         match inc.try_recv() {
             Ok(Incoming::Msg(m)) => match m {
                 ServerMsg::Welcome { code, id, host_id, seed, max, players, config } => {
-                    *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: false };
+                    if rejoining.is_some() {
+                        // Back in the same room mid-run: carry on, don't restart.
+                        let (name, was_started) = (session.my_name.clone(), session.started);
+                        *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: was_started, my_name: name };
+                        commands.remove_resource::<Reconnect>();
+                        notice.show("Reconnected to the room.", Some(3.0), false);
+                        chat.push("*", "You reconnected to the room.", false, true);
+                        continue;
+                    }
+                    let name = session.my_name.clone();
+                    *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: false, my_name: name };
                     let preset = config.and_then(|c| serde_json::from_value::<crate::presets::Preset>(c).ok()).map(crate::presets::Preset::sanitized);
                     ready.write(RoomReady { seed, preset });
+                }
+                ServerMsg::Kicked { reason } => {
+                    // Removed on purpose: say so plainly, and don't try to rejoin.
+                    notice.show(format!("You were removed from the room: {reason}  You're playing alone now."), Some(9.0), true);
+                    chat.push("*", format!("You were removed from the room: {reason}"), false, true);
+                    session.status = NetStatus::Error(reason);
+                    peers.0.clear();
+                    commands.remove_resource::<Link>();
+                    commands.remove_resource::<Reconnect>();
+                    return;
+                }
+                ServerMsg::Announcement { text } => {
+                    notice.show(format!("ANNOUNCEMENT:  {text}"), Some(9.0), false);
+                    chat.push("ANNOUNCEMENT", text, false, true);
+                }
+                ServerMsg::AdminRooms { rooms } => {
+                    admin.write(AdminReply::Rooms(rooms));
+                }
+                ServerMsg::AdminOk { msg } => {
+                    admin.write(AdminReply::Ok(msg));
                 }
                 ServerMsg::Joined { player } => {
                     subs.write(crate::run::Subtitle::info(format!("{} joined the lift.", player.name)));
@@ -342,6 +470,14 @@ fn pump(
                 }
                 ServerMsg::Pong => {}
                 ServerMsg::Error { msg } => {
+                    if let Some(r) = rejoining.as_mut() {
+                        // The room wouldn't take us back.
+                        r.tries = REJOIN_TRIES;
+                        r.wait = 0.0;
+                        commands.remove_resource::<Link>();
+                        return;
+                    }
+                    admin.write(AdminReply::Error(msg.clone()));
                     if session.online() {
                         subs.write(crate::run::Subtitle::danger(msg));
                     } else {
@@ -353,12 +489,23 @@ fn pump(
             },
             Ok(Incoming::Failed(e)) => {
                 let was_online = session.online();
-                session.status = NetStatus::Error(e.clone());
                 peers.0.clear();
-                if was_online {
-                    subs.write(crate::run::Subtitle::danger(format!("Disconnected from the room: {e}")));
-                }
                 commands.remove_resource::<Link>();
+                if let Some(r) = rejoining.as_mut() {
+                    // A rejoin attempt couldn't connect: try again shortly.
+                    r.wait = 3.0;
+                    return;
+                }
+                if was_online {
+                    // Lost the connection: try to get back into the same room.
+                    warn!("connection lost: {e}");
+                    notice.show("Connection to the room lost. Reconnecting...", None, true);
+                    chat.push("*", "Connection lost. Reconnecting...", false, true);
+                    session.status = NetStatus::Connecting;
+                    commands.insert_resource(Reconnect { code: session.code.clone(), name: session.my_name.clone(), tries: 0, wait: 1.0 });
+                    return;
+                }
+                session.status = NetStatus::Error(e.clone());
                 return;
             }
             Err(TryRecvError::Empty) => return,
@@ -366,6 +513,73 @@ fn pump(
                 commands.remove_resource::<Link>();
                 return;
             }
+        }
+    }
+}
+
+/// Rejoins the room after a dropped connection, a few times, then gives up.
+#[allow(clippy::too_many_arguments)]
+fn reconnect(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    r: Option<ResMut<Reconnect>>,
+    link: Option<Res<Link>>,
+    mut session: ResMut<NetSession>,
+    mut notice: ResMut<NetNotice>,
+    mut chat: ResMut<crate::chat::Chat>,
+) {
+    let Some(mut r) = r else { return };
+    if link.is_some() {
+        return;
+    }
+    r.wait -= time.delta_secs();
+    if r.wait > 0.0 {
+        return;
+    }
+    if r.tries >= REJOIN_TRIES {
+        commands.remove_resource::<Reconnect>();
+        session.status = NetStatus::Error("Disconnected from the room.".into());
+        notice.show("Disconnected from the room and couldn't get back in. You're playing alone now.", Some(9.0), true);
+        chat.push("*", "Disconnected from the room.", false, true);
+        return;
+    }
+    r.tries += 1;
+    r.wait = 3.0;
+    notice.show(format!("Connection to the room lost. Reconnecting... (try {} of {REJOIN_TRIES})", r.tries), None, true);
+    let first = to_text(&ClientMsg::Rejoin { code: r.code.clone(), name: r.name.clone(), version: PROTOCOL_VERSION, token: session_token() });
+    commands.insert_resource(connect(server_url(), first));
+}
+
+/// Replies on the admin tools' own connection (closed after each answer).
+fn pump_admin(mut commands: Commands, link: Option<Res<AdminLink>>, mut admin: MessageWriter<AdminReply>) {
+    let Some(link) = link else { return };
+    let Ok(inc) = link.0.inc.lock() else { return };
+    loop {
+        match inc.try_recv() {
+            Ok(Incoming::Msg(ServerMsg::AdminRooms { rooms })) => admin.write(AdminReply::Rooms(rooms)),
+            Ok(Incoming::Msg(ServerMsg::AdminOk { msg })) => admin.write(AdminReply::Ok(msg)),
+            Ok(Incoming::Msg(ServerMsg::Error { msg })) => admin.write(AdminReply::Error(msg)),
+            Ok(Incoming::Msg(_)) => continue,
+            Ok(Incoming::Failed(e)) => {
+                admin.write(AdminReply::Error(e));
+                commands.remove_resource::<AdminLink>();
+                return;
+            }
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                commands.remove_resource::<AdminLink>();
+                return;
+            }
+        };
+    }
+}
+
+fn tick_notice(time: Res<Time<Real>>, mut notice: ResMut<NetNotice>) {
+    if let Some(s) = notice.seconds.as_mut() {
+        *s -= time.delta_secs();
+        if *s <= 0.0 {
+            notice.seconds = None;
+            notice.clear();
         }
     }
 }
@@ -439,7 +653,14 @@ fn run_socket(url: &str, first: String, out: Receiver<String>, inc: &Sender<Inco
     raw.set_read_timeout(Some(Duration::from_millis(10))).ok();
     ws.send(Message::text(first)).map_err(|e| e.to_string())?;
     let mut last_ping = Instant::now();
+    // The server answers every ping: hearing nothing for this long means the
+    // connection is dead even if writes still "succeed" (a dropped mobile
+    // connection, a sleeping laptop, a proxy that closed only one side).
+    let mut last_heard = Instant::now();
     loop {
+        if last_heard.elapsed() > Duration::from_secs(25) {
+            return Err("Lost contact with the room server.".into());
+        }
         // Drain outgoing.
         loop {
             match out.try_recv() {
@@ -459,6 +680,7 @@ fn run_socket(url: &str, first: String, out: Receiver<String>, inc: &Sender<Inco
         }
         match ws.read() {
             Ok(Message::Text(t)) => {
+                last_heard = Instant::now();
                 if let Ok(m) = serde_json::from_str::<ServerMsg>(&t) {
                     if inc.send(Incoming::Msg(m)).is_err() {
                         return Ok(());
@@ -466,7 +688,7 @@ fn run_socket(url: &str, first: String, out: Receiver<String>, inc: &Sender<Inco
                 }
             }
             Ok(Message::Close(_)) => return Err("The server closed the connection.".into()),
-            Ok(_) => {}
+            Ok(_) => last_heard = Instant::now(),
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
                 let _ = ws.flush();
             }
