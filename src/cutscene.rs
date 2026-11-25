@@ -384,6 +384,10 @@ fn run_timeline(
     }
     let Some(def) = active.def.clone() else { return };
     active.t += dt;
+    // QA: HALLWAYS_CUT_DEBUG logs the timeline clock every second.
+    if std::env::var_os("HALLWAYS_CUT_DEBUG").is_some() && (active.t % 1.0) < dt {
+        info!("cutscene {} t={:.1}/{:.1}", active.id, active.t, def.duration);
+    }
     while active.fired < def.events.len() && def.events[active.fired].at <= active.t {
         let action = def.events[active.fired].action.clone();
         apply_event(&action, false, &mut active, &settings, &mut mood, &mut shake, &mut sfx, &mut subs, &mut hollow, &mut lift);

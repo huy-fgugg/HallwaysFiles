@@ -150,7 +150,19 @@ fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session
     commands
         .spawn((t.screen_root(false), GlobalZIndex(30), DespawnOnExit(Screen::Admin), AdminRoot, Name::new("Admin panel")))
         .with_children(|root| {
-            root.spawn(t.heading_text("ADMIN PANEL"));
+            // Heading and Close side by side above the (scrolling) panel, so
+            // Close is always on screen however long the panel gets.
+            root.spawn(Node { column_gap: px(24), align_items: AlignItems::Center, flex_shrink: 0.0, ..default() }).with_children(|top| {
+                top.spawn(t.heading_text("ADMIN PANEL"));
+                if unlocked {
+                    let close = spawn_button(top, &t, "Close", MenuAction::CloseAdmin, 100, false);
+                    top.commands().entity(close).entry::<Node>().and_modify(|mut n| {
+                        n.min_width = px(160);
+                        n.width = px(160);
+                        n.min_height = px(46);
+                    });
+                }
+            });
             // Never squash the panel (it scrolls if it really is too tall).
             root.spawn(t.panel(560.0)).entry::<Node>().and_modify(|mut n| n.flex_shrink = 0.0).entity().with_children(|p| {
                 if !unlocked {
@@ -230,11 +242,6 @@ fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session
                     p.spawn((Text::new(tools.status.clone()), t.font(false, t.size_small), TextColor(t.text_dim)));
                 }
                 p.spawn((Text::new(""), t.font(false, t.size_small), TextColor(t.text_dim), AdminMessage));
-                let close = spawn_button(p, &t, "Close", MenuAction::CloseAdmin, 100, false);
-                p.commands().entity(close).entry::<Node>().and_modify(|mut n| {
-                    n.min_height = px(46);
-                    n.flex_shrink = 0.0;
-                });
             });
         });
 }

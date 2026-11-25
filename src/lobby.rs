@@ -146,7 +146,13 @@ fn run_lobby(
     mut player: Query<(&mut Player, &mut Transform)>,
     (mut death, mut next_overlay, mut run): (ResMut<crate::hollow::DeathCause>, ResMut<NextState<Overlay>>, ResMut<crate::run::RunState>),
     mut asked: Local<bool>,
+    theater: Res<crate::theater::Theater>,
 ) {
+    // Watching a cutscene from the Cutscenes menu: the lift lobby stands still
+    // (its countdown used to restart the Arrival cutscene halfway through).
+    if theater.active() {
+        return;
+    }
     let Ok((mut pl, mut tf)) = player.single_mut() else { return };
     if lobby.start_in_car {
         lobby.start_in_car = false;
