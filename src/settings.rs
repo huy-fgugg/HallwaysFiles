@@ -214,7 +214,13 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(load_settings())
+        let mut settings = load_settings();
+        // First launch on a phone or the Low-End Edition: Low graphics (the
+        // renderer was already set up for it in `app::run`).
+        if !settings_file_exists() && (cfg!(any(target_os = "android", target_os = "ios")) || crate::lowend::enabled()) {
+            settings.graphics = Graphics::Low;
+        }
+        app.insert_resource(settings)
             .add_systems(Update, apply_window_mode.run_if(resource_changed::<Settings>));
     }
 }

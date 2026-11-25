@@ -214,7 +214,7 @@ pub fn spawn_room(
     openings.push(Opening { side: Side::South, center: r.entry_x, width: DOOR_W, height: DOOR_H, bottom: r.entry_height });
     b.room(r.min, r.max, h, &style, &openings, &[Side::South]);
     // Some rooms have a working mirror beside the entry door.
-    if let Some(x) = crate::mirror::mirror_spot(r) {
+    if let Some(x) = crate::mirror::mirror_spot(r).filter(|_| !crate::lowend::enabled()) {
         crate::mirror::spawn_mirror(b, r, x, images, std_mats);
     }
 

@@ -5,6 +5,11 @@ name: Release
 # a push whose commit message contains "[release]".
 on:
   workflow_dispatch:
+    inputs:
+      lowend_for:
+        description: "Only add Low-End Edition downloads to an existing release tag (e.g. v1.1.3); leave empty for a full release"
+        required: false
+        default: ""
   push:
     branches: [main, "claude/**"]
 
@@ -13,7 +18,7 @@ permissions:
 
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    if: (github.event_name == 'workflow_dispatch' && inputs.lowend_for == '') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -45,10 +50,15 @@ jobs:
           Copy-Item -Recurse assets HALLWAYS\assets
           Copy-Item packaging\windows\*.bat HALLWAYS\
           Compress-Archive -Path HALLWAYS -DestinationPath "hallways-$v-windows.zip" -Force
+      - name: Package Low-End Edition
+        shell: bash
+        run: packaging/lowend/package.sh windows "${{ needs.check.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: hallways-*-windows.zip
+          path: |
+            hallways-*-windows.zip
+            dist/hallways-*-windows-lowend.zip
 
   linux:
     needs: check
@@ -73,10 +83,14 @@ jobs:
         run: |
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb | grep -E "opt/hallways/hallways$|usr/bin/hallways|hallways.desktop"
+      - name: Package Low-End Edition
+        run: packaging/lowend/package.sh linux "${{ needs.check.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: dist/*.deb
+          path: |
+            dist/*.deb
+            dist/*-linux-lowend.tar.gz
 
   android:
     needs: check
@@ -148,6 +162,11 @@ jobs:
             - **Windows:** `hallways-${{ needs.check.outputs.version }}-windows.zip`. Unzip it and run `HALLWAYS\hallways.exe`. On an older or integrated GPU, use `HALLWAYS (Low Graphics).bat`; if it still crashes, `HALLWAYS (Compatibility Mode).bat`. Windows may warn about an unknown app (it isn't code-signed): choose **More info → Run anyway**.
             - **Linux (Debian/Ubuntu):** `hallways_${{ needs.check.outputs.version }}_amd64.deb`. Install with `sudo apt install ./hallways_${{ needs.check.outputs.version }}_amd64.deb`, then start **HALLWAYS** from your app menu or run `hallways`.
 
+            ### Low-End Edition (weak or old PCs)
+            Smaller textures (a much smaller download and less video memory), Low graphics, a smaller window, fewer rooms loaded at once and no mirrors. Online play works with everyone else.
+            - **Windows:** `hallways-${{ needs.check.outputs.version }}-windows-lowend.zip`. Unzip it and run `HALLWAYS (Low-End).bat`.
+            - **Linux:** `hallways-${{ needs.check.outputs.version }}-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.
+
             - **Android (phones/tablets, 64-bit, Android 9+):** `hallways-${{ needs.check.outputs.version }}-android.apk` (added a few minutes after the others). Download it on the phone, allow "install unknown apps" for your browser, and open it. Touch controls: left thumb walks, right thumb looks, buttons for USE / CROUCH / RUN / LIGHT / ITEM / MENU.
 
             Needs a graphics card with Vulkan (Linux/Android) or DirectX 12/Vulkan (Windows).
@@ -157,3 +176,50 @@ jobs:
 
             ## Your own music
             Drop a song into a folder in `assets/music/` (Windows: next to the exe; Linux: `/opt/hallways/assets/music/`).
+
+  # Adds Low-End Edition downloads to an already published release (run by
+  # hand with lowend_for = its tag). The game is built from that tag; the
+  # packaging comes from this branch.
+  lowend-backfill:
+    if: github.event_name == 'workflow_dispatch' && inputs.lowend_for != ''
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            runner: windows-latest
+          - os: linux
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.lowend_for }}
+          path: game
+      - name: System libraries
+        if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: game
+      - name: Build
+        working-directory: game
+        run: cargo build --release
+      - name: Package Low-End Edition
+        shell: bash
+        run: |
+          v="${{ inputs.lowend_for }}"
+          packaging/lowend/package.sh ${{ matrix.os }} "${v#v}" game
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.lowend_for }}
+          files: dist/*-lowend.*
+          append_body: true
+          body: |
+            ${{ matrix.os == 'windows' && '### Low-End Edition (weak or old PCs)
+            Smaller textures (a much smaller download and less video memory) and Low graphics. Online play works with everyone else.
+            - **Windows:** the `-windows-lowend.zip`. Unzip it and run `HALLWAYS (Low-End).bat`.
+            - **Linux:** the `-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.' || '' }}

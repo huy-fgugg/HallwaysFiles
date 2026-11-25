@@ -78,7 +78,7 @@ pub const KEEP_AHEAD: u32 = 3;
 /// Pure helper: which generated rooms should exist when the player is in `current`.
 pub fn wanted_rooms(current: u32, gate_open: bool, last: u32) -> std::ops::RangeInclusive<u32> {
     let lo = current.saturating_sub(KEEP_BEHIND).max(FIRST_ROOM);
-    let ahead = if gate_open || current >= FIRST_ROOM { KEEP_AHEAD } else { 1 };
+    let ahead = if gate_open || current >= FIRST_ROOM { crate::lowend::rooms_ahead(KEEP_AHEAD) } else { 1 };
     let hi = (current.max(1) + ahead).min(last);
     lo..=hi
 }

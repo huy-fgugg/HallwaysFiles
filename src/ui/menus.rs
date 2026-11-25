@@ -145,7 +145,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSee
             })
             .with_children(|footer| {
                 footer.spawn(theme.dim_text(format!("SEED {}", seed.display())));
-                footer.spawn(theme.dim_text(format!("v{}", env!("CARGO_PKG_VERSION"))));
+                footer.spawn(theme.dim_text(format!("v{}{}", env!("CARGO_PKG_VERSION"), if crate::lowend::enabled() { "  LOW-END EDITION" } else { "" })));
             });
         });
 }

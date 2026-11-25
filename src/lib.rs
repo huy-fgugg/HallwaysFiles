@@ -40,6 +40,7 @@ pub mod run;
 pub mod settings;
 pub mod state;
 pub mod chase_fx;
+pub mod lowend;
 pub mod mirror;
 pub mod surge;
 pub mod theater;
