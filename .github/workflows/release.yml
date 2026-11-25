@@ -56,13 +56,12 @@ jobs:
           Compress-Archive -Path HALLWAYS -DestinationPath "hallways-$v-windows.zip" -Force
       - name: Package Low-End Edition
         shell: bash
-        run: packaging/lowend/package.sh windows "${{ needs.check.outputs.version }}"
+        # Next to the normal zip, so both land at the top of the artifact.
+        run: packaging/lowend/package.sh windows "${{ needs.check.outputs.version }}" && mv dist/*-windows-lowend.zip .
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: |
-            hallways-*-windows.zip
-            dist/hallways-*-windows-lowend.zip
+          path: hallways-*-windows*.zip
 
   linux:
     needs: check
@@ -266,14 +265,23 @@ jobs:
           (cd game/android && gradle --no-daemon assembleRelease -PlowEnd)
           mkdir -p dist
           cp game/android/app/build/outputs/apk/release/app-release.apk "dist/hallways-${v#v}-android-lowend.apk"
-      - uses: softprops/action-gh-release@v2
+      # Upload with gh: editing an existing release through the API was
+      # refused for this workflow's token, but adding files is allowed.
+      - name: Add the files to the release
         if: env.WANTED == 'true'
-        with:
-          tag_name: ${{ inputs.lowend_for }}
-          files: dist/*-lowend.*
-          append_body: true
-          body: |
-            ${{ matrix.os == 'windows' && '### Low-End Edition (weak or old PCs)
-            Smaller textures (a much smaller download and less video memory) and Low graphics. Online play works with everyone else.
-            - **Windows:** the `-windows-lowend.zip`. Unzip it and run `HALLWAYS (Low-End).bat`.
-            - **Linux:** the `-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.' || matrix.os == 'android' && '- **Android Low-End:** the `-android-lowend.apk`. Smaller textures, Low graphics; installs as its own app, **HALLWAYS Low-End**, next to the normal one.' || '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.lowend_for }}" dist/*-lowend.* --clobber -R "${{ github.repository }}"
+      - name: Mention them in the release notes (best effort)
+        if: env.WANTED == 'true' && matrix.os == 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.lowend_for }}"
+          notes="$(gh release view "$tag" -R "${{ github.repository }}" --json body -q .body)"
+          if ! grep -q "Low-End Edition" <<<"$notes"; then
+            printf '%s\n\n### Low-End Edition (weak or old PCs and phones)\nSmaller textures (a much smaller download and less memory) and Low graphics. Online play works with everyone else.\n- **Windows:** the `-windows-lowend.zip`. Unzip it and run `HALLWAYS (Low-End).bat`.\n- **Linux:** the `-linux-lowend.tar.gz`. Extract it and run `HALLWAYS-LowEnd/hallways-lowend.sh`.\n- **Android:** the `-android-lowend.apk`. Installs as its own app, **HALLWAYS Low-End**, next to the normal one.\n' "$notes" > notes.md
+            gh release edit "$tag" -R "${{ github.repository }}" --notes-file notes.md || echo "Could not update the release notes (the files are uploaded)."
+          fi
