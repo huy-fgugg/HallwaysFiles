@@ -12,7 +12,7 @@ STAGE="$(mktemp -d)"
 DIR="$STAGE/HALLWAYS-LowEnd"
 mkdir -p "$DIR"
 cp -rL "$SRC/assets" "$DIR/assets"
-"$PY" -I "$HERE/shrink.py" "$DIR/assets" 256
+"$PY" "$HERE/shrink.py" "$DIR/assets" 256
 if [ "$OS" = windows ]; then
   cp "$SRC/target/release/hallways.exe" "$DIR/"
   cp "$HERE/HALLWAYS (Low-End).bat" "$DIR/"

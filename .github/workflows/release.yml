@@ -132,7 +132,7 @@ jobs:
       - name: Low-End Edition APK
         run: |
           python3 -m pip install --quiet pillow
-          python3 -I packaging/lowend/shrink.py android/app/src/main/assets 256
+          python3 packaging/lowend/shrink.py android/app/src/main/assets 256
           (cd android && gradle --no-daemon assembleRelease -PlowEnd)
           cp android/app/build/outputs/apk/release/app-release.apk "hallways-${{ needs.check.outputs.version }}-android-lowend.apk"
       - uses: actions/upload-artifact@v4
@@ -259,7 +259,7 @@ jobs:
           v="${{ inputs.lowend_for }}"
           cp -r game/assets game/android/app/src/main/assets
           python3 -m pip install --quiet pillow
-          python3 -I packaging/lowend/shrink.py game/android/app/src/main/assets 256
+          python3 packaging/lowend/shrink.py game/android/app/src/main/assets 256
           # Older tags have no -PlowEnd switch: give the app its own id and name here.
           sed -i 's/applicationId "com.hallways.game"/applicationId "com.hallways.game.lowend"/' game/android/app/build.gradle
           sed -i 's/android:label="HALLWAYS"/android:label="HALLWAYS Low-End"/' game/android/app/src/main/AndroidManifest.xml
