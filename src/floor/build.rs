@@ -736,15 +736,22 @@ mod tests {
 #[derive(Component)]
 pub struct MimicOf(pub u32, pub u8);
 
-/// (Lumens, item) for a drawer, deterministic per room seed.
+/// Smallest amount in a rare Lumen pouch.
+pub const POUCH_MIN: u32 = 15;
+
+/// (Lumens, item) for a drawer, deterministic per room seed. Most drawers
+/// hold a few Lumens; some an item; now and then a pouch of 15-30 Lumens.
 pub fn drawer_loot(r: &RoomPlan, id: u8, items: &crate::data::ItemConfig) -> (Option<u32>, Option<crate::items::ItemKind>) {
     let mut rng = GameRng::fork(r.seed, 500 + u64::from(id));
     let roll = rng.next_f32();
     let pick = rng.next_f32();
-    let amount = 1 + rng.below(6);
+    let amount = 2 + rng.below(7);
+    let pouch = POUCH_MIN + rng.below(16);
     if roll < items.item_chance {
         (None, Some(crate::items::ItemKind::roll(items, pick)))
-    } else if roll < items.item_chance + 0.45 {
+    } else if roll < items.item_chance + 0.05 {
+        (Some(pouch), None)
+    } else if roll < items.item_chance + 0.62 {
         (Some(amount), None)
     } else {
         (None, None)

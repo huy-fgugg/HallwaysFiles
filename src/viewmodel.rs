@@ -130,6 +130,9 @@ pub struct ItemMats {
     pub cloth: Handle<StandardMaterial>,
     pub orange: Handle<StandardMaterial>,
     pub white: Handle<StandardMaterial>,
+    pub red: Handle<StandardMaterial>,
+    /// Glowing green of the Lucky Charm.
+    pub charm: Handle<StandardMaterial>,
 }
 
 impl BodyKit {
@@ -151,6 +154,8 @@ impl BodyKit {
                 cloth: mats.add(m(Color::srgb(0.92, 0.9, 0.84), 0.95, 0.0)),
                 orange: mats.add(StandardMaterial { base_color: Color::srgba(0.9, 0.45, 0.1, 0.92), perceptual_roughness: 0.25, ..default() }),
                 white: mats.add(m(Color::srgb(0.93, 0.93, 0.93), 0.5, 0.0)),
+                red: mats.add(m(Color::srgb(0.8, 0.1, 0.1), 0.6, 0.0)),
+                charm: mats.add(StandardMaterial { base_color: Color::srgb(0.4, 0.95, 0.55), emissive: LinearRgba::rgb(0.4, 1.6, 0.6), perceptual_roughness: 0.4, ..default() }),
             },
         }
     }
@@ -268,6 +273,30 @@ pub fn build_item(c: &mut ChildSpawnerCommands, kit: &BodyKit, kind: ItemKind, s
             part(c, &kit.cube, &im.brass, Vec3::new(0.0, 0.0, -0.09) * s, Vec3::new(0.008, 0.008, 0.11) * s);
             part(c, &kit.cube, &im.brass, Vec3::new(0.012, 0.0, -0.135) * s, Vec3::new(0.02, 0.008, 0.012) * s);
             part(c, &kit.cube, &im.brass, Vec3::new(0.01, 0.0, -0.115) * s, Vec3::new(0.016, 0.008, 0.008) * s);
+        }
+        ItemKind::Battery => {
+            // A fat cell, terminal forward.
+            cyl(c, &im.black, Vec3::new(0.0, 0.0, -0.03), 0.022, 0.08, lay);
+            cyl(c, &im.brass, Vec3::new(0.0, 0.0, -0.075), 0.023, 0.012, lay);
+            cyl(c, &im.steel, Vec3::new(0.0, 0.0, -0.085), 0.008, 0.01, lay);
+        }
+        ItemKind::MedKit => {
+            // A small white case with a red cross on top.
+            part(c, &kit.cube, &im.white, Vec3::new(0.0, 0.0, -0.04) * s, Vec3::new(0.09, 0.05, 0.065) * s);
+            part(c, &kit.cube, &im.red, Vec3::new(0.0, 0.0255, -0.04) * s, Vec3::new(0.016, 0.002, 0.05) * s);
+            part(c, &kit.cube, &im.red, Vec3::new(0.0, 0.0255, -0.04) * s, Vec3::new(0.05, 0.002, 0.016) * s);
+        }
+        ItemKind::LuckyCharm => {
+            // A clover charm on a brass ring.
+            c.spawn((
+                Mesh3d(kit.cyl.clone()),
+                MeshMaterial3d(im.brass.clone()),
+                Transform::from_xyz(0.0, 0.0, -0.02 * s).with_rotation(lay).with_scale(Vec3::new(0.02, 0.005, 0.02) * s),
+                NotShadowCaster,
+            ));
+            for (x, z) in [(-0.012f32, -0.045f32), (0.012, -0.045), (-0.012, -0.069), (0.012, -0.069)] {
+                c.spawn((Mesh3d(kit.cyl.clone()), MeshMaterial3d(im.charm.clone()), Transform::from_xyz(x * s, 0.0, z * s).with_scale(Vec3::new(0.026, 0.004, 0.026) * s), NotShadowCaster));
+            }
         }
     }
 }

@@ -57,6 +57,22 @@ pub struct ItemConfig {
     pub vitamins: ItemTuning,
     pub bandage: ItemTuning,
     pub skeleton_key: ItemTuning,
+    #[serde(default = "default_battery")]
+    pub battery: ItemTuning,
+    #[serde(default = "default_med_kit")]
+    pub med_kit: ItemTuning,
+    #[serde(default = "default_lucky_charm")]
+    pub lucky_charm: ItemTuning,
+}
+
+fn default_battery() -> ItemTuning {
+    ItemTuning { name: "Battery".into(), weight: 2.2, max_stack: 3, power: 150.0 }
+}
+fn default_med_kit() -> ItemTuning {
+    ItemTuning { name: "Med Kit".into(), weight: 0.9, max_stack: 2, power: 70.0 }
+}
+fn default_lucky_charm() -> ItemTuning {
+    ItemTuning { name: "Lucky Charm".into(), weight: 0.12, max_stack: 1, power: 35.0 }
 }
 
 const ENTITIES_BUILTIN: &str = include_str!("../assets/data/entities.ron");

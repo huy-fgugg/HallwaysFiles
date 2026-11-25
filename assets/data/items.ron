@@ -1,10 +1,14 @@
 // HALLWAYS item tuning. `weight` is the relative chance of the item appearing
 // when a drawer rolls an item instead of Lumens.
 (
-    item_chance: 0.11,
+    item_chance: 0.13,
     flashlight:    (name: "Flashlight",    weight: 3.0, max_stack: 1, power: 150.0),  // power = battery seconds
     lockpick:      (name: "Lockpick",      weight: 2.0, max_stack: 3, power: 0.0),
     vitamins:      (name: "Vitamins",      weight: 2.5, max_stack: 3, power: 8.0),    // power = boost seconds
     bandage:       (name: "Bandage",       weight: 3.0, max_stack: 3, power: 35.0),   // power = vitality restored
     skeleton_key:  (name: "Skeleton Key",  weight: 0.6, max_stack: 1, power: 0.0),
+    battery:       (name: "Battery",       weight: 2.2, max_stack: 3, power: 150.0),  // power = battery seconds restored
+    med_kit:       (name: "Med Kit",       weight: 0.9, max_stack: 2, power: 70.0),   // power = vitality restored
+    lucky_charm:   (name: "Lucky Charm",   weight: 0.12, max_stack: 1, power: 35.0),  // saves you once; power = vitality after
+
 )

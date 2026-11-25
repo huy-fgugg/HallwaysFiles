@@ -429,7 +429,7 @@ impl Preset {
         self.lumens = self.lumens.min(400);
         self.start_kit = self.start_kit.min(3);
         self.revives = self.revives.min(5);
-        self.items_off &= 0b1_1111;
+        self.items_off &= ((1u16 << crate::items::ItemKind::ALL.len()) - 1) as u8;
         for s in &mut self.structures {
             *s = (*s).min(4);
         }

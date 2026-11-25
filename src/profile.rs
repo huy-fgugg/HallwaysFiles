@@ -63,6 +63,9 @@ pub fn shop_price(kind: ItemKind) -> u32 {
         ItemKind::Vitamins => 30,
         ItemKind::Bandage => 35,
         ItemKind::SkeletonKey => 90,
+        ItemKind::Battery => 25,
+        ItemKind::MedKit => 70,
+        ItemKind::LuckyCharm => 250,
     }
 }
 
@@ -232,9 +235,9 @@ impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(load_profile())
             .init_resource::<LastBanked>()
-            .add_systems(OnEnter(Overlay::Dead), |mut p: ResMut<Profile>, mut run: ResMut<RunState>, mut last: ResMut<LastBanked>| {
-                // With a revive left the run may go on: it's banked when you leave instead.
-                if !run.banked && run.revives_left == 0 {
+            .add_systems(OnEnter(Overlay::Dead), |mut p: ResMut<Profile>, mut run: ResMut<RunState>, mut last: ResMut<LastBanked>, inv: Res<crate::items::Inventory>| {
+                // With a revive (or a Lucky Charm) left the run may go on: it's banked when you leave instead.
+                if !run.banked && run.revives_left == 0 && !inv.has(ItemKind::LuckyCharm) {
                     run.banked = true;
                     last.0 = p.bank_run(&run, false);
                     save_profile(&p);

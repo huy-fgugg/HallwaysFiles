@@ -398,7 +398,13 @@ fn interact(
                             AddResult::StackFull => format!("Found a {name}, but you can't carry more."),
                             AddResult::Replaced(old) => format!("Found a {name}. Dropped your {} to make room.", old.tuning(&item_cfg).name),
                             _ if item == crate::items::ItemKind::Flashlight => format!("Found a {name}. Press F to switch it on."),
+                            _ if item == crate::items::ItemKind::LuckyCharm => format!("Found a {name}! It will save you once from dying."),
                             _ => format!("Found a {name}. Select it (1-3) and press Q to use."),
+                        };
+                        // Rare finds say so.
+                        let msg = match item.rarity(&item_cfg) {
+                            r @ (crate::items::Rarity::Rare | crate::items::Rarity::VeryRare) => format!("[{}] {msg}", r.label()),
+                            _ => msg,
                         };
                         subs.write(Subtitle::info(msg));
                         // Keep the Lumens message from overwriting the item message.
@@ -410,7 +416,7 @@ fn interact(
                         Some(n) => {
                             run.lumens += n;
                             sfx.write(PlaySfx(Sfx::Pickup));
-                            subs.write(Subtitle::info(format!("Found {n} Lumens")));
+                            subs.write(Subtitle::info(if n >= crate::floor::build::POUCH_MIN { format!("A pouch of Lumens! (+{n})") } else { format!("Found {n} Lumens") }));
                         }
                         None if !drawer.has_key && !had_item => {
                             subs.write(Subtitle::info("Empty."));

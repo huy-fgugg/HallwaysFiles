@@ -183,6 +183,37 @@ pub fn draw(kind: ItemKind) -> Canvas {
             c.set(25, 23, BRASS_LO);
             c.set(21, 26, BRASS_LO);
         }
+        ItemKind::Battery => {
+            // A chunky battery: dark body, brass cap and terminal, a lightning bolt.
+            c.rect(9, 8, 23, 28, DARK);
+            c.rect(10, 9, 13, 27, [70, 70, 80, 255]);
+            c.rect(9, 6, 23, 9, BRASS);
+            c.rect(13, 3, 19, 6, BRASS_HI);
+            c.line(18.0, 11.0, 13.0, 18.0, 2.4, GLOW);
+            c.line(13.0, 18.0, 19.0, 18.0, 2.4, GLOW);
+            c.line(19.0, 18.0, 14.0, 25.0, 2.4, GLOW);
+        }
+        ItemKind::MedKit => {
+            // A white case with a red cross and a dark handle.
+            c.rect(5, 10, 27, 27, WHITE);
+            c.rect(5, 24, 27, 27, CREAM);
+            c.rect(12, 6, 20, 10, DARK);
+            c.rect(14, 7, 18, 10, WHITE);
+            c.rect(14, 13, 18, 25, RED);
+            c.rect(10, 17, 22, 21, RED);
+        }
+        ItemKind::LuckyCharm => {
+            // A glowing four-leaf clover on a little brass ring.
+            let leaf = [120, 230, 150, 255];
+            let leaf_lo = [60, 160, 90, 255];
+            c.ring(16.0, 4.5, 1.5, 3.0, BRASS);
+            for (x, y) in [(12.0, 12.0), (20.0, 12.0), (12.0, 20.0), (20.0, 20.0)] {
+                c.disc(x, y, 5.2, leaf_lo);
+                c.disc(x, y, 4.0, leaf);
+            }
+            c.disc(16.0, 16.0, 2.5, GLOW);
+            c.line(16.0, 22.0, 20.0, 29.0, 2.0, leaf_lo);
+        }
     }
     c.outline();
     c

@@ -296,6 +296,9 @@ fn item_name(k: ItemKind) -> &'static str {
         ItemKind::Vitamins => "Vitamins",
         ItemKind::Bandage => "Bandage",
         ItemKind::SkeletonKey => "Skeleton Key",
+        ItemKind::Battery => "Battery",
+        ItemKind::MedKit => "Med Kit",
+        ItemKind::LuckyCharm => "Lucky Charm",
     }
 }
 

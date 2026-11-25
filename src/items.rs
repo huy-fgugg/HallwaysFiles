@@ -28,10 +28,52 @@ pub enum ItemKind {
     Vitamins,
     Bandage,
     SkeletonKey,
+    /// Recharges the flashlight (common).
+    Battery,
+    /// Heals a lot (uncommon).
+    MedKit,
+    /// Very rare: carried, it saves you from one death.
+    LuckyCharm,
+}
+
+/// How rare an item is (from its weight in the drawer roll).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rarity {
+    Common,
+    Uncommon,
+    Rare,
+    VeryRare,
+}
+
+impl Rarity {
+    pub fn of_weight(w: f32) -> Self {
+        if w >= 2.0 {
+            Rarity::Common
+        } else if w >= 0.8 {
+            Rarity::Uncommon
+        } else if w >= 0.3 {
+            Rarity::Rare
+        } else {
+            Rarity::VeryRare
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Rarity::Common => "COMMON",
+            Rarity::Uncommon => "UNCOMMON",
+            Rarity::Rare => "RARE",
+            Rarity::VeryRare => "VERY RARE",
+        }
+    }
 }
 
 impl ItemKind {
-    pub const ALL: [ItemKind; 5] = [ItemKind::Flashlight, ItemKind::Lockpick, ItemKind::Vitamins, ItemKind::Bandage, ItemKind::SkeletonKey];
+    pub const ALL: [ItemKind; 8] = [ItemKind::Flashlight, ItemKind::Lockpick, ItemKind::Vitamins, ItemKind::Bandage, ItemKind::SkeletonKey, ItemKind::Battery, ItemKind::MedKit, ItemKind::LuckyCharm];
+
+    pub fn rarity(self, cfg: &ItemConfig) -> Rarity {
+        Rarity::of_weight(self.tuning(cfg).weight)
+    }
 
     pub fn tuning_mut(self, cfg: &mut ItemConfig) -> &mut ItemTuning {
         match self {
@@ -40,6 +82,9 @@ impl ItemKind {
             ItemKind::Vitamins => &mut cfg.vitamins,
             ItemKind::Bandage => &mut cfg.bandage,
             ItemKind::SkeletonKey => &mut cfg.skeleton_key,
+            ItemKind::Battery => &mut cfg.battery,
+            ItemKind::MedKit => &mut cfg.med_kit,
+            ItemKind::LuckyCharm => &mut cfg.lucky_charm,
         }
     }
 
@@ -50,6 +95,9 @@ impl ItemKind {
             ItemKind::Vitamins => &cfg.vitamins,
             ItemKind::Bandage => &cfg.bandage,
             ItemKind::SkeletonKey => &cfg.skeleton_key,
+            ItemKind::Battery => &cfg.battery,
+            ItemKind::MedKit => &cfg.med_kit,
+            ItemKind::LuckyCharm => &cfg.lucky_charm,
         }
     }
 
@@ -61,6 +109,9 @@ impl ItemKind {
             ItemKind::Vitamins => "VITA",
             ItemKind::Bandage => "BAND",
             ItemKind::SkeletonKey => "KEY",
+            ItemKind::Battery => "BATT",
+            ItemKind::MedKit => "MED",
+            ItemKind::LuckyCharm => "LUCK",
         }
     }
 
@@ -71,6 +122,9 @@ impl ItemKind {
             ItemKind::Vitamins => Color::srgb(0.55, 0.9, 0.45),
             ItemKind::Bandage => Color::srgb(0.95, 0.5, 0.48),
             ItemKind::SkeletonKey => Color::srgb(0.85, 0.68, 0.3),
+            ItemKind::Battery => Color::srgb(0.95, 0.85, 0.25),
+            ItemKind::MedKit => Color::srgb(1.0, 0.35, 0.35),
+            ItemKind::LuckyCharm => Color::srgb(0.6, 1.0, 0.75),
         }
     }
 
@@ -183,6 +237,7 @@ impl Plugin for ItemsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inventory>()
             .init_resource::<SpeedBoost>()
+            .add_systems(OnEnter(crate::state::Overlay::Dead), lucky_charm_saves)
             .add_systems(OnEnter(AppState::Playing), |mut c: Commands, mut profile: ResMut<crate::profile::Profile>, cfg: Res<ItemConfig>, active: Res<crate::presets::ActivePreset>| {
                 // Items bought in the shop are handed over once, at the start of a run.
                 let mut inv = Inventory::default();
@@ -326,7 +381,7 @@ fn select_and_use(
         return;
     }
     let Some(stack) = inv.slots[inv.selected] else { return };
-    if matches!(stack.kind, ItemKind::Flashlight | ItemKind::Vitamins) || (stack.kind == ItemKind::Bandage && run.vitality < 100.0) {
+    if matches!(stack.kind, ItemKind::Flashlight | ItemKind::Vitamins | ItemKind::Battery) || (matches!(stack.kind, ItemKind::Bandage | ItemKind::MedKit) && run.vitality < 100.0) {
         arms.write(crate::viewmodel::ArmAnim(crate::viewmodel::Gesture::Use));
     }
     match stack.kind {
@@ -354,7 +409,54 @@ fn select_and_use(
         ItemKind::Lockpick | ItemKind::SkeletonKey => {
             subs.write(Subtitle::info("Look at a locked door and press E to use it."));
         }
+        ItemKind::Battery => {
+            if !inv.has(ItemKind::Flashlight) {
+                subs.write(Subtitle::info("You need a flashlight to put the battery in."));
+            } else if inv.battery >= inv.battery_max - 0.5 {
+                subs.write(Subtitle::info("The flashlight is already fully charged."));
+            } else {
+                inv.take(ItemKind::Battery);
+                inv.battery = (inv.battery + cfg.battery.power).min(inv.battery_max.max(cfg.battery.power));
+                sfx.write(PlaySfx(Sfx::Pickup));
+                subs.write(Subtitle::info("New battery in: flashlight recharged."));
+            }
+        }
+        ItemKind::MedKit => {
+            if run.vitality >= 100.0 {
+                subs.write(Subtitle::info("You're not hurt."));
+            } else {
+                inv.take(ItemKind::MedKit);
+                run.vitality = (run.vitality + cfg.med_kit.power).min(100.0);
+                sfx.write(PlaySfx(Sfx::Pickup));
+                subs.write(Subtitle::info(format!("Patched up with the med kit (+{:.0} vitality).", cfg.med_kit.power)));
+            }
+        }
+        ItemKind::LuckyCharm => {
+            subs.write(Subtitle::info("Keep it with you: the Lucky Charm saves you once from dying."));
+        }
     }
+}
+
+/// The Lucky Charm breaks instead of you: back on your feet where you fell.
+#[allow(clippy::too_many_arguments)]
+fn lucky_charm_saves(
+    mut inv: ResMut<Inventory>,
+    mut run: ResMut<RunState>,
+    cfg: Res<ItemConfig>,
+    mut chase: ResMut<crate::hollow::ChaseState>,
+    mut next: ResMut<NextState<crate::state::Overlay>>,
+    app: Res<State<AppState>>,
+    mut sfx: MessageWriter<PlaySfx>,
+    mut subs: MessageWriter<Subtitle>,
+) {
+    if *app.get() != AppState::Playing || !inv.take(ItemKind::LuckyCharm) {
+        return;
+    }
+    run.vitality = cfg.lucky_charm.power.clamp(10.0, 100.0);
+    *chase = crate::hollow::ChaseState::default();
+    next.set(crate::state::Overlay::None);
+    sfx.write(PlaySfx(Sfx::Ding));
+    subs.write(Subtitle { text: "Your Lucky Charm shatters... and you're still alive!".into(), seconds: 5.0, danger: false });
 }
 
 fn drain(time: Res<Time>, mut inv: ResMut<Inventory>, mut boost: ResMut<SpeedBoost>, mut subs: MessageWriter<Subtitle>) {

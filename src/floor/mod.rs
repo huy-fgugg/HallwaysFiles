@@ -145,7 +145,7 @@ fn setup_floor(
                 k.tuning_mut(&mut items).weight = 0.0;
             }
         }
-        if p.items_off & 0b1_1111 == 0b1_1111 {
+        if (0..crate::items::ItemKind::ALL.len()).all(|i| p.items_off & (1 << i) != 0) {
             items.item_chance = 0.0;
         }
     }
