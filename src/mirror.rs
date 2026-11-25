@@ -126,7 +126,15 @@ pub fn mirror_spot(r: &RoomPlan) -> Option<f32> {
 
 /// Builds the mirror on a room's south wall (called by the room builder).
 pub fn spawn_mirror(b: &mut crate::world::Builder, r: &RoomPlan, x: f32, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) {
-    let wall = r.max.y;
+    spawn_mirror_at(b, x, r.max.y, images, std_mats);
+}
+
+/// Where the lobby's mirror hangs: the boarding hall's back wall, left of
+/// the doorway (the skin table is on the right).
+pub const LOBBY_MIRROR_X: f32 = -2.3;
+
+/// A mirror on a wall facing south (-Z) at `wall`, glass centred on `x`.
+pub fn spawn_mirror_at(b: &mut crate::world::Builder, x: f32, wall: f32, images: &mut Assets<Image>, std_mats: &mut Assets<StandardMaterial>) {
     let cy = 0.35 + GLASS_H / 2.0;
     // A carved wooden frame.
     let frame = b.mats.trim_wood.clone();
@@ -368,4 +376,14 @@ mod find {
             }
         }
     }
+
+    #[test]
+    fn lobby_mirror_fits_its_wall() {
+        use crate::world::elevator::HALL_MIN;
+        use crate::mirror::{GLASS_W, LOBBY_MIRROR_X};
+        let (l, r) = (LOBBY_MIRROR_X - GLASS_W / 2.0 - 0.09, LOBBY_MIRROR_X + GLASS_W / 2.0 + 0.09);
+        // Clear of the corner (and the bench on the west wall) and of the doorway (|x| < 1).
+        assert!(l > HALL_MIN.x + 0.65 && r < -1.0 - 0.2, "{l}..{r}");
+    }
+
 }

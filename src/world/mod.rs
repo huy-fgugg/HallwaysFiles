@@ -538,6 +538,10 @@ fn spawn_test_level(
             }
         }
     }
+    // A full-length mirror on the back wall: check your skin before the descent.
+    if !crate::lowend::enabled() {
+        crate::mirror::spawn_mirror_at(&mut b, crate::mirror::LOBBY_MIRROR_X, hz1, &mut images, &mut std_mats);
+    }
     for z in [hz0 + 2.0, hz1 - 2.0] {
         let e = b
             .commands

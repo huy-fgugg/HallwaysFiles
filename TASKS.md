@@ -131,6 +131,9 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.1.8
+- [x] A full-length mirror in the lift lobby (back wall, left of the doorway): check your skin before the descent (not in the Low-End Edition)
+
 ## 1.1.7
 - [x] Sprinting is now a short burst: walking is a little quicker, sprinting only a bit faster, and a stamina bar (bottom-left) drains in about 5 seconds and refills after a short rest; run it dry and it turns red until you've caught your breath. During a Hollow chase adrenaline keeps it full
 - [x] Rooms are longer (about a third deeper, halls up to 30 m), and zigzag rooms turn up twice as often and twist back and forth up to six times
