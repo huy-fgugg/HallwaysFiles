@@ -83,6 +83,10 @@ struct TouchState {
 const STICK_RADIUS: f32 = 70.0;
 const MOVE_KEYS: [KeyCode; 4] = [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyD];
 
+/// The touch controls turning taps into key presses (runs in PreUpdate).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TouchInput;
+
 pub struct TouchPlugin;
 
 impl Plugin for TouchPlugin {
@@ -91,7 +95,7 @@ impl Plugin for TouchPlugin {
             .init_resource::<TouchTalk>()
             .insert_resource(TouchState { enabled: cfg!(any(target_os = "android", target_os = "ios")), ..default() })
             .add_systems(OnEnter(AppState::Playing), spawn_controls)
-            .add_systems(PreUpdate, handle_touches.after(bevy::input::InputSystems))
+            .add_systems(PreUpdate, handle_touches.after(bevy::input::InputSystems).in_set(TouchInput))
             .add_systems(Update, (update_controls.run_if(in_state(AppState::Playing)), soft_keyboard));
     }
 }

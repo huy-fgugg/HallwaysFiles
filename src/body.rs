@@ -123,6 +123,8 @@ pub const BODY_REACH: f32 = 0.47;
 
 /// Overall size: the heroes are 2.4-2.7 m tall at the pack's scale.
 pub const BODY_SCALE: f32 = 0.58;
+/// Hip height above the soles, in metres (the chibi legs hang straight down).
+pub const LEG_LENGTH: f32 = HIPS.y * BODY_SCALE;
 /// The big chibi heads are shrunk a little more so they fit through doors.
 const HEAD_SCALE: f32 = 0.78;
 

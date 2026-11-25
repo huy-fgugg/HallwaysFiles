@@ -23,10 +23,22 @@ const SEND_HZ: f32 = 15.0;
 
 /// Jacket colours so teammates are easy to tell apart.
 
-/// Crouch pose: hips drop 0.33 m; thigh forward and knee bend chosen so the
-/// feet stay on the floor: 0.44·cos(thigh) + 0.48·cos(knee − thigh) = 0.57.
+/// Crouch pose: both legs swing forward into a squat. The chibi legs have no
+/// knees, so the hips drop exactly as far as the legs rise (see
+/// [`hip_drop`]) and the feet stay on the floor.
 pub const CROUCH_THIGH: f32 = 1.0;
-pub const CROUCH_KNEE: f32 = 1.8;
+
+/// How far the hips drop so the lower foot rests on the floor, for the two
+/// legs' swing angles (the angle the body actually turns them by).
+pub fn hip_drop(swing: [f32; 2]) -> f32 {
+    crate::body::LEG_LENGTH * (1.0 - swing[0].cos().max(swing[1].cos()))
+}
+
+/// Angle a leg is really turned by (see `body::apply_poses`: a bent calf
+/// bends the whole leg a little less).
+fn leg_swing(pose: &BodyPose, i: usize) -> f32 {
+    pose.thigh[i] - pose.calf[i] * 0.35
+}
 
 #[derive(Component)]
 struct Avatar {
@@ -39,10 +51,16 @@ struct Avatar {
     skin: crate::body::Skin,
     /// Seconds since this player died (their body falls, then fades out).
     dead: f32,
+    /// How much they look like they are talking (eased, 0..1).
+    talk: f32,
 }
 
 #[derive(Component)]
 struct NameTag(u8);
+
+/// Speaker icon on a player's name tag, shown while they talk.
+#[derive(Component)]
+struct SpeakerIcon(u8);
 
 /// Where living, visible teammates stand: the local player collides with them.
 #[derive(Resource, Default)]
@@ -54,7 +72,7 @@ impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PeerBodies>().add_systems(
             Update,
-            (send_state, sync_doors, apply_peer_events, spawn_avatars, animate_avatars, place_name_tags).chain().run_if(in_state(AppState::Playing)),
+            (send_state, sync_doors, apply_peer_events, spawn_avatars, animate_avatars, place_name_tags, speaker_icons).chain().run_if(in_state(AppState::Playing)),
         );
         // QA: HALLWAYS_AVATAR_VIEW stands three teammates in front of you
         // (still, walking, crouching) to check the models up close.
@@ -156,7 +174,7 @@ fn apply_peer_events(
             PeerMsg::Notice { text } => {
                 subs.write(crate::run::Subtitle::info(format!("{}: {}", session.name_of(ev.from), text)));
             }
-            PeerMsg::State(_) | PeerMsg::Admin { .. } | PeerMsg::Voice { .. } => {}
+            _ => {}
         }
     }
 }
@@ -200,6 +218,7 @@ fn spawn_avatars(
     avatars: Query<(Entity, &Avatar)>,
     tags: Query<(Entity, &NameTag)>,
     model: Option<Res<crate::body::PlayerModel>>,
+    assets: Res<AssetServer>,
 ) {
     let Some(model) = model else { return };
     let have: HashMap<u8, Entity> = avatars.iter().map(|(e, a)| (a.id, e)).collect();
@@ -227,7 +246,11 @@ fn spawn_avatars(
             NameTag(*id),
             Pickable::IGNORE,
             DespawnOnExit(AppState::Playing),
-            children![(Text::new(session.name_of(*id)), theme.font(true, 15.0), TextColor(color.mix(&Color::WHITE, 0.55)))],
+            children![
+                // A speaker icon lights up while they talk (voice chat).
+                (ImageNode::new(assets.load("ui/speaker.png")).with_color(Color::srgb(0.55, 1.0, 0.6)), Node { width: px(16), height: px(16), margin: UiRect::right(px(5)), ..default() }, Visibility::Hidden, SpeakerIcon(*id), Pickable::IGNORE),
+                (Text::new(session.name_of(*id)), theme.font(true, 15.0), TextColor(color.mix(&Color::WHITE, 0.55)))
+            ],
         ));
     }
 }
@@ -237,7 +260,7 @@ fn spawn_avatar(commands: &mut Commands, model: &crate::body::PlayerModel, id: u
     let skin = st.skin.unwrap_or_else(|| crate::body::Skin::for_id(id));
     commands
         .spawn((
-            Avatar { id, shown: pos, yaw: st.yaw, pitch: st.pitch, phase: st.phase, crouch: 0.0, skin, dead: 0.0 },
+            Avatar { id, shown: pos, yaw: st.yaw, pitch: st.pitch, phase: st.phase, crouch: 0.0, skin, dead: 0.0, talk: 0.0 },
             BodyPose::default(),
             Transform::from_translation(pos),
             Visibility::default(),
@@ -247,6 +270,21 @@ fn spawn_avatar(commands: &mut Commands, model: &crate::body::PlayerModel, id: u
         .with_children(|root| crate::body::spawn_body(root, model, skin, true));
 }
 
+/// Talking animation: a gentle nod and head turn, and the free hand
+/// gesturing, scaled by `talk` (0..1).
+pub fn talking_gesture(pose: &mut BodyPose, talk: f32, t: f32, left_busy: bool) {
+    if talk < 0.01 {
+        return;
+    }
+    pose.head += (t * 7.0).sin() * 0.09 * talk;
+    pose.head_yaw += (t * 2.3).sin() * 0.12 * talk;
+    if !left_busy {
+        pose.arm[1] += (0.55 + 0.25 * (t * 4.5).sin()) * talk;
+        pose.forearm[1] += 0.5 * talk;
+        pose.arm_roll[1] += 0.25 * talk * (t * 3.1).sin().abs();
+    }
+}
+
 /// Pose for a player body from its shared state: walking, running,
 /// crouching, holding items and gestures. Also used by cutscene actors.
 pub fn pose_for(speed: f32, phase: f32, crouch: f32, pitch: f32, right: bool, left: bool, gesture: Gesture, envelope: f32) -> BodyPose {
@@ -254,15 +292,17 @@ pub fn pose_for(speed: f32, phase: f32, crouch: f32, pitch: f32, right: bool, le
     let ph = phase * 0.5;
     let swing = ph.sin() * 0.55 * walk;
     let c = crouch;
-    let mut pose = BodyPose { drop: 0.33 * c, lean: 0.25 * c, head: -pitch * 0.8 - 0.2 * c, ..default() };
+    let mut pose = BodyPose { lean: 0.35 * c, head: -pitch * 0.8 - 0.2 * c, ..default() };
     for (i, sgn) in [(0usize, 1.0f32), (1, -1.0)] {
         let s = swing * sgn;
         pose.thigh[i] = s * (1.0 - 0.6 * c) + CROUCH_THIGH * c;
-        pose.calf[i] = ((ph.sin() * sgn).max(0.0) * 0.7 * walk) * (1.0 - 0.6 * c) + CROUCH_KNEE * c;
+        pose.calf[i] = ((ph.sin() * sgn).max(0.0) * 0.7 * walk) * (1.0 - c);
         let held = if i == 0 { right } else { left };
         pose.arm[i] = if held { 0.75 } else { -s * 0.8 };
         pose.forearm[i] = if held { 0.6 } else { 0.2 };
     }
+    // Feet on the floor whatever the legs are doing (squatting, striding).
+    pose.drop = hip_drop([leg_swing(&pose, 0), leg_swing(&pose, 1)]);
     let e = envelope;
     match gesture {
         Gesture::Reach => pose.arm[0] += 0.8 * e,
@@ -330,9 +370,13 @@ fn animate_avatars(
             continue;
         }
         *pose = pose_for(st.speed, av.phase, av.crouch, av.pitch, st.right.is_some(), st.left.is_some(), st.gesture, st.gesture.envelope(st.gt));
-        // Their mouth opens with how loud they're talking (voice chat).
+        // Their mouth opens with how loud they're talking (voice chat), and
+        // they nod and gesture as they talk.
         let level = voices.0.get(&av.id).map_or(0.0, |v| v.level());
-        commands.entity(ent).insert(crate::body::Talking((level * 9.0).clamp(0.0, 1.0)));
+        let talk = (level * 9.0).clamp(0.0, 1.0);
+        av.talk += (talk - av.talk) * (dt * 8.0).min(1.0);
+        talking_gesture(&mut pose, av.talk, time.elapsed_secs() + av.id as f32, st.left.is_some());
+        commands.entity(ent).insert(crate::body::Talking(talk));
         // A teammate who changed their look.
         if let Some(skin) = st.skin
             && skin != av.skin
@@ -352,6 +396,23 @@ fn animate_avatars(
             if let Ok(mut v) = beams.get_mut(e) {
                 *v = if st.light { Visibility::Inherited } else { Visibility::Hidden };
             }
+        }
+    }
+}
+
+/// Lights the speaker icon over anyone talking (not for players you muted).
+fn speaker_icons(voices: Res<crate::voice::Voices>, session: Res<NetSession>, settings: Res<crate::settings::Settings>, mut icons: Query<(&SpeakerIcon, &mut Visibility, &mut ImageNode)>, time: Res<Time>) {
+    for (icon, mut vis, mut img) in &mut icons {
+        let level = voices.0.get(&icon.0).map_or(0.0, |v| v.level());
+        let talking = level > 0.012 && !settings.is_muted(&session.name_of(icon.0));
+        let want = if talking { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
+        if talking {
+            // Pulses with their voice.
+            let k = 0.6 + 0.4 * (level * 12.0).clamp(0.0, 1.0) * (0.75 + 0.25 * (time.elapsed_secs() * 10.0).sin());
+            img.color = Color::srgb(0.45 * k + 0.3, k, 0.5 * k + 0.2);
         }
     }
 }
@@ -391,10 +452,14 @@ mod tests {
 
     #[test]
     fn feet_stay_on_the_floor() {
-        // Thigh 0.44 m (hip to knee), shin and boot 0.48 m (knee to sole).
-        let crouched = 0.9 - 0.33 - 0.44 * CROUCH_THIGH.cos() - 0.48 * (CROUCH_KNEE - CROUCH_THIGH).cos();
-        assert!(crouched.abs() < 0.03, "crouched feet at {crouched}");
-        let standing: f32 = 0.9 - 0.44 - 0.48;
-        assert!(standing.abs() < 0.03, "standing feet at {standing}");
+        // Crouched, standing and mid-stride: the lower sole is at floor level
+        // (hips at LEG_LENGTH - drop, the foot LEG_LENGTH·cos(swing) below).
+        for (speed, phase, crouch) in [(0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (4.0, 1.3, 0.0), (2.0, 2.0, 1.0), (1.0, 0.7, 0.5)] {
+            let pose = pose_for(speed, phase, crouch, 0.0, false, false, Gesture::None, 0.0);
+            let hips = crate::body::LEG_LENGTH - pose.drop;
+            let lowest = (0..2).map(|i| hips - crate::body::LEG_LENGTH * leg_swing(&pose, i).cos()).fold(f32::INFINITY, f32::min);
+            assert!(lowest.abs() < 1e-4, "speed {speed} crouch {crouch}: sole at {lowest}");
+            assert!(pose.drop < crate::body::LEG_LENGTH * 0.6, "the body stays above the floor");
+        }
     }
 }

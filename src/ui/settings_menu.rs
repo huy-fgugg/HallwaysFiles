@@ -24,10 +24,18 @@ pub enum SettingField {
     Graphics,
     VoiceChat,
     VoiceVolume,
+    /// Your microphone (M in game).
+    Mic,
+    /// Volume of the N-th other player in your online room (0 = muted).
+    Player(u8),
 }
 
+/// Names of the other players in your online room (for the Player rows).
+#[derive(Resource, Debug, Default, Clone)]
+pub struct RoomNames(pub Vec<String>);
+
 impl SettingField {
-    pub const ALL: [SettingField; 13] = [
+    pub const ALL: [SettingField; 14] = [
         SettingField::Graphics,
         SettingField::MouseSensitivity,
         SettingField::InvertY,
@@ -36,12 +44,21 @@ impl SettingField {
         SettingField::MusicVolume,
         SettingField::VoiceChat,
         SettingField::VoiceVolume,
+        SettingField::Mic,
         SettingField::SpookyIntensity,
         SettingField::Subtitles,
         SettingField::ReduceFlashing,
         SettingField::LimitLoudSounds,
         SettingField::Fullscreen,
     ];
+
+    /// Row label (players' rows show their name).
+    pub fn label_for(self, names: &RoomNames) -> String {
+        match self {
+            SettingField::Player(i) => names.0.get(i as usize).map_or("Player".into(), |n| format!("  {n}")),
+            f => f.label().into(),
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -58,6 +75,21 @@ impl SettingField {
             SettingField::Graphics => "Graphics quality",
             SettingField::VoiceChat => "Voice chat",
             SettingField::VoiceVolume => "Voice volume",
+            SettingField::Mic => "Microphone",
+            SettingField::Player(_) => "Player",
+        }
+    }
+
+    pub fn value_text_for(self, s: &Settings, names: &RoomNames) -> String {
+        match self {
+            SettingField::Player(i) => match names.0.get(i as usize) {
+                Some(n) => match s.player_volume(n) {
+                    0 => "MUTED".into(),
+                    v => format!("{v}%"),
+                },
+                None => "-".into(),
+            },
+            f => f.value_text(s),
         }
     }
 
@@ -79,6 +111,20 @@ impl SettingField {
             SettingField::Graphics => s.graphics.label().into(),
             SettingField::VoiceChat => s.voice.label().into(),
             SettingField::VoiceVolume => format!("{}%", s.voice_volume),
+            SettingField::Mic => if s.mic_muted { "MUTED".into() } else { "ON".into() },
+            SettingField::Player(_) => "-".into(),
+        }
+    }
+
+    /// Applies a change, with the room's names for the Player rows.
+    pub fn apply_for(self, s: &mut Settings, delta: i32, names: &RoomNames) {
+        match self {
+            SettingField::Player(i) => {
+                if let Some(n) = names.0.get(i as usize) {
+                    s.step_player_volume(n, delta);
+                }
+            }
+            f => f.apply(s, delta),
         }
     }
 
@@ -113,6 +159,8 @@ impl SettingField {
             SettingField::Graphics => s.graphics = s.graphics.step(delta),
             SettingField::VoiceChat => s.voice = s.voice.step(delta),
             SettingField::VoiceVolume => step_pct(&mut s.voice_volume, delta),
+            SettingField::Mic => s.mic_muted = !s.mic_muted,
+            SettingField::Player(_) => {}
         }
     }
 }
@@ -124,7 +172,8 @@ pub struct SettingsMenuPlugin;
 
 impl Plugin for SettingsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(Screen::Settings), spawn_settings)
+        app.init_resource::<RoomNames>()
+            .add_systems(OnEnter(Screen::Settings), spawn_settings)
             .add_systems(OnExit(Screen::Settings), persist)
             .add_systems(
                 Update,
@@ -133,21 +182,32 @@ impl Plugin for SettingsMenuPlugin {
     }
 }
 
-fn spawn_settings(mut commands: Commands, theme: Res<UiTheme>, settings: Res<Settings>, app: Res<State<AppState>>) {
+fn spawn_settings(mut commands: Commands, theme: Res<UiTheme>, settings: Res<Settings>, app: Res<State<AppState>>, session: Res<crate::net::NetSession>) {
     let opaque = *app.get() == AppState::MainMenu;
+    // The other players in your online room, for their volume rows.
+    let names = RoomNames(if session.online() { session.players.iter().filter(|p| p.id != session.my_id).map(|p| p.name.clone()).collect() } else { vec![] });
+    let mut fields: Vec<SettingField> = SettingField::ALL.to_vec();
+    let at = fields.iter().position(|f| *f == SettingField::Mic).map_or(fields.len(), |i| i + 1);
+    for i in (0..names.0.len()).rev() {
+        fields.insert(at, SettingField::Player(i as u8));
+    }
+    commands.insert_resource(names.clone());
     commands
         .spawn((theme.screen_root(opaque), GlobalZIndex(20), DespawnOnExit(Screen::Settings), Name::new("Settings")))
         .with_children(|root| {
             root.spawn(theme.heading_text("SETTINGS"));
             root.spawn(theme.panel(640.0)).with_children(|panel| {
-                for (i, field) in SettingField::ALL.iter().copied().enumerate() {
+                for (i, field) in fields.iter().copied().enumerate() {
+                    if field == SettingField::Player(0) {
+                        panel.spawn((Text::new("PLAYERS IN THIS ROOM  (their voice volume; MUTED also hides their chat)"), theme.font(true, theme.size_small * 0.85), TextColor(theme.interact), Node { margin: UiRect::top(px(6)), ..default() }));
+                    }
                     let mut row = panel.spawn((theme.row(), Focusable(i as i32), Adjustable(field), Name::new(field.label())));
                     if i == 0 {
                         row.insert(InitialFocus);
                     }
                     let row_id = row.id();
                     row.with_children(|r| {
-                        r.spawn((Text::new(field.label()), theme.font(false, theme.size_body), TextColor(theme.text)));
+                        r.spawn((Text::new(field.label_for(&names)), theme.font(false, theme.size_body), TextColor(theme.text)));
                         r.spawn(Node { align_items: AlignItems::Center, column_gap: px(10), ..default() })
                             .with_children(|v| {
                                 v.spawn((
@@ -158,7 +218,7 @@ fn spawn_settings(mut commands: Commands, theme: Res<UiTheme>, settings: Res<Set
                                     Node { padding: UiRect::horizontal(px(8)), ..default() },
                                 ));
                                 v.spawn((
-                                    Text::new(field.value_text(&settings)),
+                                    Text::new(field.value_text_for(&settings, &names)),
                                     theme.font(true, theme.size_body),
                                     TextColor(theme.interact),
                                     Node { min_width: px(150), justify_content: JustifyContent::Center, ..default() },
@@ -180,22 +240,25 @@ fn spawn_settings(mut commands: Commands, theme: Res<UiTheme>, settings: Res<Set
                 spawn_button(row, &theme, "Reset defaults", MenuAction::ResetSettings, 100, false);
                 spawn_button(row, &theme, "Back", MenuAction::CloseSettings, 101, false);
             });
+            if !session.online() {
+                root.spawn(theme.dim_text("Join an online room to set other players' volumes here."));
+            }
             root.spawn(theme.dim_text("Arrows / D-pad to navigate  -  Left/Right to change  -  Esc to go back"));
         });
 }
 
-fn handle_adjust(mut reader: MessageReader<AdjustRequested>, mut settings: ResMut<Settings>) {
+fn handle_adjust(mut reader: MessageReader<AdjustRequested>, mut settings: ResMut<Settings>, names: Res<RoomNames>) {
     for req in reader.read() {
-        req.field.apply(&mut settings, req.delta);
+        req.field.apply_for(&mut settings, req.delta, &names);
     }
 }
 
-fn refresh_values(settings: Res<Settings>, mut q: Query<(&SettingValue, &mut Text)>) {
+fn refresh_values(settings: Res<Settings>, names: Res<RoomNames>, mut q: Query<(&SettingValue, &mut Text)>) {
     if !settings.is_changed() {
         return;
     }
     for (v, mut text) in &mut q {
-        let s = v.0.value_text(&settings);
+        let s = v.0.value_text_for(&settings, &names);
         if text.0 != s {
             text.0 = s;
         }
@@ -215,7 +278,8 @@ fn handle_actions(
     for MenuActivated(action) in reader.read() {
         match action {
             MenuAction::CloseSettings => close(app.get(), &mut next),
-            MenuAction::ResetSettings => *settings = Settings::default(),
+            // Keeps your per-player volumes (those are about people, not options).
+            MenuAction::ResetSettings => *settings = Settings { player_volumes: std::mem::take(&mut settings.player_volumes), ..Settings::default() },
             _ => {}
         }
     }

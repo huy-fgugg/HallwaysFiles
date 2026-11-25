@@ -74,6 +74,8 @@ pub enum PeerMsg {
     Admin { target: u8, action: crate::admin::AdminAction },
     /// 100 ms of voice (ADPCM, base64; see `voice`).
     Voice { seq: u32, data: String },
+    /// A chat message (T).
+    Chat { text: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

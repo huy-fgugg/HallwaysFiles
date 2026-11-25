@@ -421,7 +421,7 @@ fn send_voice(
     mut seq: Local<u32>,
 ) {
     let mode = if std::env::var_os("HALLWAYS_FAKE_MIC").is_some() { VoiceMode::OpenMic } else { settings.voice };
-    if !session.online() || mode == VoiceMode::Off {
+    if !session.online() || mode == VoiceMode::Off || settings.mic_muted {
         *mic = None;
         tx.0 = false;
         pending.clear();
@@ -500,6 +500,8 @@ fn place_voices(
             }
         };
         let k = if session.online() && st.alive { k } else { 0.0 };
+        // Your volume for this player (Settings; 0 = muted).
+        let k = k * settings.player_volume(&session.name_of(vp.0)) as f32 / 100.0;
         if let Some(mut s) = sink {
             s.set_volume(Volume::Linear(master * k * 1.6));
         }

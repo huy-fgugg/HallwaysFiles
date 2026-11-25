@@ -235,16 +235,36 @@ fn spawn_double(mut commands: Commands, model: Option<Res<crate::body::PlayerMod
         .with_children(|root| crate::body::spawn_body(root, &model, profile.skin, false));
 }
 
+/// Closest the double's feet may be to a mirror's glass: the big chibi head
+/// (tilted forward when you look down) must stay in front of the glass, or
+/// the part behind it is cut off and you see inside the head.
+pub const DOUBLE_CLEARANCE: f32 = 0.62;
+
+/// Where the double stands: where you are, pushed back from any mirror
+/// you're pressed against (imperceptible in the reflection at that range).
+pub fn double_position(feet: Vec3, mirrors: impl Iterator<Item = Mirror>) -> Vec3 {
+    let mut at = feet;
+    for m in mirrors {
+        let d = (at - m.center).dot(m.normal);
+        let side = (at - m.center).dot(m.right).abs();
+        if d > -0.1 && d < DOUBLE_CLEARANCE && side < GLASS_W / 2.0 + 0.7 {
+            at += m.normal * (DOUBLE_CLEARANCE - d);
+        }
+    }
+    at
+}
+
 fn move_double(
     player: Query<(&crate::player::Player, &Transform), Without<MirrorDouble>>,
     hide: Res<crate::interaction::HideState>,
     inv: Res<crate::items::Inventory>,
+    mirrors: Query<&Mirror>,
     mut q: Query<(&mut Transform, &mut crate::body::BodyPose, &mut Visibility), With<MirrorDouble>>,
 ) {
     let Ok((p, body)) = player.single() else { return };
     let (right, left) = crate::viewmodel::held_items(&inv);
     for (mut tf, mut pose, mut vis) in &mut q {
-        tf.translation = body.translation;
+        tf.translation = double_position(body.translation, mirrors.iter().copied());
         tf.rotation = Quat::from_rotation_y(p.yaw);
         let crouch = ((crate::player::STAND_EYE - p.eye) / (crate::player::STAND_EYE - crate::player::CROUCH_EYE)).clamp(0.0, 1.0);
         *pose = crate::avatar::pose_for(p.speed, p.bob_phase, crouch, p.pitch, right.is_some(), left.is_some(), crate::viewmodel::Gesture::None, 0.0);
@@ -303,6 +323,20 @@ mod tests {
         assert!(q.z / q.w > 1.0, "behind the glass is clipped");
         // Behind the mirror: nothing to show.
         assert!(reflect_view(Vec3::new(0.0, 1.6, 1.0), &mirror(), half).is_none());
+    }
+
+    #[test]
+    fn the_double_never_reaches_past_the_glass() {
+        let m = mirror();
+        // Pressed flat against the glass (player radius 0.3 from the wall).
+        let at = double_position(Vec3::new(0.0, 0.0, -0.3), [m].into_iter());
+        assert!(((at - m.center).dot(m.normal) - DOUBLE_CLEARANCE).abs() < 1e-4);
+        // Further away: untouched.
+        let far = Vec3::new(0.2, 0.0, -2.0);
+        assert_eq!(double_position(far, [m].into_iter()), far);
+        // Beside the mirror (well to the side): untouched.
+        let side = Vec3::new(3.0, 0.0, -0.3);
+        assert_eq!(double_position(side, [m].into_iter()), side);
     }
 
     #[test]

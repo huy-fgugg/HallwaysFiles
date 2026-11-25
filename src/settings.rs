@@ -80,6 +80,39 @@ pub struct Settings {
     pub voice: crate::voice::VoiceMode,
     /// 0 ..= 100
     pub voice_volume: u32,
+    /// Your microphone is muted (M).
+    pub mic_muted: bool,
+    /// Other players' voice volume by name, percent (0 = muted: no voice and
+    /// no chat from them). Players not listed are at 100%.
+    pub player_volumes: std::collections::BTreeMap<String, u32>,
+}
+
+/// Choices for a player's volume in Settings.
+pub const PLAYER_VOLUMES: [u32; 7] = [0, 25, 50, 75, 100, 150, 200];
+
+impl Settings {
+    /// A player's volume, percent (100 unless you changed it).
+    pub fn player_volume(&self, name: &str) -> u32 {
+        self.player_volumes.get(&name.to_lowercase()).copied().unwrap_or(100)
+    }
+
+    /// Steps a player's volume through [`PLAYER_VOLUMES`] (wrapping).
+    pub fn step_player_volume(&mut self, name: &str, delta: i32) {
+        let key = name.to_lowercase();
+        let now = self.player_volume(&key);
+        let i = PLAYER_VOLUMES.iter().position(|v| *v >= now).unwrap_or(4) as i32;
+        let d = if delta == 0 { 1 } else { delta };
+        let v = PLAYER_VOLUMES[(i + d).rem_euclid(PLAYER_VOLUMES.len() as i32) as usize];
+        if v == 100 {
+            self.player_volumes.remove(&key);
+        } else {
+            self.player_volumes.insert(key, v);
+        }
+    }
+
+    pub fn is_muted(&self, name: &str) -> bool {
+        self.player_volume(name) == 0
+    }
 }
 
 impl Default for Settings {
@@ -99,6 +132,8 @@ impl Default for Settings {
             graphics: Graphics::default(),
             voice: crate::voice::VoiceMode::default(),
             voice_volume: 90,
+            mic_muted: false,
+            player_volumes: Default::default(),
         }
     }
 }
