@@ -1,6 +1,6 @@
 [package]
 name = "hallways"
-version = "1.1.8"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -29,6 +29,12 @@ debug = false
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+# Peer-to-peer rooms (computers only: phones never host and use the server relay).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+webrtc = "0.21"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 # Android: asking for the microphone at runtime (voice chat).
 [target.'cfg(target_os = "android")'.dependencies]

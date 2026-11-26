@@ -33,6 +33,8 @@ pub enum Overlay {
     Achievements,
     Skin,
     MapBuilder,
+    /// The room's host left: paused while a new one is chosen.
+    Reconnecting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,6 +53,7 @@ pub enum Screen {
     Achievements,
     Skin,
     MapBuilder,
+    Reconnecting,
 }
 
 impl ComputedStates for Screen {
@@ -72,6 +75,7 @@ impl ComputedStates for Screen {
             (AppState::Playing, Overlay::Admin) => Screen::Admin,
             (AppState::Playing, Overlay::Dead) => Screen::Death,
             (AppState::Playing, Overlay::Summary) => Screen::Summary,
+            (AppState::Playing, Overlay::Reconnecting) => Screen::Reconnecting,
             (AppState::Playing, _) => Screen::Hud,
         })
     }
@@ -100,6 +104,7 @@ impl Plugin for StatePlugin {
             .init_state::<Overlay>()
             .add_computed_state::<Screen>()
             .add_systems(OnEnter(Overlay::Pause), pause_time)
+            .add_systems(OnEnter(Overlay::Reconnecting), pause_time)
             .add_systems(OnEnter(Overlay::None), resume_time)
             .add_systems(OnEnter(AppState::MainMenu), reset_overlay)
             .add_systems(OnEnter(AppState::Restarting), restart);

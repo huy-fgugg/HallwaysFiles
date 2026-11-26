@@ -59,10 +59,52 @@ pub enum ClientMsg {
     Admin { key: String, cmd: AdminCmd },
     /// Forward `data` to everyone else in the room.
     Relay { data: serde_json::Value },
+    /// Forward `data` to some players only (the host passing on a message
+    /// that came to it directly, to players without a direct link).
+    RelayTo { to: Vec<u8>, data: serde_json::Value },
+    /// Pass a direct-link (peer-to-peer) setup message to one player.
+    Signal { to: u8, data: serde_json::Value },
+    /// What this player's device can do as the room's host (sent on joining
+    /// and every few seconds). The server hands the host role to the best one.
+    HostInfo(HostInfo),
+    /// Choosing a new host by vote: this player's pick.
+    Vote { id: u8 },
     /// Host only: everyone leaves the lift now.
     Start,
     Ping,
 }
+
+/// A player's device, as a possible host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostInfo {
+    /// Runs the game well enough to host (a computer, not the Low-End
+    /// Edition, enough cores, a steady frame rate).
+    pub capable: bool,
+    /// Can host at all (any computer; phones never host).
+    pub eligible: bool,
+    /// Higher is better (frame rate, cores, direct links working).
+    pub score: u32,
+}
+
+impl Default for HostInfo {
+    /// Older games never say: treat them as able to host, last choice.
+    fn default() -> Self {
+        Self { capable: true, eligible: true, score: 0 }
+    }
+}
+
+/// One name on the host vote.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Candidate {
+    pub id: u8,
+    pub name: String,
+    /// On a computer (can be voted in).
+    pub eligible: bool,
+    pub votes: u8,
+}
+
+/// Seconds the host vote stays open (it ends sooner once everyone voted).
+pub const VOTE_SECS: u64 = 20;
 
 /// What a server admin can do.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,6 +154,13 @@ pub enum ServerMsg {
     Left { id: u8 },
     /// The host left; this player now hosts.
     HostIs { id: u8 },
+    /// The host left and no computer here can take over on its own: vote.
+    /// Sent again as votes come in.
+    HostVote { candidates: Vec<Candidate>, seconds_left: u64 },
+    /// The host left and nobody left can host (only phones): the room ends.
+    NoHost,
+    /// A direct-link setup message from `from`.
+    Signal { from: u8, data: serde_json::Value },
     Relay { from: u8, data: serde_json::Value },
     Start,
     Pong,
@@ -124,6 +173,18 @@ pub enum ServerMsg {
     AdminRooms { rooms: Vec<RoomSummary> },
     /// Admin tools: done (with a short result).
     AdminOk { msg: String },
+}
+
+/// Who takes over when the host leaves: the best player whose computer
+/// runs the game well. None = nobody qualifies (then the room votes).
+pub fn auto_host(players: &[(u8, HostInfo)]) -> Option<u8> {
+    players.iter().filter(|(_, h)| h.capable && h.eligible).max_by(|a, b| a.1.score.cmp(&b.1.score).then(b.0.cmp(&a.0))).map(|(id, _)| *id)
+}
+
+/// The vote's result: the most votes among players on a computer (ties go
+/// to the better computer, then the earlier player). None = only phones left.
+pub fn vote_winner(players: &[(u8, HostInfo, u8)]) -> Option<u8> {
+    players.iter().filter(|(_, h, _)| h.eligible).max_by(|a, b| a.2.cmp(&b.2).then(a.1.score.cmp(&b.1.score)).then(b.0.cmp(&a.0))).map(|(id, _, _)| *id)
 }
 
 /// Room names are unique ignoring case and surrounding spaces.
@@ -179,4 +240,26 @@ mod tests {
         assert!(!valid_code("ABCD0"));
         assert!(!valid_code(&normalize_code("abcdo")), "O is never issued");
     }
+
+    #[test]
+    fn choosing_a_new_host() {
+        let pc = |score| HostInfo { capable: true, eligible: true, score };
+        let slow_pc = HostInfo { capable: false, eligible: true, score: 50 };
+        let phone = HostInfo { capable: false, eligible: false, score: 0 };
+        // The best capable computer takes over; phones and slow computers never do automatically.
+        assert_eq!(auto_host(&[(2, phone), (3, pc(400)), (4, pc(900)), (5, slow_pc)]), Some(4));
+        assert_eq!(auto_host(&[(2, phone), (5, slow_pc)]), None);
+        // Then the vote: most votes among computers wins, phones can't win.
+        assert_eq!(vote_winner(&[(2, phone, 3), (5, slow_pc, 1), (6, HostInfo { score: 10, ..slow_pc }, 0)]), Some(5));
+        // Tie: the better computer.
+        assert_eq!(vote_winner(&[(5, slow_pc, 1), (6, HostInfo { score: 90, ..slow_pc }, 1)]), Some(6));
+        // Nobody voted: still a computer.
+        assert_eq!(vote_winner(&[(2, phone, 0), (5, slow_pc, 0)]), Some(5));
+        // Only phones: no host.
+        assert_eq!(vote_winner(&[(2, phone, 2), (3, phone, 0)]), None);
+        // Old games that never say are treated as able.
+        let m: ClientMsg = serde_json::from_str(r#"{"t":"host_info","capable":false,"eligible":true,"score":7}"#).unwrap();
+        assert_eq!(m, ClientMsg::HostInfo(HostInfo { capable: false, eligible: true, score: 7 }));
+    }
+
 }

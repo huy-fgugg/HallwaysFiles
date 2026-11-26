@@ -11,6 +11,7 @@ pub mod settings_menu;
 pub mod skin_menu;
 pub mod map_builder;
 pub mod splash;
+pub mod reconnect;
 
 use bevy::prelude::*;
 
@@ -30,6 +31,7 @@ impl Plugin for UiPlugin {
             splash::SplashPlugin,
             skin_menu::SkinMenuPlugin,
             map_builder::MapBuilderPlugin,
+            reconnect::ReconnectPlugin,
         ));
     }
 }

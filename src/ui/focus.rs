@@ -46,6 +46,8 @@ pub enum MenuAction {
     Admin(u8, crate::admin::AdminAction),
     /// Room host: remove this player.
     AdminKick(u8),
+    /// Host vote: pick this player.
+    VoteHost(u8),
     /// Send the typed message to everyone in your room.
     AdminAnnounce,
     /// Server tools (need the server's admin key).

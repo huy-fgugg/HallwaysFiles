@@ -7,6 +7,9 @@
 //! to the game through channels, so a slow connection never stalls a frame.
 
 pub mod proto;
+pub mod host;
+#[cfg(not(target_os = "android"))]
+pub mod p2p;
 
 use std::collections::HashMap;
 use std::net::TcpStream;
@@ -136,6 +139,8 @@ pub enum NetRequest {
     Kick { id: u8, reason: String },
     /// Server admin tools (through your room's connection, or a short-lived one).
     Admin { key: String, cmd: proto::AdminCmd },
+    /// Host vote: pick this player.
+    Vote { id: u8 },
 }
 
 /// A reply from the server's admin tools (or an error for them).
@@ -246,7 +251,12 @@ impl Plugin for NetPlugin {
             .add_message::<RequestStart>()
             .add_message::<AdminReply>()
             .init_resource::<NetNotice>()
-            .add_systems(Update, (auto_online, handle_requests, reconnect, pump, pump_admin, send_outgoing, send_start, tick_notice).chain())
+            .init_resource::<host::HostChange>()
+            .init_resource::<host::HostPerf>()
+            .init_resource::<host::Direct>()
+            .add_message::<host::DirectIn>()
+            .add_systems(Update, (auto_online, handle_requests, reconnect, pump, host::direct_links, deliver_direct, pump_admin, send_outgoing, send_start, tick_notice).chain())
+            .add_systems(Update, (host::measure, host::report_host_info, host::settle, host::drive_overlay).chain())
             .add_systems(OnEnter(crate::state::AppState::MainMenu), |mut req: MessageWriter<NetRequest>, s: Res<NetSession>| {
                 if s.status != NetStatus::Offline && !matches!(s.status, NetStatus::Error(_)) {
                     req.write(NetRequest::Leave);
@@ -279,7 +289,8 @@ fn auto_online(
                 req.write(NetRequest::Host { name: "Host".into(), seed: 4242, preset: None });
                 step.0 = 1;
             } else if let Ok(code) = std::fs::read_to_string(&file) {
-                req.write(NetRequest::Join { name: "Guest".into(), code: code.trim().to_string() });
+                let name = std::env::var("HALLWAYS_AUTO_NAME").unwrap_or_else(|_| "Guest".into());
+                req.write(NetRequest::Join { name, code: code.trim().to_string() });
                 step.0 = 1;
             }
         }
@@ -295,7 +306,7 @@ fn auto_online(
             }
         }
         // Both step into the lift car (players start in the boarding hall).
-        2 if step.1 > 1.5 => {
+        2 if step.1 > 1.5 && (mode != "host" || session.players.len() >= std::env::var("HALLWAYS_AUTO_PLAYERS").ok().and_then(|v| v.parse().ok()).unwrap_or(2)) => {
             if let Ok((_, mut tf)) = player.single_mut() {
                 tf.translation = crate::world::elevator::CAR_START + Vec3::X * if mode == "host" { -0.4 } else { 0.4 };
                 step.0 = 5;
@@ -303,7 +314,7 @@ fn auto_online(
             }
         }
         // Host starts once the guest is in.
-        5 if mode == "host" && session.players.len() >= 2 && step.1 > 3.0 => {
+        5 if mode == "host" && session.players.len() >= std::env::var("HALLWAYS_AUTO_PLAYERS").ok().and_then(|v| v.parse().ok()).unwrap_or(2) && step.1 > 3.0 => {
             if lobby.as_mut().is_some_and(|l| l.waiting) {
                 start.write(RequestStart);
             }
@@ -345,6 +356,15 @@ fn handle_requests(
                 *session = NetSession::default();
                 peers.0.clear();
                 notice.clear();
+                commands.insert_resource(host::HostChange::None);
+                commands.insert_resource(host::Direct::default());
+            }
+            NetRequest::Vote { id } => {
+                info!("voting for player {id} as host");
+                if let Some(l) = link.as_ref() {
+                    let _ = l.out.send(to_text(&ClientMsg::Vote { id: *id }));
+                }
+                commands.queue(VoteCast(*id));
             }
             NetRequest::Kick { id, reason } => {
                 if let Some(l) = link.as_ref() {
@@ -398,6 +418,7 @@ fn pump(
     mut subs: MessageWriter<crate::run::Subtitle>,
     mut voice: MessageWriter<crate::voice::VoiceIn>,
     (mut notice, mut admin, mut rejoining, mut chat): (ResMut<NetNotice>, MessageWriter<AdminReply>, Option<ResMut<Reconnect>>, ResMut<crate::chat::Chat>),
+    (mut change, direct): (ResMut<host::HostChange>, Res<host::Direct>),
 ) {
     let Some(link) = link else { return };
     let Ok(inc) = link.inc.lock() else { return };
@@ -448,14 +469,52 @@ fn pump(
                     subs.write(crate::run::Subtitle::info(format!("{} left.", session.name_of(id))));
                     session.players.retain(|p| p.id != id);
                     peers.0.remove(&id);
-                }
-                ServerMsg::HostIs { id } => {
-                    session.host_id = id;
-                    if id == session.my_id {
-                        subs.write(crate::run::Subtitle::info("You are now the host."));
+                    // The host left mid-run: everyone pauses while a new one is chosen.
+                    if id == session.host_id && session.started && !change.active() {
+                        *change = host::HostChange::Choosing { t: 0.0 };
                     }
                 }
+                ServerMsg::HostIs { id } => {
+                    info!("player {id} is the host");
+                    let old = session.host_id;
+                    session.host_id = id;
+                    if session.started && (old != id || change.active()) {
+                        // Wait on the RECONNECTING screen until we're linked to the new host.
+                        if !matches!(*change, host::HostChange::Choosing { .. }) {
+                            *change = host::HostChange::Choosing { t: 0.0 };
+                        }
+                    } else {
+                        if matches!(*change, host::HostChange::Voting { .. }) {
+                            *change = host::HostChange::None;
+                        }
+                        if id == session.my_id {
+                            subs.write(crate::run::Subtitle::info("You are now the host."));
+                        } else if old != id {
+                            subs.write(crate::run::Subtitle::info(format!("{} is now the host.", session.name_of(id))));
+                        }
+                    }
+                }
+                ServerMsg::HostVote { candidates, seconds_left } => {
+                    info!("host vote: {:?}, {seconds_left} s left", candidates.iter().map(|c| (c.name.as_str(), c.votes)).collect::<Vec<_>>());
+                    session.host_id = 0;
+                    let my_vote = match &*change {
+                        host::HostChange::Voting { my_vote, .. } => *my_vote,
+                        _ => None,
+                    };
+                    *change = host::HostChange::Voting { candidates, seconds_left, my_vote };
+                }
+                ServerMsg::NoHost => {
+                    // The server closes the room: don't try to rejoin it.
+                    *change = host::HostChange::NoHost { t: 0.0 };
+                    session.status = NetStatus::Error("No new host found.".into());
+                    peers.0.clear();
+                    commands.remove_resource::<Link>();
+                    commands.remove_resource::<Reconnect>();
+                    return;
+                }
+                ServerMsg::Signal { from, data } => direct.signal(from, data),
                 ServerMsg::Relay { from, data } => {
+                    let (from, data) = host::unwrap(from, data, session.host_id);
                     if let Ok(msg) = serde_json::from_value::<PeerMsg>(data) {
                         if let PeerMsg::Voice { data, .. } = msg {
                             voice.write(crate::voice::VoiceIn { from, data });
@@ -479,6 +538,10 @@ fn pump(
                         r.wait = 0.0;
                         commands.remove_resource::<Link>();
                         return;
+                    }
+                    // An older server that doesn't know the newer messages yet.
+                    if msg == "Bad message." {
+                        continue;
                     }
                     admin.write(AdminReply::Error(msg.clone()));
                     if session.online() {
@@ -587,7 +650,36 @@ fn tick_notice(time: Res<Time<Real>>, mut notice: ResMut<NetNotice>) {
     }
 }
 
-fn send_outgoing(link: Option<Res<Link>>, session: Res<NetSession>, mut out: MessageReader<SendPeer>) {
+/// Remembers your vote (shown as picked until the next update).
+struct VoteCast(u8);
+
+impl Command for VoteCast {
+    type Out = ();
+    fn apply(self, world: &mut World) {
+        if let Some(mut c) = world.get_resource_mut::<host::HostChange>() {
+            if let host::HostChange::Voting { my_vote, .. } = &mut *c {
+                *my_vote = Some(self.0);
+            }
+        }
+    }
+}
+
+/// Messages that came over direct links, delivered like relayed ones.
+fn deliver_direct(mut inbox: MessageReader<host::DirectIn>, mut peers: ResMut<Peers>, mut events: MessageWriter<PeerEvent>, mut voice: MessageWriter<crate::voice::VoiceIn>) {
+    for host::DirectIn { from, msg } in inbox.read() {
+        let (from, msg) = (*from, msg.clone());
+        if let PeerMsg::Voice { data, .. } = msg {
+            voice.write(crate::voice::VoiceIn { from, data });
+            continue;
+        }
+        if let PeerMsg::State(s) = &msg {
+            peers.0.insert(from, *s);
+        }
+        events.write(PeerEvent { from, msg });
+    }
+}
+
+fn send_outgoing(link: Option<Res<Link>>, session: Res<NetSession>, direct: Res<host::Direct>, mut out: MessageReader<SendPeer>) {
     let Some(link) = link else {
         out.clear();
         return;
@@ -597,7 +689,7 @@ fn send_outgoing(link: Option<Res<Link>>, session: Res<NetSession>, mut out: Mes
             continue;
         }
         if let Ok(data) = serde_json::to_value(msg) {
-            let _ = link.out.send(to_text(&ClientMsg::Relay { data }));
+            host::send_room(&link, &direct, &session, data);
         }
     }
 }

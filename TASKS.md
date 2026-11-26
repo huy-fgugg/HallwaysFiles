@@ -131,6 +131,14 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.2.0
+- [x] Peer-to-peer rooms: players connect straight to the host's computer (WebRTC); the room server only introduces players and relays for anyone whose network blocks direct links. Phones always use the server and never host
+- [x] Host leaves mid-run: every game pauses on RECONNECTING ("Choosing new host...") while the room moves to the best remaining computer, then carries on
+- [x] Only a computer that can handle it hosts: each game reports its frame rate, CPU cores and edition; phones, the Low-End Edition and slow computers are never picked automatically. A room started on a phone hands over to a good computer when one joins
+- [x] No computer good enough left: "NO NEW HOST FOUND :(" with a vote listing everyone's names; the computer with the most votes hosts (phones can't be voted in). Only phones left: "No new host found :(" and back to the menu
+- [x] A host whose game vanished is noticed in 20 s instead of 60
+- [x] The stamina bar no longer pushes the vitality bar up into the voice/mic badges
+
 ## 1.1.8
 - [x] A full-length mirror in the lift lobby (back wall, left of the doorway): check your skin before the descent (not in the Low-End Edition)
 

@@ -25,14 +25,15 @@ use axum::{
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
-use proto::{AdminCmd, ClientMsg, PlayerInfo, RoomSummary, ServerMsg, MAX_PLAYERS, PROTOCOL_VERSION};
+use proto::{AdminCmd, Candidate, ClientMsg, HostInfo, PlayerInfo, RoomSummary, ServerMsg, MAX_PLAYERS, PROTOCOL_VERSION, VOTE_SECS};
 use tokio::sync::mpsc;
 
 /// Frames bigger than this close the connection (positions are ~200 bytes;
 /// a hand-built map sent when hosting can be tens of kilobytes).
 const MAX_FRAME: usize = 256 * 1024;
-/// Clients ping every 8 s; a socket silent for this long is closed.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Clients ping every 8 s; a socket silent for this long is closed (and a
+/// host that vanished is replaced this quickly).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_ROOMS: usize = 2000;
 /// A dropped player can rejoin (with the same token) for this long.
 const REJOIN_WINDOW: Duration = Duration::from_secs(180);
@@ -44,6 +45,8 @@ struct Player {
     name: String,
     token: u64,
     tx: mpsc::UnboundedSender<String>,
+    /// What this player's device can do as host.
+    info: HostInfo,
 }
 
 struct Room {
@@ -59,9 +62,79 @@ struct Room {
     /// Recreated by a rejoining player after the server lost it (a restart):
     /// for a while anyone with a token can rejoin it.
     recreated: bool,
+    /// Choosing a new host by vote: (voter -> pick, round number, when it began).
+    vote: Option<(HashMap<u8, u8>, u32, Instant)>,
+    vote_round: u32,
+}
+
+/// What happened when a room lost its host.
+#[derive(Debug, PartialEq)]
+enum HostGone {
+    /// Someone took over (or the host wasn't the one who left).
+    Fine,
+    /// A vote began: finish it after `VOTE_SECS` if not everyone votes (round number).
+    Vote(u32),
+    /// Nobody can host: the room is over (the caller removes it).
+    Over,
 }
 
 impl Room {
+    fn infos(&self) -> Vec<(u8, HostInfo)> {
+        self.players.iter().map(|p| (p.id, p.info)).collect()
+    }
+
+    fn vote_msg(&self) -> ServerMsg {
+        let (votes, started) = self.vote.as_ref().map(|v| (v.0.clone(), v.2)).unwrap_or_else(|| (HashMap::new(), Instant::now()));
+        let candidates = self
+            .players
+            .iter()
+            .map(|p| Candidate { id: p.id, name: p.name.clone(), eligible: p.info.eligible, votes: votes.values().filter(|v| **v == p.id).count() as u8 })
+            .collect();
+        ServerMsg::HostVote { candidates, seconds_left: VOTE_SECS.saturating_sub(started.elapsed().as_secs()) }
+    }
+
+    /// The host just left: hand over to the best computer, else vote, else end.
+    fn host_gone(&mut self) -> HostGone {
+        if self.players.iter().any(|p| p.id == self.host_id) {
+            return HostGone::Fine;
+        }
+        if let Some(id) = proto::auto_host(&self.infos()) {
+            self.host_id = id;
+            self.vote = None;
+            self.broadcast(&ServerMsg::HostIs { id }, None);
+            return HostGone::Fine;
+        }
+        if self.players.iter().any(|p| p.info.eligible) {
+            self.host_id = 0;
+            self.vote_round += 1;
+            self.vote = Some((HashMap::new(), self.vote_round, Instant::now()));
+            self.broadcast(&self.vote_msg(), None);
+            return HostGone::Vote(self.vote_round);
+        }
+        self.broadcast(&ServerMsg::NoHost, None);
+        for p in &self.players {
+            let _ = p.tx.send(CLOSE.to_string());
+        }
+        HostGone::Over
+    }
+
+    /// Ends the vote (time up or everyone voted): the winner hosts.
+    fn finish_vote(&mut self) -> HostGone {
+        let Some((votes, _, _)) = self.vote.take() else { return HostGone::Fine };
+        let tally: Vec<(u8, HostInfo, u8)> = self.players.iter().map(|p| (p.id, p.info, votes.values().filter(|v| **v == p.id).count() as u8)).collect();
+        match proto::vote_winner(&tally) {
+            Some(id) => {
+                self.host_id = id;
+                self.broadcast(&ServerMsg::HostIs { id }, None);
+                HostGone::Fine
+            }
+            None => {
+                self.host_id = 0;
+                self.host_gone()
+            }
+        }
+    }
+
     fn broadcast(&self, msg: &ServerMsg, except: Option<u8>) {
         let text = serde_json::to_string(msg).unwrap_or_default();
         for p in &self.players {
@@ -82,13 +155,6 @@ fn remove_player(room: &mut Room, id: u8, reason: &str) -> bool {
     send(&p.tx, &ServerMsg::Kicked { reason: reason.to_string() });
     let _ = p.tx.send(CLOSE.to_string());
     room.broadcast(&ServerMsg::Left { id }, None);
-    if room.host_id == id
-        && let Some(first) = room.players.first()
-    {
-        room.host_id = first.id;
-        let host = room.host_id;
-        room.broadcast(&ServerMsg::HostIs { id: host }, None);
-    }
     true
 }
 
@@ -130,9 +196,9 @@ impl Rooms {
             return Err("The server is full right now. Try again soon.".into());
         }
         let code = Self::new_code(&map);
-        let player = Player { id: 1, name: clean_name(name), token, tx: tx.clone() };
+        let player = Player { id: 1, name: clean_name(name), token, tx: tx.clone(), info: HostInfo::default() };
         let info = vec![PlayerInfo { id: 1, name: player.name.clone() }];
-        map.insert(code.clone(), Room { players: vec![player], host_id: 1, seed, started: false, next_id: 2, config: config.clone(), created: Instant::now(), dropped: vec![], recreated: false });
+        map.insert(code.clone(), Room { players: vec![player], host_id: 1, seed, started: false, next_id: 2, config: config.clone(), created: Instant::now(), dropped: vec![], recreated: false, vote: None, vote_round: 0 });
         send(&tx, &ServerMsg::Welcome { code: code.clone(), id: 1, host_id: 1, seed, max: MAX_PLAYERS, players: info, config });
         Ok((code, 1))
     }
@@ -149,7 +215,7 @@ impl Rooms {
             && !map.contains_key(&code)
             && map.len() < MAX_ROOMS
         {
-            map.insert(code.clone(), Room { players: vec![], host_id: 0, seed, started, next_id: 1, config, created: Instant::now(), dropped: vec![], recreated: true });
+            map.insert(code.clone(), Room { players: vec![], host_id: 0, seed, started, next_id: 1, config, created: Instant::now(), dropped: vec![], recreated: true, vote: None, vote_round: 0 });
         }
         let rejoin = rejoin.is_some();
         let room = map.get_mut(&code).ok_or_else(|| format!("No room with code {code}. Check the letters and try again."))?;
@@ -173,8 +239,8 @@ impl Rooms {
         room.next_id = room.next_id.wrapping_add(1).max(1);
         let player = PlayerInfo { id, name };
         room.broadcast(&ServerMsg::Joined { player: player.clone() }, None);
-        room.players.push(Player { id, name: player.name.clone(), token, tx: tx.clone() });
-        if room.host_id == 0 {
+        room.players.push(Player { id, name: player.name.clone(), token, tx: tx.clone(), info: HostInfo::default() });
+        if room.host_id == 0 && room.vote.is_none() {
             room.host_id = id;
         }
         let players = room.players.iter().map(|p| PlayerInfo { id: p.id, name: p.name.clone() }).collect();
@@ -203,10 +269,77 @@ impl Rooms {
             return;
         }
         room.broadcast(&ServerMsg::Left { id }, None);
-        if room.host_id == id {
-            room.host_id = room.players[0].id;
-            let host = room.host_id;
-            room.broadcast(&ServerMsg::HostIs { id: host }, None);
+        let gone = if room.vote.is_some() { self.vote_progress(room) } else { room.host_gone() };
+        self.after_host_gone(&mut map, code, gone);
+    }
+
+    /// A vote ends early once everyone still here has voted.
+    fn vote_progress(&self, room: &mut Room) -> HostGone {
+        let Some((votes, _, _)) = room.vote.as_mut() else { return HostGone::Fine };
+        let ids: Vec<u8> = room.players.iter().map(|p| p.id).collect();
+        votes.retain(|voter, pick| ids.contains(voter) && ids.contains(pick));
+        if room.players.iter().all(|p| votes.contains_key(&p.id)) {
+            return room.finish_vote();
+        }
+        room.broadcast(&room.vote_msg(), None);
+        HostGone::Fine
+    }
+
+    fn after_host_gone(&self, map: &mut HashMap<String, Room>, code: &str, gone: HostGone) {
+        match gone {
+            HostGone::Fine => {}
+            HostGone::Over => {
+                map.remove(code);
+            }
+            HostGone::Vote(round) => {
+                // Time limit: finish the vote even if not everyone picks.
+                if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                    let (rooms, code) = (self.clone(), code.to_string());
+                    rt.spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(VOTE_SECS)).await;
+                        rooms.vote_timeout(&code, round);
+                    });
+                }
+            }
+        }
+    }
+
+    fn vote_timeout(&self, code: &str, round: u32) {
+        let mut map = self.0.lock().unwrap();
+        let Some(room) = map.get_mut(code) else { return };
+        if room.vote.as_ref().is_some_and(|v| v.1 == round) {
+            let gone = room.finish_vote();
+            self.after_host_gone(&mut map, code, gone);
+        }
+    }
+
+    fn vote(&self, code: &str, voter: u8, pick: u8) {
+        let mut map = self.0.lock().unwrap();
+        let Some(room) = map.get_mut(code) else { return };
+        if room.vote.is_none() || !room.players.iter().any(|p| p.id == pick) {
+            return;
+        }
+        if let Some(v) = room.vote.as_mut() {
+            v.0.insert(voter, pick);
+        }
+        let gone = self.vote_progress(room);
+        self.after_host_gone(&mut map, code, gone);
+    }
+
+    /// A player reports what their device can do. Before the descent, a
+    /// room hosted from a phone (or a weak computer) hands over to a better one.
+    fn host_info(&self, code: &str, id: u8, info: HostInfo) {
+        let mut map = self.0.lock().unwrap();
+        let Some(room) = map.get_mut(code) else { return };
+        let Some(p) = room.players.iter_mut().find(|p| p.id == id) else { return };
+        p.info = info;
+        let host_ok = room.players.iter().any(|p| p.id == room.host_id && p.info.capable && p.info.eligible);
+        if !room.started && room.vote.is_none() && !host_ok
+            && let Some(best) = proto::auto_host(&room.infos())
+            && best != room.host_id
+        {
+            room.host_id = best;
+            room.broadcast(&ServerMsg::HostIs { id: best }, None);
         }
     }
 
@@ -268,9 +401,8 @@ impl Rooms {
                 let Some(room) = map.get_mut(&code) else { return ServerMsg::Error { msg: format!("No room {code}.") } };
                 let reason = if reason.trim().is_empty() { "An admin removed you from the room.".to_string() } else { reason };
                 if remove_player(room, id, &reason) {
-                    if room.players.is_empty() {
-                        map.remove(&code);
-                    }
+                    let gone = if room.players.is_empty() { HostGone::Over } else if room.vote.is_some() { self.vote_progress(room) } else { room.host_gone() };
+                    self.after_host_gone(&mut map, &code, gone);
                     ServerMsg::AdminOk { msg: format!("Removed player {id} from {code}.") }
                 } else {
                     ServerMsg::Error { msg: "That player isn't in the room.".into() }
@@ -354,6 +486,26 @@ async fn handle(socket: WebSocket, rooms: Rooms) {
                 let id = *id;
                 rooms.with_room(code, |room| room.broadcast(&ServerMsg::Relay { from: id, data }, Some(id)));
             }
+            (ClientMsg::RelayTo { to, data }, Some((code, id))) => {
+                let id = *id;
+                rooms.with_room(code, |room| {
+                    let text = serde_json::to_string(&ServerMsg::Relay { from: id, data }).unwrap_or_default();
+                    for p in room.players.iter().filter(|p| to.contains(&p.id) && p.id != id) {
+                        let _ = p.tx.send(text.clone());
+                    }
+                });
+            }
+            (ClientMsg::Signal { to, data }, Some((code, id))) => {
+                let id = *id;
+                rooms.with_room(code, |room| {
+                    if let Some(p) = room.players.iter().find(|p| p.id == to) {
+                        send(&p.tx, &ServerMsg::Signal { from: id, data });
+                    }
+                });
+            }
+            (ClientMsg::HostInfo(info), Some((code, id))) => rooms.host_info(code, *id, info),
+            (ClientMsg::Vote { id: pick }, Some((code, id))) => rooms.vote(code, *id, pick),
+            (ClientMsg::HostInfo(_) | ClientMsg::Signal { .. } | ClientMsg::Vote { .. }, None) => {}
             (ClientMsg::Start, Some((code, id))) => {
                 let id = *id;
                 rooms.with_room(code, |room| {
@@ -529,4 +681,64 @@ mod tests {
         c2.send(text(&ClientMsg::Join { code: code.clone(), name: "Cy".into(), version: PROTOCOL_VERSION, token: 7 })).await.unwrap();
         assert!(matches!(recv(&mut c2).await, ServerMsg::Error { .. }));
     }
+
+    #[tokio::test]
+    async fn host_handover_vote_and_no_host() {
+        let url = start().await;
+        let join = |name: &'static str, code: String| {
+            let url = url.clone();
+            async move {
+                let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+                ws.send(text(&ClientMsg::Join { code, name: name.into(), version: PROTOCOL_VERSION, token: 0 })).await.unwrap();
+                let ServerMsg::Welcome { id, .. } = recv(&mut ws).await else { panic!() };
+                (ws, id)
+            }
+        };
+        let phone = HostInfo { capable: false, eligible: false, score: 0 };
+        let slow_pc = HostInfo { capable: false, eligible: true, score: 20 };
+        let good_pc = HostInfo { capable: true, eligible: true, score: 900 };
+
+        // 1) A phone hosts; a good computer joins: it takes over before the descent.
+        let (mut a, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        a.send(text(&ClientMsg::Host { name: "Phone".into(), seed: 1, version: PROTOCOL_VERSION, config: None, token: 0 })).await.unwrap();
+        let ServerMsg::Welcome { code, .. } = recv(&mut a).await else { panic!() };
+        a.send(text(&ClientMsg::HostInfo(phone))).await.unwrap();
+        let (mut b, bid) = join("Desk", code.clone()).await;
+        assert!(matches!(recv(&mut a).await, ServerMsg::Joined { .. }));
+        b.send(text(&ClientMsg::HostInfo(good_pc))).await.unwrap();
+        assert_eq!(recv(&mut a).await, ServerMsg::HostIs { id: bid });
+        assert_eq!(recv(&mut b).await, ServerMsg::HostIs { id: bid });
+
+        // 2) Signals and targeted relays reach only their player.
+        b.send(text(&ClientMsg::Signal { to: 1, data: serde_json::json!({"kind": "offer"}) })).await.unwrap();
+        assert!(matches!(recv(&mut a).await, ServerMsg::Signal { from, .. } if from == bid));
+        b.send(text(&ClientMsg::RelayTo { to: vec![1], data: serde_json::json!({"k": "chat"}) })).await.unwrap();
+        assert!(matches!(recv(&mut a).await, ServerMsg::Relay { from, .. } if from == bid));
+
+        // 3) A slow computer joins; the good host leaves: nobody qualifies on
+        //    their own, so the room votes, and the slow computer wins (phones can't).
+        let (mut c, cid) = join("Slow", code.clone()).await;
+        let _ = recv(&mut a).await; // Joined
+        let _ = recv(&mut b).await; // Joined
+        c.send(text(&ClientMsg::HostInfo(slow_pc))).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(b);
+        assert!(matches!(recv(&mut a).await, ServerMsg::Left { .. }));
+        let ServerMsg::HostVote { candidates, .. } = recv(&mut a).await else { panic!("vote") };
+        assert_eq!(candidates.iter().map(|c| (c.name.as_str(), c.eligible)).collect::<Vec<_>>(), vec![("Phone", false), ("Slow", true)]);
+        let _ = recv(&mut c).await; // Left
+        let _ = recv(&mut c).await; // HostVote
+        a.send(text(&ClientMsg::Vote { id: cid })).await.unwrap();
+        assert!(matches!(recv(&mut a).await, ServerMsg::HostVote { candidates, .. } if candidates.iter().any(|c| c.id == cid && c.votes == 1)));
+        let _ = recv(&mut c).await;
+        c.send(text(&ClientMsg::Vote { id: 1 })).await.unwrap(); // votes for the phone: doesn't count as a host
+        assert_eq!(recv(&mut a).await, ServerMsg::HostIs { id: cid });
+        let _ = recv(&mut c).await;
+
+        // 4) The slow computer leaves too: only a phone is left, so the room ends.
+        drop(c);
+        assert!(matches!(recv(&mut a).await, ServerMsg::Left { .. }));
+        assert_eq!(recv(&mut a).await, ServerMsg::NoHost);
+    }
+
 }

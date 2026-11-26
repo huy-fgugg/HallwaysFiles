@@ -150,7 +150,9 @@ fn spawn_hud(mut commands: Commands, theme: Res<UiTheme>, seed: Res<RunSeed>) {
                     ))
                     .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(2)), ..default() }, BackgroundColor(t.text.with_alpha(0.85)), VitalityFill));
                     // Stamina: shown while it's not full.
-                    c.spawn((Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() }, Visibility::Hidden, StaminaRow))
+                    // Pinned just under the vitality bar, out of the layout, so nothing
+                    // above it moves (the voice/mic badges sit right above vitality).
+                    c.spawn((Node { position_type: PositionType::Absolute, top: percent(100), margin: UiRect::top(px(5)), flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() }, Visibility::Hidden, StaminaRow))
                         .with_children(|r| {
                             r.spawn((Node { width: px(186), height: px(6), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(t.panel.with_alpha(0.9))))
                                 .with_child((Node { width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(Color::srgb(0.55, 0.78, 0.95)), StaminaFill));
