@@ -75,10 +75,6 @@ pub enum PeerMsg {
     Notice { text: String },
     /// Admin panel action aimed at one player.
     Admin { target: u8, action: crate::admin::AdminAction },
-    /// 100 ms of voice (ADPCM, base64; see `voice`).
-    Voice { seq: u32, data: String },
-    /// A chat message (T).
-    Chat { text: String },
     /// An admin's announcement for the room (big banner).
     Announce { text: String },
 }
@@ -416,8 +412,7 @@ fn pump(
     mut started: MessageWriter<DescentStarted>,
     mut events: MessageWriter<PeerEvent>,
     mut subs: MessageWriter<crate::run::Subtitle>,
-    mut voice: MessageWriter<crate::voice::VoiceIn>,
-    (mut notice, mut admin, mut rejoining, mut chat): (ResMut<NetNotice>, MessageWriter<AdminReply>, Option<ResMut<Reconnect>>, ResMut<crate::chat::Chat>),
+    (mut notice, mut admin, mut rejoining): (ResMut<NetNotice>, MessageWriter<AdminReply>, Option<ResMut<Reconnect>>),
     (mut change, direct): (ResMut<host::HostChange>, Res<host::Direct>),
 ) {
     let Some(link) = link else { return };
@@ -432,7 +427,6 @@ fn pump(
                         *session = NetSession { status: NetStatus::InRoom, code, my_id: id, host_id, seed, max, players, started: was_started, my_name: name, config };
                         commands.remove_resource::<Reconnect>();
                         notice.show("Reconnected to the room.", Some(3.0), false);
-                        chat.push("*", "You reconnected to the room.", false, true);
                         continue;
                     }
                     let name = session.my_name.clone();
@@ -443,7 +437,6 @@ fn pump(
                 ServerMsg::Kicked { reason } => {
                     // Removed on purpose: say so plainly, and don't try to rejoin.
                     notice.show(format!("You were removed from the room: {reason}  You're playing alone now."), Some(9.0), true);
-                    chat.push("*", format!("You were removed from the room: {reason}"), false, true);
                     session.status = NetStatus::Error(reason);
                     peers.0.clear();
                     commands.remove_resource::<Link>();
@@ -452,7 +445,6 @@ fn pump(
                 }
                 ServerMsg::Announcement { text } => {
                     notice.show(format!("ANNOUNCEMENT:  {text}"), Some(9.0), false);
-                    chat.push("ANNOUNCEMENT", text, false, true);
                 }
                 ServerMsg::AdminRooms { rooms } => {
                     admin.write(AdminReply::Rooms(rooms));
@@ -516,10 +508,6 @@ fn pump(
                 ServerMsg::Relay { from, data } => {
                     let (from, data) = host::unwrap(from, data, session.host_id);
                     if let Ok(msg) = serde_json::from_value::<PeerMsg>(data) {
-                        if let PeerMsg::Voice { data, .. } = msg {
-                            voice.write(crate::voice::VoiceIn { from, data });
-                            continue;
-                        }
                         if let PeerMsg::State(s) = &msg {
                             peers.0.insert(from, *s);
                         }
@@ -566,7 +554,6 @@ fn pump(
                     // Lost the connection: try to get back into the same room.
                     warn!("connection lost: {e}");
                     notice.show("Connection to the room lost. Reconnecting...", None, true);
-                    chat.push("*", "Connection lost. Reconnecting...", false, true);
                     session.status = NetStatus::Connecting;
                     commands.insert_resource(Reconnect { code: session.code.clone(), name: session.my_name.clone(), tries: 0, wait: 1.0 });
                     return;
@@ -592,7 +579,6 @@ fn reconnect(
     link: Option<Res<Link>>,
     mut session: ResMut<NetSession>,
     mut notice: ResMut<NetNotice>,
-    mut chat: ResMut<crate::chat::Chat>,
 ) {
     let Some(mut r) = r else { return };
     if link.is_some() {
@@ -606,7 +592,6 @@ fn reconnect(
         commands.remove_resource::<Reconnect>();
         session.status = NetStatus::Error("Disconnected from the room.".into());
         notice.show("Disconnected from the room and couldn't get back in. You're playing alone now.", Some(9.0), true);
-        chat.push("*", "Disconnected from the room.", false, true);
         return;
     }
     r.tries += 1;
@@ -665,13 +650,9 @@ impl Command for VoteCast {
 }
 
 /// Messages that came over direct links, delivered like relayed ones.
-fn deliver_direct(mut inbox: MessageReader<host::DirectIn>, mut peers: ResMut<Peers>, mut events: MessageWriter<PeerEvent>, mut voice: MessageWriter<crate::voice::VoiceIn>) {
+fn deliver_direct(mut inbox: MessageReader<host::DirectIn>, mut peers: ResMut<Peers>, mut events: MessageWriter<PeerEvent>) {
     for host::DirectIn { from, msg } in inbox.read() {
         let (from, msg) = (*from, msg.clone());
-        if let PeerMsg::Voice { data, .. } = msg {
-            voice.write(crate::voice::VoiceIn { from, data });
-            continue;
-        }
         if let PeerMsg::State(s) = &msg {
             peers.0.insert(from, *s);
         }

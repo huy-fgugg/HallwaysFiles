@@ -8,6 +8,9 @@
 //! game well: see [`host_info`]). If none qualifies, the players vote among
 //! the computers left; if only phones are left, the room ends.
 
+// Phones never open direct links, so some of this goes unused there.
+#![cfg_attr(target_os = "android", allow(dead_code))]
+
 use std::collections::HashSet;
 
 use bevy::prelude::*;

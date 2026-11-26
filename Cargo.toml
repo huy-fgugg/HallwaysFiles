@@ -1,12 +1,10 @@
 [package]
 name = "hallways"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
 bevy = { version = "0.20.1", features = ["wav", "jpeg", "mp3"] }
-# Microphone capture for voice chat (same version Bevy's audio already uses).
-cpal = "0.17"
 rand = "0.10.3"
 rand_chacha = "0.10.0"
 ron = "0.12.3"
@@ -36,7 +34,3 @@ webrtc = "0.21"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
-# Android: asking for the microphone at runtime (voice chat).
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
-ndk-context = "0.1"

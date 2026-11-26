@@ -1,7 +1,7 @@
 //! Admin panel (F8 in a run, or Pause → Admin Panel). Locked behind a code.
 //! Once unlocked for the session it can:
 //! * spawn items for yourself;
-//! * kill, revive, jumpscare, bring to you, mute the chat of, or give Lumens
+//! * kill, revive, jumpscare, bring to you, or give Lumens
 //!   to any player in the room (and, as the room's host, remove them);
 //! * send an announcement to everyone in the room;
 //! * with the server's admin key: list every room on the server, send an
@@ -34,9 +34,6 @@ pub enum AdminAction {
     Jumpscare,
     /// Teleport them to the admin.
     Bring,
-    /// They can't send chat messages until unmuted.
-    MuteChat,
-    UnmuteChat,
     /// +50 Lumens.
     GiveLumens,
 }
@@ -205,8 +202,6 @@ fn build_panel(commands: &mut Commands, theme: &UiTheme, unlocked: bool, session
                     if them {
                         p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
                             small_btn(row, &t, "Bring", MenuAction::Admin(id, AdminAction::Bring), base + 4, 110.0);
-                            small_btn(row, &t, "Mute chat", MenuAction::Admin(id, AdminAction::MuteChat), base + 5, 150.0);
-                            small_btn(row, &t, "Unmute", MenuAction::Admin(id, AdminAction::UnmuteChat), base + 6, 120.0);
                             if host {
                                 small_btn(row, &t, "Kick", MenuAction::AdminKick(id), base + 7, 100.0);
                             }
@@ -286,7 +281,7 @@ fn panel_actions(
     profile: Res<crate::profile::Profile>,
     mut out: MessageWriter<SendPeer>,
     mut effects: MessageWriter<AdminEffect>,
-    (mut tools, mut net, mut notice, mut chat): (ResMut<ServerTools>, MessageWriter<crate::net::NetRequest>, ResMut<crate::net::NetNotice>, ResMut<crate::chat::Chat>),
+    (mut tools, mut net, mut notice): (ResMut<ServerTools>, MessageWriter<crate::net::NetRequest>, ResMut<crate::net::NetNotice>),
 ) {
     // Remember what's typed in the boxes (the panel is rebuilt with replies).
     for f in &fields {
@@ -334,8 +329,6 @@ fn panel_actions(
                     AdminAction::Revive => format!("Revived {who}."),
                     AdminAction::Jumpscare => format!("Jumpscared {who}."),
                     AdminAction::Bring => format!("Brought {who} to you."),
-                    AdminAction::MuteChat => format!("Muted {who}'s chat."),
-                    AdminAction::UnmuteChat => format!("Unmuted {who}'s chat."),
                     AdminAction::GiveLumens => format!("Gave {who} 50 Lumens."),
                 });
                 // Close the panel when targeting yourself so you can see it happen.
@@ -349,7 +342,7 @@ fn panel_actions(
                 say(format!("Removing {}...", session.name_of(id)));
             }
             MenuAction::AdminAnnounce if unlocked.0 => {
-                let text = crate::chat::clean(&tools.announcement);
+                let text = crate::notice::clean(&tools.announcement);
                 if text.is_empty() {
                     say("Type a message first.".into());
                 } else {
@@ -357,7 +350,6 @@ fn panel_actions(
                         out.write(SendPeer(PeerMsg::Announce { text: text.clone() }));
                     }
                     notice.show(format!("ANNOUNCEMENT:  {text}"), Some(8.0), false);
-                    chat.push("ANNOUNCEMENT", text, true, true);
                     say("Announced to the room.".into());
                 }
             }
@@ -441,7 +433,7 @@ fn apply_effects(
     mut shake: ResMut<CameraShake>,
     mut subs: MessageWriter<Subtitle>,
     settings: Res<crate::settings::Settings>,
-    (peers, mut player, mut chat_muted): (Res<crate::net::Peers>, Query<&mut Transform, With<crate::player::Player>>, ResMut<crate::chat::ChatMuted>),
+    (peers, mut player): (Res<crate::net::Peers>, Query<&mut Transform, With<crate::player::Player>>),
 ) {
     for e in effects.read() {
         match e.action {
@@ -479,14 +471,6 @@ fn apply_effects(
                     tf.translation = Vec3::from_array(st.p) + Vec3::new(0.6, 0.0, 0.6);
                     subs.write(Subtitle::info(format!("{} brought you to them.", e.by)));
                 }
-            }
-            AdminAction::MuteChat => {
-                chat_muted.0 = true;
-                subs.write(Subtitle::info(format!("{} muted your chat.", e.by)));
-            }
-            AdminAction::UnmuteChat => {
-                chat_muted.0 = false;
-                subs.write(Subtitle::info(format!("{} unmuted your chat.", e.by)));
             }
             AdminAction::GiveLumens => {
                 run.lumens += 50;

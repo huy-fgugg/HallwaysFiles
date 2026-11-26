@@ -131,6 +131,11 @@
 - [x] Fix: narrow Atrium halls were nearly blocked by columns
 - [x] Three more full-floor autopilot runs; the last one clean from the lift to Door 100
 
+## 1.2.1
+- [x] Voice chat and text chat removed (microphone, TALK button, T/M keys, speaker icons, voice and player-volume settings, admin chat mute, Android microphone permission); admin announcements and connection banners stay
+- [x] Fix the Android build of 1.2.0 (unused direct-link code on phones)
+- [x] (1.2.0's peer-to-peer hosting, host handover, vote and "No new host found" are in this release)
+
 ## 1.2.0
 - [x] Peer-to-peer rooms: players connect straight to the host's computer (WebRTC); the room server only introduces players and relays for anyone whose network blocks direct links. Phones always use the server and never host
 - [x] Host leaves mid-run: every game pauses on RECONNECTING ("Choosing new host...") while the room moves to the best remaining computer, then carries on

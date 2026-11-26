@@ -21,10 +21,6 @@ use crate::theme::UiTheme;
 #[derive(Resource, Debug, Default)]
 pub struct TouchLook(pub Vec2);
 
-/// The TALK button is held (push-to-talk voice chat on phones).
-#[derive(Resource, Debug, Default)]
-pub struct TouchTalk(pub bool);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Interact,
@@ -36,7 +32,6 @@ enum Action {
     Pause,
     Start,
     Skip,
-    Talk,
 }
 
 impl Action {
@@ -51,7 +46,6 @@ impl Action {
             Action::Pause => "MENU",
             Action::Start => "START",
             Action::Skip => "HOLD TO SKIP",
-            Action::Talk => "TALK",
         }
     }
 }
@@ -92,7 +86,6 @@ pub struct TouchPlugin;
 impl Plugin for TouchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TouchLook>()
-            .init_resource::<TouchTalk>()
             .insert_resource(TouchState { enabled: cfg!(any(target_os = "android", target_os = "ios")), ..default() })
             .add_systems(OnEnter(AppState::Playing), spawn_controls)
             .add_systems(PreUpdate, handle_touches.after(bevy::input::InputSystems).in_set(TouchInput))
@@ -148,7 +141,6 @@ fn spawn_controls(mut commands: Commands, theme: Res<UiTheme>) {
             button(root, &t, Action::Pause, (215.0, -12.0), 64.0);
             button(root, &t, Action::Start, (560.0, 140.0), 110.0);
             button(root, &t, Action::Skip, (40.0, 170.0), 110.0);
-            button(root, &t, Action::Talk, (310.0, 40.0), 84.0);
             // Floating joystick (shown where the thumb lands).
             root.spawn((
                 Node { position_type: PositionType::Absolute, width: px(STICK_RADIUS * 2.0), height: px(STICK_RADIUS * 2.0), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
@@ -206,7 +198,6 @@ fn handle_touches(
     window: Query<&Window, With<PrimaryWindow>>,
     screen: Option<Res<State<Screen>>>,
     inv: Option<Res<crate::items::Inventory>>,
-    mut talk: ResMut<TouchTalk>,
 ) {
 
     if touches.iter().next().is_some() || touches.iter_just_pressed().next().is_some() {
@@ -251,7 +242,7 @@ fn handle_touches(
                     state.sprint = !state.sprint;
                     None
                 }
-                Action::Skip | Action::Talk => None,
+                Action::Skip => None,
             };
             if let Some(k) = tap {
                 keys.press(k);
@@ -329,7 +320,6 @@ fn handle_touches(
     hold(&mut keys, KeyCode::ShiftLeft, state.sprint && in_game && !state.crouch);
     let skipping = state.pressed_buttons.iter().any(|(_, a)| *a == Action::Skip);
     hold(&mut keys, KeyCode::Space, skipping);
-    talk.0 = state.pressed_buttons.iter().any(|(_, a)| *a == Action::Talk);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -344,7 +334,6 @@ fn update_controls(
     mut base: Query<(&mut Node, &mut Visibility), (With<StickBase>, Without<TouchRoot>, Without<TouchButton>, Without<StickKnob>)>,
     mut knob: Query<(&mut Node, &mut Visibility), (With<StickKnob>, Without<TouchRoot>, Without<TouchButton>, Without<StickBase>)>,
     ui_scale: Res<UiScale>,
-    (session, settings): (Res<crate::net::NetSession>, Res<crate::settings::Settings>),
 ) {
     let k = ui_scale.0.max(0.01);
     let in_game = screen.is_some_and(|s| *s.get() == Screen::Hud);
@@ -357,8 +346,6 @@ fn update_controls(
         let visible = match b.0 {
             Action::Start => lobby.waiting && lobby.is_host,
             Action::Skip => playing_cutscene,
-            // Push-to-talk, only in online rooms with voice chat on push-to-talk.
-            Action::Talk => session.online() && settings.voice == crate::voice::VoiceMode::PushToTalk,
             _ => !playing_cutscene,
         };
         *v = if visible { Visibility::Inherited } else { Visibility::Hidden };

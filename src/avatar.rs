@@ -51,16 +51,10 @@ struct Avatar {
     skin: crate::body::Skin,
     /// Seconds since this player died (their body falls, then fades out).
     dead: f32,
-    /// How much they look like they are talking (eased, 0..1).
-    talk: f32,
 }
 
 #[derive(Component)]
 struct NameTag(u8);
-
-/// Speaker icon on a player's name tag, shown while they talk.
-#[derive(Component)]
-struct SpeakerIcon(u8);
 
 /// Where living, visible teammates stand: the local player collides with them.
 #[derive(Resource, Default)]
@@ -72,7 +66,7 @@ impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PeerBodies>().add_systems(
             Update,
-            (send_state, sync_doors, apply_peer_events, spawn_avatars, animate_avatars, place_name_tags, speaker_icons).chain().run_if(in_state(AppState::Playing)),
+            (send_state, sync_doors, apply_peer_events, spawn_avatars, animate_avatars, place_name_tags).chain().run_if(in_state(AppState::Playing)),
         );
         // QA: HALLWAYS_AVATAR_VIEW stands three teammates in front of you
         // (still, walking, crouching) to check the models up close.
@@ -218,7 +212,6 @@ fn spawn_avatars(
     avatars: Query<(Entity, &Avatar)>,
     tags: Query<(Entity, &NameTag)>,
     model: Option<Res<crate::body::PlayerModel>>,
-    assets: Res<AssetServer>,
 ) {
     let Some(model) = model else { return };
     let have: HashMap<u8, Entity> = avatars.iter().map(|(e, a)| (a.id, e)).collect();
@@ -247,8 +240,6 @@ fn spawn_avatars(
             Pickable::IGNORE,
             DespawnOnExit(AppState::Playing),
             children![
-                // A speaker icon lights up while they talk (voice chat).
-                (ImageNode::new(assets.load("ui/speaker.png")).with_color(Color::srgb(0.55, 1.0, 0.6)), Node { width: px(16), height: px(16), margin: UiRect::right(px(5)), ..default() }, Visibility::Hidden, SpeakerIcon(*id), Pickable::IGNORE),
                 (Text::new(session.name_of(*id)), theme.font(true, 15.0), TextColor(color.mix(&Color::WHITE, 0.55)))
             ],
         ));
@@ -260,7 +251,7 @@ fn spawn_avatar(commands: &mut Commands, model: &crate::body::PlayerModel, id: u
     let skin = st.skin.unwrap_or_else(|| crate::body::Skin::for_id(id));
     commands
         .spawn((
-            Avatar { id, shown: pos, yaw: st.yaw, pitch: st.pitch, phase: st.phase, crouch: 0.0, skin, dead: 0.0, talk: 0.0 },
+            Avatar { id, shown: pos, yaw: st.yaw, pitch: st.pitch, phase: st.phase, crouch: 0.0, skin, dead: 0.0 },
             BodyPose::default(),
             Transform::from_translation(pos),
             Visibility::default(),
@@ -268,21 +259,6 @@ fn spawn_avatar(commands: &mut Commands, model: &crate::body::PlayerModel, id: u
             Name::new(format!("Avatar {id}")),
         ))
         .with_children(|root| crate::body::spawn_body(root, model, skin, true));
-}
-
-/// Talking animation: a gentle nod and head turn, and the free hand
-/// gesturing, scaled by `talk` (0..1).
-pub fn talking_gesture(pose: &mut BodyPose, talk: f32, t: f32, left_busy: bool) {
-    if talk < 0.01 {
-        return;
-    }
-    pose.head += (t * 7.0).sin() * 0.09 * talk;
-    pose.head_yaw += (t * 2.3).sin() * 0.12 * talk;
-    if !left_busy {
-        pose.arm[1] += (0.55 + 0.25 * (t * 4.5).sin()) * talk;
-        pose.forearm[1] += 0.5 * talk;
-        pose.arm_roll[1] += 0.25 * talk * (t * 3.1).sin().abs();
-    }
 }
 
 /// Pose for a player body from its shared state: walking, running,
@@ -332,7 +308,6 @@ fn animate_avatars(
     children: Query<&Children>,
     colliders: Query<&crate::physics::Collider>,
     mut solid: ResMut<PeerBodies>,
-    voices: Res<crate::voice::Voices>,
 ) {
     let dt = time.delta_secs();
     let k = (dt * 12.0).min(1.0);
@@ -370,13 +345,6 @@ fn animate_avatars(
             continue;
         }
         *pose = pose_for(st.speed, av.phase, av.crouch, av.pitch, st.right.is_some(), st.left.is_some(), st.gesture, st.gesture.envelope(st.gt));
-        // Their mouth opens with how loud they're talking (voice chat), and
-        // they nod and gesture as they talk.
-        let level = voices.0.get(&av.id).map_or(0.0, |v| v.level());
-        let talk = (level * 9.0).clamp(0.0, 1.0);
-        av.talk += (talk - av.talk) * (dt * 8.0).min(1.0);
-        talking_gesture(&mut pose, av.talk, time.elapsed_secs() + av.id as f32, st.left.is_some());
-        commands.entity(ent).insert(crate::body::Talking(talk));
         // A teammate who changed their look.
         if let Some(skin) = st.skin
             && skin != av.skin
@@ -396,23 +364,6 @@ fn animate_avatars(
             if let Ok(mut v) = beams.get_mut(e) {
                 *v = if st.light { Visibility::Inherited } else { Visibility::Hidden };
             }
-        }
-    }
-}
-
-/// Lights the speaker icon over anyone talking (not for players you muted).
-fn speaker_icons(voices: Res<crate::voice::Voices>, session: Res<NetSession>, settings: Res<crate::settings::Settings>, mut icons: Query<(&SpeakerIcon, &mut Visibility, &mut ImageNode)>, time: Res<Time>) {
-    for (icon, mut vis, mut img) in &mut icons {
-        let level = voices.0.get(&icon.0).map_or(0.0, |v| v.level());
-        let talking = level > 0.012 && !settings.is_muted(&session.name_of(icon.0));
-        let want = if talking { Visibility::Inherited } else { Visibility::Hidden };
-        if *vis != want {
-            *vis = want;
-        }
-        if talking {
-            // Pulses with their voice.
-            let k = 0.6 + 0.4 * (level * 12.0).clamp(0.0, 1.0) * (0.75 + 0.25 * (time.elapsed_secs() * 10.0).sin());
-            img.color = Color::srgb(0.45 * k + 0.3, k, 0.5 * k + 0.2);
         }
     }
 }
