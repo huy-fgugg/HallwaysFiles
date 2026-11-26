@@ -46,6 +46,8 @@ enum Shot {
     Chase { secs: f32 },
     /// Door 047 slams shut behind you.
     Slam { secs: f32 },
+    /// Walk up to the lift lobby's mirror and see yourself.
+    Mirror { secs: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,8 +61,9 @@ enum Pick {
 /// The chase shot looks back this long before turning to run.
 const LOOK_BACK: f32 = 2.3;
 
-const SHOTS: [(&str, Shot); 16] = [
+const SHOTS: [(&str, Shot); 17] = [
     ("arrival", Shot::Cutscene { id: INTRO, from: 6.5, to: 12.4 }),
+    ("mirror", Shot::Mirror { secs: 3.0 }),
     ("guest_wing", Shot::Walk { pick: Pick::Room(4), secs: 3.2 }),
     ("zigzag", Shot::Route { pick: Pick::Zigzag, secs: 4.6, speed: 2.6 }),
     ("archive", Shot::Walk { pick: Pick::Room(24), secs: 3.2 }),
@@ -141,7 +144,7 @@ fn pick_room(plan: &crate::floor::plan::FloorPlan, shot: Shot) -> Option<RoomPla
         Shot::Surge { .. } => plan.rooms.iter().find(|r| r.encounter == Some(Encounter::Surge) && r.width() >= 5.5 && r.light != LightState::Dark && r.feature.is_none()),
         Shot::Chase { .. } => plan.room(PURSUIT_FIRST),
         Shot::Slam { .. } => plan.room(PURSUIT_LAST + 1),
-        Shot::Cutscene { .. } => None,
+        Shot::Cutscene { .. } | Shot::Mirror { .. } => None,
     };
     r.cloned()
 }
@@ -266,6 +269,16 @@ fn record(
                     tf.translation = Vec3::new(0.0, 0.0, -8.0);
                     p.yaw = 0.0;
                     play.write(PlayCutscene(THE_HOLLOW.into()));
+                }
+                Shot::Mirror { .. } => {
+                    // The boarding hall: walk up to the mirror on its back wall.
+                    let x = crate::mirror::LOBBY_MIRROR_X + 0.2;
+                    let wall = crate::world::elevator::HALL_MAX.y;
+                    rec.from = Vec3::new(x, 0.0, wall - 3.4);
+                    rec.to = Vec3::new(x, 0.0, wall - 2.2);
+                    rec.yaw = std::f32::consts::PI;
+                    tf.translation = rec.from;
+                    p.yaw = rec.yaw;
                 }
                 Shot::Cutscene { .. } => {
                     if let Some(r) = floor.0.room(floor.0.last_room) {
@@ -435,6 +448,7 @@ fn record(
                 // The Listener needs a moment to walk into view.
                 Shot::Listener { .. } => t > 3.0,
                 Shot::Gallery { .. } => t > 2.2,
+                Shot::Mirror { .. } => t > 1.4,
                 _ => t > 1.4 && rt.as_ref().is_some_and(|rt| rt.loaded.contains(&rec.room)),
             };
             if ready {
@@ -466,7 +480,8 @@ fn record(
                 | Shot::Route { secs, .. }
                 | Shot::Surge { secs }
                 | Shot::Chase { secs }
-                | Shot::Slam { secs } => (secs, t >= secs),
+                | Shot::Slam { secs }
+                | Shot::Mirror { secs } => (secs, t >= secs),
             };
             let route_speed = match shot {
                 Shot::Route { speed, .. } => Some(speed),
